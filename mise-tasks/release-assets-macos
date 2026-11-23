@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#MISE description="Release assets for macOS into dist/: IceVault-VERSION-macos.dmg (the application for Apple silicon and Intel in one: open, drag to Applications), IceVault-VERSION-macos.pkg (the same application as an installer that also links the command into /usr/local/bin; unsigned) and icevault-VERSION-darwin-ARCH.tar.gz (the command alone, arm64 and amd64, for mise). VERSION (the tag vX.Y.Z) is required"
+#MISE quiet=true
+# Builds the application twice with the same task as a local build (desktop-app, GOARCH=arm64 then amd64: the version goes into both programs and Info.plist),
+# checks the version of each, joins the two into one universal bundle (lipo), signs it ad hoc and packs it. Nothing of another architecture is run.
+set -euo pipefail
+: "${VERSION:?VERSION (the tag, vX.Y.Z) is required}"
+case "$VERSION" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "release-assets-macos: VERSION is vX.Y.Z, not $VERSION" >&2; exit 1 ;; esac
+cd "${MISE_PROJECT_ROOT:-$(pwd)}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+mkdir -p dist
+
+for arch in arm64 amd64; do
+  GOARCH="$arch" CGO_ENABLED=1 mise run desktop-app >/dev/null
+  app="bin/IceVault.app"
+  for exe in "$app/Contents/MacOS/icevault" "$app/Contents/MacOS/icevault-desktop" bin/icevault; do
+    go version -m "$exe" | grep -q "internal/version.Version=$VERSION" || { echo "release-assets-macos: $exe does not carry the version $VERSION" >&2; exit 1; }
+    go version -m "$exe" | grep -q "GOARCH=$arch" || { echo "release-assets-macos: $exe is not built for $arch" >&2; exit 1; }
+  done
+  [ "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")" = "${VERSION#v}" ] || { echo "release-assets-macos: Info.plist has another version" >&2; exit 1; }
+  codesign --verify --deep --strict "$app"
+  # (the bundle is signed, so the bytes differ from bin/icevault; the build information of the two files is the same)
+  [ "$(go version -m "$app/Contents/MacOS/icevault" | tail -n +2)" = "$(go version -m bin/icevault | tail -n +2)" ] || { echo "release-assets-macos: the command inside the application is not the command of this build" >&2; exit 1; }
+  tar -czf "dist/icevault-$VERSION-darwin-$arch.tar.gz" -C bin icevault
+  ditto --norsrc --noextattr --noqtn "$app" "$work/$arch/IceVault.app"
+done
+
+# One application for both: the bundle of arm64 with each program replaced by the two joined, then signed again (ad hoc; no Developer ID).
+uni="$work/universal/IceVault.app"
+ditto --norsrc --noextattr --noqtn "$work/arm64/IceVault.app" "$uni"
+for prog in icevault icevault-desktop; do
+  lipo -create "$work/arm64/IceVault.app/Contents/MacOS/$prog" "$work/amd64/IceVault.app/Contents/MacOS/$prog" -output "$uni/Contents/MacOS/$prog"
+  [ "$(lipo -archs "$uni/Contents/MacOS/$prog")" = "x86_64 arm64" ] || { echo "release-assets-macos: $prog is not universal" >&2; exit 1; }
+done
+codesign --force --deep -s - "$uni" >/dev/null 2>&1
+codesign --verify --deep --strict "$uni"
+minos="$(plutil -extract LSMinimumSystemVersion raw -o - "$uni/Contents/Info.plist")"
+
+# The disk image (the recommended download): the application and a link to /Applications, to drag it there.
+dmg="$work/dmg"
+mkdir "$dmg"
+ditto --norsrc --noextattr --noqtn "$uni" "$dmg/IceVault.app"
+ln -s /Applications "$dmg/Applications"
+rm -f "dist/IceVault-$VERSION-macos.dmg"
+hdiutil create -quiet -volname "IceVault ${VERSION#v}" -srcfolder "$dmg" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "dist/IceVault-$VERSION-macos.dmg"
+hdiutil verify -quiet "dist/IceVault-$VERSION-macos.dmg"
+
+# The installer package: IceVault.app into /Applications, then internal/appbundle/pkg/postinstall links /usr/local/bin/icevault to the command inside it
+# (the rules of internal/cliinstall). Not signed: there is no Developer ID; Gatekeeper asks once. Installed from a package the application carries no
+# quarantine flag, so it never runs from a translocated copy.
+pkg="$work/pkg"
+mkdir -p "$pkg/root/Applications" "$pkg/scripts" "$pkg/parts"
+ditto --norsrc --noextattr --noqtn "$uni" "$pkg/root/Applications/IceVault.app"
+codesign --verify --deep --strict "$pkg/root/Applications/IceVault.app"
+install -m 0755 internal/appbundle/pkg/postinstall "$pkg/scripts/postinstall"
+pkgbuild --analyze --root "$pkg/root" "$pkg/component.plist" >/dev/null
+[ "$(plutil -extract 0.RootRelativeBundlePath raw -o - "$pkg/component.plist")" = Applications/IceVault.app ] || { echo "release-assets-macos: unexpected bundles in the package" >&2; exit 1; }
+# Exactly into /Applications: Installer must not "upgrade" another copy with the same identifier that it finds elsewhere (the Downloads folder, a build).
+plutil -replace 0.BundleIsRelocatable -bool NO "$pkg/component.plist"
+pkgbuild --quiet --root "$pkg/root" --component-plist "$pkg/component.plist" --scripts "$pkg/scripts" --identifier com.cybericebox.icevault.pkg \
+  --version "${VERSION#v}" --install-location / "$pkg/parts/IceVault.pkg"
+# pkgbuild keeps extended attributes as AppleDouble "._" files in the payload, and macOS puts com.apple.provenance on every file a build writes
+# (it cannot be removed, COPYFILE_DISABLE does not reach pkgbuild): the payload, its bill of materials and the scripts are packed again without them.
+cpkg="$pkg/parts/IceVault.pkg"
+pkgutil --expand "$cpkg" "$pkg/x"
+(cd "$pkg/root" && find . | cpio -o --format odc -R 0:0 2>/dev/null) | gzip -9 >"$pkg/x/Payload"
+lsbom "$pkg/x/Bom" | grep -v '/\._' >"$pkg/bom.txt"
+mkbom -i "$pkg/bom.txt" "$pkg/x/Bom"
+rm -rf "$pkg/x/Scripts"
+(cd "$pkg/scripts" && find . | cpio -o --format odc -R 0:0 2>/dev/null) | gzip -9 >"$pkg/x/Scripts"
+sed -i '' "s/numberOfFiles=\"[0-9]*\"/numberOfFiles=\"$(wc -l <"$pkg/bom.txt" | tr -d ' ')\"/" "$pkg/x/PackageInfo"
+rm "$cpkg"
+(cd "$pkg/x" && xar --compression none -cf "$cpkg" PackageInfo Bom Payload Scripts)
+# Only the system volume (the link goes into /usr/local/bin, so Installer asks for an administrator), no choices, both architectures, the macOS of the build.
+cat >"$pkg/distribution.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>IceVault $VERSION</title>
+  <options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <volume-check><allowed-os-versions><os-version min="$minos"/></allowed-os-versions></volume-check>
+  <choices-outline><line choice="com.cybericebox.icevault"/></choices-outline>
+  <choice id="com.cybericebox.icevault" visible="false"><pkg-ref id="com.cybericebox.icevault.pkg"/></choice>
+  <pkg-ref id="com.cybericebox.icevault.pkg" version="${VERSION#v}" onConclusion="none">IceVault.pkg</pkg-ref>
+</installer-gui-script>
+EOF
+productbuild --quiet --distribution "$pkg/distribution.xml" --package-path "$pkg/parts" "dist/IceVault-$VERSION-macos.pkg"
+files="$(pkgutil --payload-files "dist/IceVault-$VERSION-macos.pkg")"
+printf '%s\n' "$files" | grep -x './Applications/IceVault.app/Contents/MacOS/icevault' >/dev/null || { echo "release-assets-macos: the package does not hold the application" >&2; exit 1; }
+if printf '%s\n' "$files" | grep '/\._' >/dev/null; then echo "release-assets-macos: AppleDouble files in the package" >&2; exit 1; fi
+echo "dist/IceVault-$VERSION-macos.dmg dist/IceVault-$VERSION-macos.pkg dist/icevault-$VERSION-darwin-arm64.tar.gz dist/icevault-$VERSION-darwin-amd64.tar.gz"

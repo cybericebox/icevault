@@ -1,0 +1,140 @@
+name: Release
+
+# Only a tag vX.Y.Z pushed by a maintainer starts this. It builds the assets with the same mise tasks as a local build, makes a DRAFT release, uploads to it and
+# publishes it (releases are immutable once published, so the assets must be there first; on macOS one application for Apple silicon and Intel:
+# IceVault-<tag>-macos.dmg, the download the release notes recommend, and the same application as the installer IceVault-<tag>-macos.pkg), then applies the retention policy (CONTRIBUTING.md, "Releases").
+# No credential but the GITHUB_TOKEN of the run; every job has only the permission it needs. The macOS jobs are the only ones on a macOS runner.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions: {}
+
+env:
+  MISE_LOCKED: "1" # every tool from the URL and checksum in mise.lock
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: macOS disk image, installer (universal) and command (arm64, amd64)
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Clone the code with its history (the build number is the commit count)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned tools (mise.toml)
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      - name: The disk image (.dmg) and the installer (.pkg) of one universal IceVault.app, the command for arm64 and amd64 (mise run release-assets-macos)
+        run: mise run release-assets-macos
+      - name: Keep the assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assets-macos
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux command (amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned tools (mise.toml)
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      - name: The command for Linux (mise run release-assets-linux)
+        run: mise run release-assets-linux
+      - name: Keep the assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assets-linux
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Draft, upload, publish, retention
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the release and its assets; nothing else
+    # GH_TOKEN (contents: write) is given only to the steps that call gh, not to the tool installation or the builds
+    env:
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Clone the code (the release notes and the retention tool)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned tools (mise.toml)
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      - name: Collect the assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums (the installers, the applications and the commands)
+        working-directory: dist
+        run: |
+          sha256sum IceVault-* icevault-* > SHA256SUMS
+          cat SHA256SUMS
+      - name: The release, as a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed -e "s/{{VERSION_NUMBER}}/${TAG#v}/g" -e "s/{{VERSION}}/$TAG/g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "IceVault $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+      - name: Upload the assets to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --repo "$REPO" dist/*
+      - name: Build the retention tool (before any step holds the token)
+        run: go build -o "$RUNNER_TEMP/relprune" ./cmd/relprune
+      - name: Publish (marked as the latest only when it is the newest final release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest="$(gh release list --repo "$REPO" --limit 1000 --json tagName,isDraft | "$RUNNER_TEMP/relprune" -newest "$TAG")"
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest="$latest"
+      - name: Retention (older releases; the tags of final releases stay)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$REPO" --limit 1000 --json tagName,isDraft | "$RUNNER_TEMP/relprune" > "$RUNNER_TEMP/prune.txt"
+          cat "$RUNNER_TEMP/prune.txt"
+          while read -r old; do
+            [ -n "$old" ] && gh release delete "$old" --repo "$REPO" --yes
+          done < "$RUNNER_TEMP/prune.txt"
+          # the tags of release candidates whose final is out go too (relprune prints only vX.Y.Z-rc.N names)
+          gh api --paginate "repos/$REPO/git/matching-refs/tags/v" --jq '.[].ref | ltrimstr("refs/tags/")' | "$RUNNER_TEMP/relprune" -rc-tags > "$RUNNER_TEMP/rc-tags.txt"
+          cat "$RUNNER_TEMP/rc-tags.txt"
+          while read -r rc; do
+            [ -n "$rc" ] && gh api -X DELETE "repos/$REPO/git/refs/tags/$rc"
+          done < "$RUNNER_TEMP/rc-tags.txt"
+      - name: Remove the draft when a step before the publish failed
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "$TAG" --repo "$REPO" --yes
+          fi

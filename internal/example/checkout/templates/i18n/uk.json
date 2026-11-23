@@ -1,0 +1,9 @@
+{
+ "services/portal.env": {
+  "PUBLIC_HOST": "ОБОВ'ЯЗКОВО: хост, який відкривають читачі",
+  "CONTACT_ADDRESS": "адреса для зв'язку"
+ },
+ "targets/gcp.env": {
+  "GKE_POOL": "ОБОВ'ЯЗКОВО: пул вузлів"
+ }
+}

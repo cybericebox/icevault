@@ -1,0 +1,33 @@
+version: "2"
+run:
+  allow-parallel-runners: true
+linters:
+  default: none
+  enable:
+    - copyloopvar
+    - errcheck
+    - goconst
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    goconst:
+      min-occurrences: 5
+    revive:
+      rules:
+        - name: comment-spacings
+  exclusions:
+    rules:
+      - linters: [goconst, errcheck, unparam]
+        path: _test\.go

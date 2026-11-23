@@ -1,0 +1,1 @@
+WARNING: <tmp>/out now holds 10 secret file(s) in PLAINTEXT. Delete it when you are done (rm -rf <tmp>/out).

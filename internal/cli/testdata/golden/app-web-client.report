@@ -1,0 +1,5 @@
+  VITE_PUBLIC_HOST  <- vault PUBLIC_HOST
+  VITE_ANALYTICS  <- vault ANALYTICS_ID
+  VITE_CONTACT_ADDRESS  <- vault CONTACT_ADDRESS
+  ALLOWED_ORIGINS  <- example value
+wrote 4 variable(s) to <tmp>/project/clients/web/.env (mode 0600, PLAINTEXT, git-ignored)

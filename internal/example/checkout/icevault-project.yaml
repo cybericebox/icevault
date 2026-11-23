@@ -1,0 +1,215 @@
+# The description of Lumen Notes, the made-up example project of the tests and the demo: a notes service with a portal, an engine and an
+# optional indexer, deployed to a Google Cloud cluster or with Docker Compose. It uses every feature of the format.
+format: 2
+name: Lumen Notes
+
+checkout:
+  templates: templates            # templates/<file>: the sample settings files (keys, order, comments)
+  environments: deploy            # deploy/<env>/core.env: the committed settings of an environment
+  plaintext: plain                # plain/<env>/: the plaintext tree import reads
+  vault: plain/vault/lumen.kdbx
+
+conditions:
+  defaults: {PORTAL: cluster, ENGINE: cluster, INDEXER: none}
+  word-before: "@"                # PORTAL=shared@prod reads as shared
+
+files:
+  - core.env
+  - path: targets/gcp-access.env
+    used-when: HOSTING=gcp
+  - path: targets/gcp.env
+    used-when: HOSTING=gcp
+  - path: targets/compose.env
+    used-when: HOSTING=compose
+  - path: shared/blobs.env
+    used-when: "HOSTING in [gcp, compose]"
+  - path: services/portal.env
+    used-when: "PORTAL=cluster or (ENGINE=cluster and HOSTING=gcp)"
+    partly-used:
+      when: HOSTING=compose and ENGINE=cluster
+      keys: [THEME_COLOR]
+  - path: services/engine.env
+    used-when: ENGINE=cluster and HOSTING=gcp
+    partly-used:
+      when: HOSTING=compose and ENGINE=cluster
+      keys: [ENGINE_THREADS]
+  - path: services/indexer.env
+    used-when: "INDEXER in [host, cluster]"
+retired-files:
+  - targets/old.env
+
+kept-files:
+  - name: release key pointer
+    pattern: keys/[a-z0-9_-]+/release/ACTIVE
+    mode: "0400"
+    why: names the release key in use (no secret)
+  - name: release keys
+    pattern: keys/[a-z0-9_-]+/release/.+
+    mode: "0400"
+    why: the engine signs exported notebooks with them; a lost key leaves old exports unverifiable
+    keep-retired: true
+    needed-until: no export signed with it is still shared
+    guard: release
+  - name: node keys
+    pattern: keys/[a-z0-9_-]+/.+
+    mode: "0600"
+    why: made once per target; the running nodes trust them
+    keep-retired: true
+    site-bound: true
+  - name: service account
+    pattern: creds/[a-z0-9_-]+\.json
+    mode: "0600"
+    why: the service account the deploy runs as
+    managed: owner
+    site-bound: true
+  - name: target access
+    pattern: creds/[a-z0-9_-]+\.kubeconfig
+    mode: "0600"
+    why: how the deploy reaches the target
+    site-bound: true
+left-out:
+  - pattern: work(/.*)?
+    why: "scratch files of the deploy scripts: rebuilt on every run"
+  - pattern: dumps/.*
+    why: notebook dumps stay out of the vault
+  - pattern: cache/.*
+    why: a download cache
+
+session:
+  prefix: lumen
+  persist: [dumps]
+  variables: {marker: LUMEN_SESSION, environment: LUMEN_STAGE, tree: LUMEN_FILES}
+
+required-check:
+  script: tools/check-required.sh
+  interpreter: sh
+  args: ["{tree}", "{provider}"]
+  when: HOSTING=gcp
+  heading: "Values still to set"
+
+apps:
+  - name: web-client
+    dir: clients/web
+    from: services/portal.env
+    prefix: VITE_
+    plain: [ALLOWED_ORIGINS]
+    aliases: {VITE_ANALYTICS: [ANALYTICS_ID, LEGACY_ANALYTICS_ID]}
+  - name: worker-cli
+    dir: clients/worker
+    from: services/indexer.env
+    all: true
+
+derived:
+  - {name: HOSTING, file: core.env, from: site.provider}
+  - {name: STATE_STORE, file: core.env, from: site.state-backend}
+
+general:
+  file: core.env
+  variables:
+    - name: NOTES_LABEL
+      label: {en: Label, uk: Позначка}
+      help: {en: A short label shown next to the stage name., uk: Коротка позначка поруч із назвою етапу.}
+    - name: PUBLIC_HOST
+      file: services/portal.env
+      label: {en: Public host, uk: Публічний хост}
+      help: {en: The host name readers open the portal at., uk: "Ім'я хоста, за яким читачі відкривають портал."}
+      required: true
+
+site-kinds:
+  google-cluster:
+    provider: gcp
+    file: targets/gcp.env
+    connection:
+      kind: google
+      name: GCP project
+      file: targets/gcp-access.env
+      variables:
+        - {name: GCP_PROJECT_ID, field: project}
+        - {name: GCP_KEY_PATH, field: credentials}
+    state:
+      kind: hcp
+      name: Terraform Cloud
+      file: core.env
+      variables:
+        - {name: TFC_ORG, field: organization}
+    variables:
+      - {name: GKE_POOL, label: {en: Node pool}, required: true}
+      - {name: GCP_ZONE, label: {en: Zone}}
+  compose:
+    provider: compose
+    file: targets/compose.env
+    variables:
+      - {name: COMPOSE_PROJECT, label: {en: Compose project}}
+      - {name: LISTEN_PORT, label: {en: Listen port}}
+      - {name: BUILD_REF, label: {en: Build reference}, managed: system}
+
+products:
+  - name: portal
+    title: {en: Portal, uk: Портал}
+    help: {en: What readers open., uk: "Те, що відкривають читачі."}
+    file: services/portal.env
+    place-variable: PORTAL
+    connections:
+      - kind: s3
+        name: Blob store
+        role: blobs
+        file: shared/blobs.env
+        variables:
+          - {name: BLOB_KEY_SECRET, field: secret_access_key, secret: true}
+          - {name: BLOB_BUCKET, field: bucket}
+      - kind: cloudflare
+        name: CDN
+        role: cdn
+        optional: true
+        file: services/portal.env
+        variables:
+          - {name: CDN_TOKEN, field: api_token, secret: true}
+          - {name: CDN_PURGE_KEY, field: purge_key, secret: true}
+          - {name: CDN_SIGNING_KEY, field: signing_key, secret: true}
+    variables:
+      - {name: COOKIE_KEY, label: {en: Cookie key}, secret: true, generated: true}
+      - {name: SIGNUP_MODE, label: {en: Sign-up mode}, required: true}
+      - {name: ANALYTICS_ID, label: {en: Analytics id}}
+      - {name: INVITE_SALT, label: {en: Invite salt}, secret: true, when: "SIGNUP_MODE=invite"}
+      - {name: PORTAL_FLAGS, label: {en: Flags}}
+      - {name: CHANGELOG_TAG, label: {en: Changelog image tag}, when: "PORTAL_FLAGS has changelog", when-off: drop}
+      - {name: THEME_COLOR, label: {en: Theme colour}}
+      - {name: CONTACT_ADDRESS, label: {en: Contact address}}
+      - {name: BILLING_ACCOUNT, label: {en: Billing account}, secret: true}
+    on-site-kind:
+      google-cluster:
+        - {name: EXPORT_BUCKET, file: targets/gcp.env, label: {en: Export bucket}, managed: system}
+      compose:
+        - {name: EXPORT_BUCKET, file: targets/compose.env, label: {en: Export bucket}}
+  - name: engine
+    title: {en: Engine, uk: Рушій}
+    file: services/engine.env
+    place-variable: ENGINE
+    connections:
+      - kind: s3
+        role: blobs
+        file: shared/blobs.env
+        variables:
+          - {name: BLOB_KEY_SECRET, field: secret_access_key, secret: true}
+    variables:
+      - {name: ENGINE_PROFILE_DIR, label: {en: Profile folder}, managed: system}
+      - {name: ENGINE_TAG, label: {en: Image tag}}
+      - {name: ENGINE_THREADS, label: {en: Threads}}
+      - {name: BOOTSTRAP_INVITE, label: {en: First invite}, secret: true, temporary: true}
+  - name: indexer
+    title: {en: Indexer, uk: Індексатор}
+    file: services/indexer.env
+    place-variable: INDEXER
+    variables:
+      - {name: INDEXER_SECRET, label: {en: Indexer secret}, secret: true, generated: true}
+      - {name: BROKER_URL, label: {en: Broker address}, required-when: "INDEXER=cluster"}
+      - {name: BROKER_PASSWORD, label: {en: Broker password}, secret: true, required-when: "INDEXER in [host, cluster]"}
+
+vault-connections:
+  - kind: other
+    name: Uptime monitor
+    role: monitoring
+    serve-as: monitor
+    variables:
+      - {name: MONITOR_KEY, field: api_key, secret: true}
+      - {name: MONITOR_ACCOUNT, field: account}

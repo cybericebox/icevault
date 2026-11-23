@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="The command line of the tool, built from this checkout; TAB lists the commands and their flags"
+#MISE depends=["build"]
+#MISE quiet=true
+#USAGE include file="$MISE_CONFIG_ROOT/usage/icevault.usage.kdl"
+# mise checks the words against the spec (generated from internal/cli/help.go) and passes them on unchanged; prints nothing of its own.
+exec "$MISE_CONFIG_ROOT/bin/icevault" "$@"

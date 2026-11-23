@@ -1,0 +1,55 @@
+#!/bin/sh
+# The postinstall script of the macOS installer package (mise-tasks/release-assets-macos): Installer runs it as root once IceVault.app is in
+# /Applications. It links the icevault command, which the application carries, into /usr/local/bin, with the rules of the window's own installer
+# (internal/cliinstall): a symbolic link and nothing else; a file that is not a link is never touched; nothing is written through a link.
+# Without the user's answer (Installer asks nothing) a link that points elsewhere is replaced only when it points to the command of an IceVault.app
+# (an older copy, a development build); a link to any other program stays. The package is installed even when no link is made: the line in the
+# installer log says why, and the window can still install the command.
+#
+# Arguments of Installer: $1 the package, $2 the install location, $3 the target volume ("/" on the running system).
+set -u
+
+vol="${3:-/}"
+vol="${vol%/}"
+target="/Applications/IceVault.app/Contents/MacOS/icevault"
+dir="$vol/usr/local/bin"
+link="$dir/icevault"
+
+say() { echo "IceVault postinstall: $*"; }
+
+if [ ! -f "$vol$target" ] || [ ! -x "$vol$target" ]; then
+  say "$vol$target is missing: no link made"
+  exit 0
+fi
+
+if [ -L "$link" ]; then
+  current="$(readlink "$link")"
+  case "$current" in
+    "$target")
+      say "$link already points to $target"
+      exit 0
+      ;;
+    */IceVault.app/Contents/MacOS/icevault) ;; # another IceVault: replaced below
+    *)
+      say "$link points to $current, not to an IceVault application: left as it is"
+      exit 0
+      ;;
+  esac
+elif [ -e "$link" ]; then
+  say "$link is a file, not a link: left as it is"
+  exit 0
+fi
+
+if [ ! -d "$dir" ]; then
+  if ! mkdir -p "$dir"; then
+    say "cannot make $dir: no link made"
+    exit 0
+  fi
+fi
+# -h: an existing link is replaced itself, never followed
+if ln -sfh "$target" "$link"; then
+  say "$link -> $target"
+else
+  say "cannot make $link"
+fi
+exit 0

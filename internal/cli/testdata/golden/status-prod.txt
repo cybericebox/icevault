@@ -1,0 +1,45 @@
+vault: environment prod: 7 settings file(s) with 34 variable(s), 3 other file(s), 0 retired
+  core.env: 7 variable(s)
+      NOTES_LABEL                          environment            owner
+      TFC_ORG                              environment            owner
+      HOSTING                              environment            owner
+      STATE_STORE                          environment            owner
+      PORTAL                               environment            owner
+      ENGINE                               environment            owner
+      INDEXER                              environment            owner
+  services/engine.env: 4 variable(s), 1 empty
+      ENGINE_PROFILE_DIR                   environment            system
+      ENGINE_TAG                           environment            owner
+      ENGINE_THREADS                       environment            owner
+      BOOTSTRAP_INVITE                     environment            owner
+  services/indexer.env: 3 variable(s), 1 empty
+      INDEXER_SECRET                       environment            system
+      BROKER_URL                           environment            owner
+      BROKER_PASSWORD                      environment            owner
+  services/portal.env: 13 variable(s), 2 empty
+      PUBLIC_HOST                          environment            owner
+      CONTACT_ADDRESS                      environment            owner
+      BILLING_ACCOUNT                      environment            owner
+      COOKIE_KEY                           environment            system
+      THEME_COLOR                          environment            owner
+      PORTAL_FLAGS                         environment            owner
+      CHANGELOG_TAG                        environment            owner
+      SIGNUP_MODE                          environment            owner
+      ANALYTICS_ID                         environment            owner
+      INVITE_SALT                          environment            owner
+      CDN_TOKEN                            environment            owner
+      CDN_PURGE_KEY                        environment            owner
+      CDN_SIGNING_KEY                      environment            owner
+  shared/blobs.env: 2 variable(s)
+      BLOB_KEY_SECRET                      environment            owner
+      BLOB_BUCKET                          environment            owner
+  targets/gcp-access.env: 2 variable(s)
+      GCP_PROJECT_ID                       environment            owner
+      GCP_KEY_PATH                         environment            owner
+  targets/gcp.env: 3 variable(s)
+      GKE_POOL                             environment            owner
+      GCP_ZONE                             environment            owner
+      EXPORT_BUCKET                        environment            system
+required values: all set
+plaintext copies still on disk in <tmp>/project/plain/prod: 9 file(s): the vault is used and these are ignored; `purge-plaintext --env prod` removes the ones the vault holds
+vault copies: none recorded: `icevault copies add DIR` (standing one-way copies) or `copy --to DIR` (once); keep at least two, in other places

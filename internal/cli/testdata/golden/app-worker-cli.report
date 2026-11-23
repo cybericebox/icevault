@@ -1,0 +1,3 @@
+  INDEXER_SECRET  <- vault
+  BROKER_PASSWORD  <- vault
+wrote 2 variable(s) to <tmp>/project/clients/worker/.env (mode 0600, PLAINTEXT, git-ignored)

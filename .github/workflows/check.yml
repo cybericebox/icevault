@@ -1,0 +1,42 @@
+name: Check
+
+# Build, lint and test on every pull request and on develop. Linux only: macOS runner minutes cost ten times as much and are kept for releases. The window
+# (build tags desktop, cgo and the platform web view) is checked on a maintainer's Mac with `mise run desktop-check`.
+on:
+  pull_request:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+env:
+  MISE_LOCKED: "1" # every tool from the URL and checksum in mise.lock
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, test, workflows, leaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Clone the code with its history (the leak scan reads it)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned tools (mise.toml)
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5.2.10
+      - name: Lint (mise run lint)
+        run: mise run lint
+      - name: Test (mise run test)
+        run: mise run test
+      - name: The command line builds for Linux, Windows and macOS (mise run cross)
+        run: mise run cross
+      - name: Workflows (mise run lint-workflows)
+        run: mise run lint-workflows
+      - name: Leaks in the history and the tree (mise run leaks)
+        run: mise run leaks

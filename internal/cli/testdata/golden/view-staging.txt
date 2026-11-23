@@ -1,0 +1,25 @@
+environment 'staging' (linked items included): 20 variable(s), 2 empty
+  FILE                  VARIABLE         SOURCE                  MANAGED  STATE  CHANGED
+  core.env              NOTES_LABEL      environment             owner    set    2026-01-02T03:04:05Z
+  core.env              HOSTING          environment             owner    set    
+  core.env              PORTAL           environment             owner    set    
+  core.env              ENGINE           environment             owner    set    
+  core.env              INDEXER          environment             owner    set    
+  services/indexer.env  INDEXER_SECRET   environment             system   set    2026-01-02T03:04:05Z
+  services/indexer.env  BROKER_URL       environment             owner    set    2026-01-02T03:04:05Z
+  services/indexer.env  BROKER_PASSWORD  environment             owner    empty  2026-01-02T03:04:05Z
+  services/portal.env   PUBLIC_HOST      environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env   CONTACT_ADDRESS  environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env   COOKIE_KEY       environment             system   set    2026-01-02T03:04:05Z
+  services/portal.env   THEME_COLOR      environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env   PORTAL_FLAGS     environment             owner    empty  2026-01-02T03:04:05Z
+  services/portal.env   SIGNUP_MODE      environment             owner    set    2026-01-02T03:04:05Z
+  shared/blobs.env      BLOB_KEY_SECRET  environment             owner    set    2026-01-02T03:04:05Z
+  shared/blobs.env      BLOB_BUCKET      environment             owner    set    2026-01-02T03:04:05Z
+  targets/compose.env   EXPORT_BUCKET    environment             owner    set    2026-01-02T03:04:05Z
+  targets/compose.env   COMPOSE_PROJECT  environment             owner    set    2026-01-02T03:04:05Z
+  targets/compose.env   LISTEN_PORT      environment             owner    set    2026-01-02T03:04:05Z
+  targets/compose.env   BUILD_REF        environment             system   set    2026-01-02T03:04:05Z
+
+missing: 1 entry(ies) the environment needs and that are empty (fill them in the KeePassXC app):
+  services-indexer/BROKER_PASSWORD  [owner]

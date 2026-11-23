@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#MISE description="Build the macOS application bin/IceVault.app (the window and the icevault command inside, its own icon, ad-hoc signed; no Developer ID signing, no notarisation)"
+#MISE depends=["build"]
+#MISE quiet=true
+# Contents/MacOS/icevault-desktop + Contents/MacOS/icevault (the command line of the same build) + Contents/Info.plist + Contents/Resources/icon.icns, then
+# `codesign -s -` (ad hoc), so that Gatekeeper does not stop a local build. The window program is built into a temporary folder and exists only inside the
+# bundle (bin/ holds icevault and IceVault.app, nothing else). Only macOS tools and the pinned Go are used; the icon is made in a temporary folder from
+# cmd/icevault-desktop/app/icon-1024.png.
+set -euo pipefail
+[ "$(uname -s)" = Darwin ] || { echo "desktop-app: the application bundle is built on macOS only" >&2; exit 1; }
+cd "${MISE_PROJECT_ROOT:-$(pwd)}"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+src=cmd/icevault-desktop/app/icon-1024.png
+iconset="$tmp/icon.iconset"
+mkdir "$iconset"
+for s in 16 32 128 256 512; do
+  sips -z "$s" "$s" "$src" --out "$iconset/icon_${s}x${s}.png" >/dev/null
+  d=$((s * 2))
+  sips -z "$d" "$d" "$src" --out "$iconset/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$tmp/icon.icns"
+
+describe="${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
+# Wails needs the UTType framework named by hand (the wails CLI adds it itself), ALWAYS the production tag (without it the window has a web inspector), and the
+# Go runtime of this version needs macOS 13.
+CGO_LDFLAGS="-mmacosx-version-min=13.0 -framework UniformTypeIdentifiers" CGO_CFLAGS="-mmacosx-version-min=13.0" \
+  go build -tags desktop,production -ldflags "-X github.com/cybericebox/icevault/internal/version.Version=$describe" -o "$tmp/icevault-desktop" ./cmd/icevault-desktop
+
+minos="$(vtool -show-build "$tmp/icevault-desktop" | awk '$1 == "minos" { print $2; exit }')"
+build="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+GOARCH="$(go env GOHOSTARCH)" CGO_ENABLED=0 $(command -v heavy >/dev/null && echo heavy --) go build -o "$tmp/mkapp" ./cmd/mkapp # the packer runs on this machine, whatever GOARCH the build has
+rm -rf bin/icevault-desktop # the loose window program of earlier builds
+app="$("$tmp/mkapp" --out bin --binary "$tmp/icevault-desktop" --cli bin/icevault --icon "$tmp/icon.icns" --describe "$describe" --build "$build" --min-os "$minos")"
+
+codesign --force --deep -s - "$app" >/dev/null 2>&1
+codesign --verify --deep --strict "$app"
+plutil -lint "$app/Contents/Info.plist" >/dev/null
+
+echo "$app"

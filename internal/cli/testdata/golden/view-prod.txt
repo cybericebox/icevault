@@ -1,0 +1,40 @@
+environment 'prod' (linked items included): 34 variable(s), 4 empty
+  FILE                    VARIABLE            SOURCE                  MANAGED  STATE  CHANGED
+  core.env                NOTES_LABEL         environment             owner    set    2026-01-02T03:04:05Z
+  core.env                TFC_ORG             environment             owner    set    2026-01-02T03:04:05Z
+  core.env                HOSTING             environment             owner    set    
+  core.env                STATE_STORE         environment             owner    set    
+  core.env                PORTAL              environment             owner    set    
+  core.env                ENGINE              environment             owner    set    
+  core.env                INDEXER             environment             owner    set    
+  services/engine.env     ENGINE_PROFILE_DIR  environment             system   set    2026-01-02T03:04:05Z
+  services/engine.env     ENGINE_TAG          environment             owner    set    2026-01-02T03:04:05Z
+  services/engine.env     ENGINE_THREADS      environment             owner    set    2026-01-02T03:04:05Z
+  services/engine.env     BOOTSTRAP_INVITE    environment             owner    empty  2026-01-02T03:04:05Z
+  services/indexer.env    INDEXER_SECRET      environment             system   set    2026-01-02T03:04:05Z
+  services/indexer.env    BROKER_URL          environment             owner    empty  2026-01-02T03:04:05Z
+  services/indexer.env    BROKER_PASSWORD     environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     PUBLIC_HOST         environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     CONTACT_ADDRESS     environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     BILLING_ACCOUNT     environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     COOKIE_KEY          environment             system   set    2026-01-02T03:04:05Z
+  services/portal.env     THEME_COLOR         environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     PORTAL_FLAGS        environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     CHANGELOG_TAG       environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     SIGNUP_MODE         environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     ANALYTICS_ID        environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     INVITE_SALT         environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     CDN_TOKEN           environment             owner    set    2026-01-02T03:04:05Z
+  services/portal.env     CDN_PURGE_KEY       environment             owner    empty  2026-01-02T03:04:05Z
+  services/portal.env     CDN_SIGNING_KEY     environment             owner    empty  2026-01-02T03:04:05Z
+  shared/blobs.env        BLOB_KEY_SECRET     environment             owner    set    2026-01-02T03:04:05Z
+  shared/blobs.env        BLOB_BUCKET         environment             owner    set    2026-01-02T03:04:05Z
+  targets/gcp-access.env  GCP_PROJECT_ID      environment             owner    set    2026-01-02T03:04:05Z
+  targets/gcp-access.env  GCP_KEY_PATH        environment             owner    set    2026-01-02T03:04:05Z
+  targets/gcp.env         GKE_POOL            environment             owner    set    2026-01-02T03:04:05Z
+  targets/gcp.env         GCP_ZONE            environment             owner    set    2026-01-02T03:04:05Z
+  targets/gcp.env         EXPORT_BUCKET       environment             system   set    2026-01-02T03:04:05Z
+
+missing: 2 entry(ies) the environment needs and that are empty (fill them in the KeePassXC app):
+  services-portal/CDN_PURGE_KEY  [owner]
+  services-portal/CDN_SIGNING_KEY  [owner]

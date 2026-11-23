@@ -1,0 +1,11 @@
+  new       core.env
+  new       creds/gcp.kubeconfig
+  new       keys/gcp/release/ACTIVE
+  new       keys/gcp/release/r1.key
+  new       services/engine.env
+  new       services/indexer.env
+  new       services/portal.env
+  new       shared/blobs.env
+  new       targets/gcp-access.env
+  new       targets/gcp.env
+imported: 10 new, 0 changed; 0 unchanged; 0 left out on purpose, 1 not covered (no rule of the project description keeps them): readme.txt
