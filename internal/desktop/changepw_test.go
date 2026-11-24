@@ -72,7 +72,7 @@ func newChangeApp(t *testing.T) *changeHarness {
 	fv := &fakeVaults{unlockers: map[string]Unlocker{h.vault: changeUnlocker{h.core}}}
 	h.app = New(Options{Vaults: fv, Maker: h.maker, Vault: h.vault,
 		Sleep: func(d time.Duration) { h.slept = append(h.slept, d) },
-		PickSave: func(_, name string) (string, error) {
+		PickSave: func(_, _, name string) (string, error) {
 			h.saved = append(h.saved, name)
 			if len(h.picks) == 0 {
 				return "", nil
