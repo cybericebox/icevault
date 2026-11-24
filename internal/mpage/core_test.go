@@ -57,6 +57,116 @@ func code(err error) string {
 	return ""
 }
 
+func TestReferencesAndPreview(t *testing.T) {
+	c, _ := newCore(t)
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "ADMIN_MAIL", "value": "ops@example.net", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	// the picker: variables of the environment, shared values, never a value
+	got, err := c.Read("references", map[string]any{"scope": "env/prod/general"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	for _, want := range []string{`"system":"self"`, `"key":"ADMIN_MAIL"`, `"system":"shared"`, `"key":"CONTACT_ADDRESS"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("targets lack %s: %s", want, raw)
+		}
+	}
+	for _, secret := range []string{"ops@example.net", "sig-secret-1", "gkey-secret-1"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("the picker shows a value: %s", secret)
+		}
+	}
+	sh, _ := c.Read("references", map[string]any{"scope": "shared"})
+	if raw, _ := json.Marshal(sh); strings.Contains(string(raw), `"system":"self"`) {
+		t.Errorf("a shared value is offered self: %s", raw)
+	}
+	// the preview: plain text for plain, nothing for a sealed target
+	p, err := c.Read("preview-value", map[string]any{"scope": "env/prod/general", "key": "SUPPORT", "value": "to ${{ self.ADMIN_MAIL }}", "visibility": "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm := p.(map[string]any)
+	if pm["preview"] != "to ops@example.net" || pm["eff_vis"] != "plain" || pm["ref_errors"] != 0 {
+		t.Fatalf("preview: %v", pm)
+	}
+	p, _ = c.Read("preview-value", map[string]any{"scope": "env/prod/general", "key": "SUPPORT", "value": "${{ self.COOKIE_KEY }}", "visibility": "plain"})
+	if raw, _ := json.Marshal(p); strings.Contains(string(raw), "sig-secret-1") || p.(map[string]any)["preview"] != nil {
+		t.Fatalf("a sealed value came through the preview: %s", raw)
+	}
+	p, _ = c.Read("preview-value", map[string]any{"scope": "env/prod/general", "key": "SUPPORT", "value": "${{ self.NOPE }}", "visibility": "plain"})
+	if pm := p.(map[string]any); pm["ref_errors"] != 1 || pm["preview"] != nil {
+		t.Fatalf("broken: %v", pm)
+	}
+	// a shared value refers to no environment: the write is refused and nothing changes
+	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "BAD", "value": "${{ self.ADMIN_MAIL }}", "visibility": "plain"}); code(err) != "model_invalid" {
+		t.Fatalf("shared self: %v", err)
+	}
+	if c.Model().SharedVar("BAD") != nil {
+		t.Fatal("the refused value was kept")
+	}
+}
+
+func TestProductHelpFollowsThePlacement(t *testing.T) {
+	c, _ := newCore(t)
+	dp := c.d.Product("portal")
+	dp.Help = project.Text{"en": "as host processes"}
+	dp.HelpOnSiteKind = map[string]project.Text{"google-cluster": {"en": "in the cluster"}}
+	helpOf := func() string {
+		for _, e := range c.Nav()["envs"].([]map[string]any) {
+			for _, p := range e["products"].([]map[string]any) {
+				if p["name"] == "portal" {
+					return p["help"].(map[string]string)["en"]
+				}
+			}
+		}
+		return ""
+	}
+	if got := helpOf(); got != "in the cluster" {
+		t.Fatalf("on a cluster site: %q", got)
+	}
+	c.m.Env("prod").Product("portal").Site = nil
+	if got := helpOf(); got != "as host processes" {
+		t.Fatalf("without a site: %q", got)
+	}
+}
+
+func TestBrokenReferenceIsNeededForDeploy(t *testing.T) {
+	c, _ := newCore(t)
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/product/portal", "key": "LINK", "value": "${{ self.NOPE }}", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	nav := c.Nav()
+	var rows []map[string]any
+	for _, e := range nav["envs"].([]map[string]any) {
+		for _, p := range e["products"].([]map[string]any) {
+			rows = append(rows, p["missing"].([]map[string]any)...)
+		}
+	}
+	found := false
+	for _, r := range rows {
+		if r["where"] == "reference" && r["key"] == "LINK" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no row for the broken reference: %v", rows)
+	}
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/product/portal", "key": "LINK", "value": "${{ self.PUBLIC_HOST }}"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range c.Nav()["envs"].([]map[string]any) {
+		for _, p := range e["products"].([]map[string]any) {
+			for _, r := range p["missing"].([]map[string]any) {
+				if r["where"] == "reference" {
+					t.Fatalf("still a broken reference after the fix: %v", r)
+				}
+			}
+		}
+	}
+}
+
 func TestNavShowsTheModelAndNoSecret(t *testing.T) {
 	c, _ := newCore(t)
 	b, err := json.Marshal(c.Nav())

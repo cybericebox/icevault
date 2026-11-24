@@ -147,6 +147,8 @@ main { flex:1; min-height:0; overflow:auto; padding:24px 24px 64px; }
 main:focus { outline:none; }
 
 /* item header */
+.head.sticky { position:sticky; top:-24px; z-index:3; margin:-24px -24px 0; padding:24px 24px 12px; background:var(--ib-surface); border-bottom:1px solid var(--ib-line); }
+.mtable th.h { top:calc(var(--headh, 0px) - 24px); }
 .head h1 { margin:0; font-size:20px; line-height:1.2; font-weight:600; color:var(--ib-ink); }
 .head .meta { margin-top:4px; display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; font-size:13px; color:var(--ib-dim); }
 .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -160,6 +162,7 @@ main:focus { outline:none; }
 .acts .islot { display:inline-block; width:36px; height:1px; }
 .chip .ibtn .i { width:14px; height:14px; }
 .banner { display:flex; align-items:flex-start; gap:12px; margin-top:12px; padding:10px 12px; border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); background:var(--ib-paper); font-size:14px; }
+.banner.ok { background:var(--ib-ok-bg); border-color:transparent; color:var(--ib-ok); }
 .banner.warn { background:var(--ib-warn-bg); border-color:transparent; color:var(--ib-warn); }
 .banner .i { margin-top:2px; }
 .banner > div { flex:1; min-width:0; }
@@ -456,7 +459,7 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .side-add > .t, .side-add { text-overflow:ellipsis; }
 .side-add > .t { overflow:hidden; min-width:0; }
 /* the vault model: blocks of a page, cards of sites and products */
-.mblock { margin-top:20px; }
+.mblock { margin-top:28px; }
 .mblock-h { display:flex; align-items:center; gap:8px; min-height:36px; }
 .mblock-h h2 { margin:0; font-size:16px; font-weight:600; color:var(--ib-ink); }
 .mnote { margin:4px 0 8px; font-size:13px; }
@@ -472,6 +475,21 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .msub-h { display:flex; align-items:center; gap:6px; min-height:36px; font-size:13px; font-weight:600; color:var(--ib-dim); }
 .mmeta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:4px 0 8px; font-size:13px; }
 .mtable { width:100%; }
+/* one table layout: the cells of a row share one height, border and alignment (the name cell is a table cell, its content a flex box inside), the table has a full frame like a card */
+.mtwrap { border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); overflow:clip; }
+.mtwrap table.rows th.h { border-top:0; } .mtwrap table.rows tr:last-child td { border-bottom:0; }
+.mtable td, .mtable th { vertical-align:middle; }
+.mtable td.mk { padding-top:6px; padding-bottom:6px; } .mtable td.mk .kcell { min-height:36px; }
+.mblock-h .grow, .mcard-h .grow, .msub-h .grow { flex:1; }
+.mblock.folded > :not(.mblock-h), .mcard.folded > :not(.mcard-h), .msub.folded > :not(.msub-h) { display:none; }
+.mblock.folded { margin-top:12px; }
+/* the design system's control height on the model page: selects, buttons, chips, icon buttons and the checkbox in one row are alike */
+.mblock .btn, .mcard .btn, .mcard .input, .mcard .sel-trig, .mcard .chip { height:32px; }
+.mblock .ibtn, .mcard .ibtn { width:32px; height:32px; }
+.mblock-h, .mcard-h, .msub-h { min-height:32px; }
+.mswitch { min-height:32px; font-size:14px; } .mswitch input { width:16px; height:16px; margin:0; flex:none; }
+.mctl { align-items:center; } .mctl .mchips { min-height:32px; }
+.ibtn.fold { width:28px; height:28px; margin-left:-6px; } .ibtn.fold .i { width:16px; height:16px; }
 .mtable .kname { font-family:var(--ib-font); letter-spacing:normal; }
 .mtable { table-layout:fixed; }
 .mtable td.acts { white-space:nowrap; overflow:visible; }
@@ -626,6 +644,7 @@ const prettyParams = (params) => Object.fromEntries(Object.entries(params || {})
 // why a reference does not resolve: the server's English sentence, said in the page language
 function refWhy(why) {
   let m;
+  if ((m = /^self\.(\S+): there is no environment/.exec(why))) return t("ref.why.no_env", { what: "self." + m[1] });
   if ((m = /^no value (\S+)$/.exec(why))) return t("ref.why.no_value", { what: m[1] });
   if ((m = /^no external system '([^']+)'/.exec(why))) return t("ref.why.no_system", { name: m[1] });
   if ((m = /^the external system '([^']+)' is not allowed on site '([^']+)' \(only on (.*)\)$/.exec(why))) return t("ref.why.not_allowed", { name: m[1], site: m[2], list: m[3] });
@@ -849,16 +868,17 @@ function genPopover(anchor, o) {
 }
 
 // ---------------------------------------------------------------- the reference picker: search over the global values and the external systems (no values shown)
-async function pickReference(onPick) {
-  const x = await api("/api/references"); if (x.status !== 200) { say(srv(x.data), "err"); return; }
+const refTitle = (r) => r.system === "self" ? t("ref.self") : r.system === "shared" ? t("ref.shared") : (r.title || r.system);
+async function pickReference(onPick, scope) {
+  const x = await api("/api/references", scope ? { scope } : undefined); if (x.status !== 200) { say(srv(x.data), "err"); return; }
   const targets = x.data.targets; confirmLayer.open(t("ref.pick")); const box = confirmLayer.box;
   const q = el("input", "input lg"); q.type = "search"; q.placeholder = t("ref.search"); q.setAttribute("aria-label", t("ref.search")); box.append(q);
   box.append(el("div", "help", t("ref.shared_note")));
   const lst = el("div", "dlist picker"); box.append(lst);
   const draw = () => { lst.textContent = ""; const s = q.value.trim().toLowerCase();
-    const shown = targets.filter((r) => !s || (r.system + "." + r.key + " " + r.title + " " + r.description + " " + r.labels.join(" ")).toLowerCase().includes(s)).slice(0, 60);
+    const shown = targets.filter((r) => !s || (r.system + "." + r.key + " " + refTitle(r) + " " + r.description + " " + r.labels.join(" ")).toLowerCase().includes(s)).slice(0, 60);
     if (!shown.length) { lst.append(el("div", "quiet", t(targets.length ? "ref.none_match" : "ref.none"))); return; }
-    shown.forEach((r) => { const b = el("button", "pick"); b.type = "button"; b.append(el("span", "mono", r.title + " / " + r.key), el("span", "quiet", r.description || ""), el("span", "tag", t("vis.word." + r.vis)));
+    shown.forEach((r) => { const b = el("button", "pick"); b.type = "button"; b.append(el("span", "mono", refTitle(r) + " / " + r.key), el("span", "quiet", r.description || ""), el("span", "tag", t("vis.word." + r.vis)));
       b.addEventListener("click", () => { confirmLayer.close(); onPick("${{ " + r.system + "." + r.key + " }}"); }); lst.append(b); }); };
   q.addEventListener("input", draw); draw();
   const actions = el("div", "actions"); actions.append(btn(t("btn.cancel"), "", () => confirmLayer.close(), "lg")); box.append(actions); q.focus();
@@ -872,20 +892,23 @@ function insertAtCursor(inp, text, replaceTrigger) {
 // what a value with references is, as the owner types it: the chips, the strictest visibility and why, the resolved text only when that is plain
 function refSummary(info, ownVis) {
   const w = el("div", "refprev"); if (!info.refs || !info.refs.length) return null;
-  const chips = el("div", "refs"); info.refs.forEach((x) => { const b = el("span", "chip" + (x.ok ? "" : " miss")); b.textContent = x.title + " / " + x.key; setTip(b, x.ok ? "" : refWhy(x.why)); chips.append(b); }); w.append(chips);
+  const chips = el("div", "refs"); info.refs.forEach((x) => { const b = el("span", "chip" + (x.ok ? "" : " miss")); b.textContent = refTitle(x) + " / " + x.key; setTip(b, x.ok ? "" : refWhy(x.why)); chips.append(b); }); w.append(chips);
   w.append(el("div", "quiet", info.ref_errors ? t("ref.preview_broken") : info.preview !== null && info.preview !== undefined ? t("ref.preview", { text: info.preview }) : t("ref.preview_hidden", { vis: t("vis.word." + info.eff_vis) })));
+  if (info.sites && info.sites.length) {   // a value of General in an environment with several sites: one line per site
+    const ul = el("ul", "mmissing"); info.sites.forEach((s) => ul.append(el("li", s.ref_errors ? "miss" : "", s.ref_errors ? t("ref.site_broken", { site: s.site, why: refWhy(s.why) }) : s.preview !== undefined ? t("ref.site_text", { site: s.site, text: s.preview }) : t("ref.site_hidden", { site: s.site })))); w.append(el("div", "quiet", t("ref.differs"))); w.append(ul);
+  }
   if (info.because && info.because.length) w.append(withIcon("key", t("ref.because", { vis: t("vis.word." + info.eff_vis), list: info.because.join(", ") }), "tag warn"));
   return w;
 }
-function liveRefs(inp, getVis, out) {
+function liveRefs(inp, getVis, out, ctx) {
   let timer = 0; const run = async () => { const v = inp.value; out.textContent = ""; const fld = out.closest(".fld"); if (!v.includes("${{")) { out.hidden = true; if (fld) fld.hidden = true; return; }
-    const x = await api("/api/preview-value", { value: v, visibility: getVis(), site: viewSite || "" }); if (x.status !== 200) return; const n = refSummary(x.data); out.hidden = !n; if (fld) fld.hidden = !n; if (n) out.append(n); };
+    const x = await api("/api/preview-value", Object.assign({ value: v, visibility: getVis(), site: viewSite || "" }, ctx ? ctx() : {})); if (x.status !== 200) return; const n = refSummary(x.data); out.hidden = !n; if (fld) fld.hidden = !n; if (n) out.append(n); };
   inp.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 250); }); run();
 }
 // the same helpers for a value field: Insert reference and the ${{ trigger
-function refControls(inp, host) {
-  inp.addEventListener("input", () => { const a = inp.selectionStart; if (a != null && inp.value.slice(Math.max(0, a - 3), a) === "${{") pickReference((txt) => { insertAtCursor(inp, txt, true); inp.focus(); }); });
-  host.append(btn(t("ref.insert"), "link", () => pickReference((txt) => { insertAtCursor(inp, txt, false); inp.focus(); }), "ghost"));
+function refControls(inp, host, scope) {
+  inp.addEventListener("input", () => { const a = inp.selectionStart; if (a != null && inp.value.slice(Math.max(0, a - 3), a) === "${{") pickReference((txt) => { insertAtCursor(inp, txt, true); inp.focus(); }, scope); });
+  host.append(btn(t("ref.insert"), "link", () => pickReference((txt) => { insertAtCursor(inp, txt, false); inp.focus(); }, scope), "ghost"));
 }
 // ---------------------------------------------------------------- layers: the panel (dialog) and the confirm box above it
 let panelKey = false;
@@ -988,7 +1011,12 @@ function dialog(title, fields, submitText, onSubmit, note) {
     } else {
       if (f.type === "textarea") { inp = el("textarea", "input"); inp.value = f.value || ""; }
       else { inp = el("input", "input lg"); inp.type = f.type || "text"; if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
-      inp.id = id; inputs[f.name] = inp; box.append(inp); focusNode = inp;
+      inp.id = id; inputs[f.name] = inp; focusNode = inp;
+      if (f.ref && f.ref.scope) {     // a value that may refer to other values: Insert reference, the ${{ trigger, the live resolved preview
+        const wrap = el("div", "valbox"); wrap.append(inp); refControls(inp, wrap, f.ref.scope); box.append(wrap);
+        const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw);
+        liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) }));
+      } else box.append(inp);
       inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value); if (m) fieldErr(f.name, m); } if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
     }
@@ -2586,7 +2614,7 @@ loadUpd(); [4000, 20000, 60000].forEach((ms) => setTimeout(() => { if (!upd || u
 setInterval(loadUpd, 6 * 3600 * 1000);
 
 // ---------------------------------------------------------------- the vault model (internal/mpage): Shared, Connections, Other secrets; environments with General, Sites, Products
-let msel = null, munused = false; const mrevealed = new Map();
+let msel = null, munused = false, mshowauto = storeGet("icevault.showauto") === "1"; const mrevealed = new Map();
 const isModel = () => !!(nav && nav.model);
 const mtext = (o) => (o && (o[lang] || o.en)) || "";                       // a text of the project description in the language of the page
 const mlabel = (r) => mtext(r.label) || r.key;
@@ -2651,22 +2679,31 @@ function mhead(main, iconName, title, sub, actions) {
   if (nav.read_only) { const b = el("div", "banner warn"); b.append(icon("lock"), el("div", "", t("m.read_only"))); main.append(b); }
 }
 
+// a card or section that folds: a chevron first in its header, the state remembered per item (the same set the groups of the old screen use)
+function mfold(card, h, key) {
+  const k = "m|" + key, shut = collapsed.has(k);
+  const b = ibtn(shut ? "right" : "down", t(shut ? "m.expand" : "m.collapse"), () => { if (collapsed.has(k)) collapsed.delete(k); else collapsed.add(k); saveCollapsed(); renderMMain(); }, "fold");
+  b.setAttribute("aria-expanded", String(!shut)); h.prepend(b); card.classList.toggle("folded", shut);
+}
+const mscope = () => (msel ? msel.kind + "|" + (msel.id || "") : "");
 function mblock(main, title, iconName, buttons, note) {
   const sec = el("section", "mblock"); const h = el("div", "mblock-h"); h.append(icon(iconName), el("h2", "", title)); const g = el("span", "grow"); h.append(g); (buttons || []).forEach((b) => b && h.append(b)); sec.append(h);
+  mfold(sec, h, mscope() + "|sec|" + title);
   if (note) sec.append(el("p", "dim mnote", note)); main.append(sec); return sec;
 }
 
 // the rows of variables of one scope: label (from the description) with the key, the value by its visibility, what it is, the actions of edit mode
 function mvars(parent, rows, scope, opts) {
   opts = opts || {}; rows = rows || [];
-  const shown = rows.filter((r) => munused || r.active !== false); const hidden = rows.length - shown.length;
+  const shown = rows.filter((r) => (munused || r.active !== false) && (mshowauto || !r.system)); const hidden = rows.filter((r) => r.active === false).length; const auto = rows.filter((r) => r.system).length;
   if (!rows.length) { parent.append(mempty(opts.empty || t("m.empty.vars"))); return; }
+  if (!shown.length && auto && !mshowauto) { parent.append(el("p", "dim mnote", t("m.empty.auto", { n: auto }))); return; }
   const tb = el("table", "rows mtable"); const cg = el("colgroup"); ["34%", "36%", "18%", "136px"].forEach((w) => { const c = el("col"); c.style.width = w; cg.append(c); }); tb.append(cg);
   const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
   const body = el("tbody");
   shown.forEach((r) => {
     const tr = el("tr", r.active === false ? "dim" : ""); const k = scope + "|" + r.key;
-    const nc = el("td", "kcell"); nc.append(el("div", mlabel(r) !== r.key ? "kname" : "kname kmono", mlabel(r))); if (mlabel(r) !== r.key) nc.append(el("div", "ktitle mono", r.key));
+    const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw); kw.append(el("div", mlabel(r) !== r.key ? "kname" : "kname kmono", mlabel(r))); if (mlabel(r) !== r.key) kw.append(el("div", "ktitle mono", r.key));
     const help = mtext(r.help) || r.description; if (help) setTip(nc, help);
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(r.required && r.active !== false ? withIcon("alert", t("m.var.required"), "needed") : el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
@@ -2688,7 +2725,7 @@ function mvars(parent, rows, scope, opts) {
     if (editing() && !r.missing && !(r.imported && !r.overridden)) ac.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
     tr.append(nc, vc, kc, ac); body.append(tr);
   });
-  tb.append(body); parent.append(tb);
+  tb.append(body); const tw = el("div", "mtwrap"); tw.append(tb); parent.append(tw);
   if (hidden || (munused && rows.some((r) => r.active === false))) { const u = el("button", "side-add mtoggle"); u.type = "button"; u.setAttribute("aria-pressed", String(munused)); u.append(icon(munused ? "eye-off" : "eye"), el("span", "t", munused ? t("m.hide_unused") : t("m.show_unused", { n: hidden }))); u.addEventListener("click", () => { munused = !munused; renderMMain(); }); parent.append(u); }
 }
 
@@ -2704,7 +2741,8 @@ function mvarDialog(scope, r) {
   const fresh = !r; const fields = [];
   if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help") });
   const secret = r ? r.visibility !== "plain" : false;
-  const f = { name: "value", label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
+  const refCtx = { scope, key: (inp) => (fresh ? String((inp.key && inp.key.value) || "").trim() : r.key), vis: (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility) };
+  const f = { name: "value", ref: refCtx, label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
   const ty = r && r.type;
   const word = (rule) => t("m.type." + rule, { min: r && r.min != null ? r.min : "-∞", max: r && r.max != null ? r.max : "∞" });
   const stored = r && r.visibility === "plain" ? (r.value || "") : "";
@@ -2846,7 +2884,10 @@ function mEnv(main) {
   const e = envOf(msel.id); const acts = [];
   if (editing()) { const fb = btn(t("m.env.fill"), "plus", async () => { const done = busy(fb, t("busy.creating")); let r; try { r = await api("/api/m-env-fill", { env: e.name }); } finally { done(); } if (r.status === 200) { await mreload(); const n = (r.data && r.data.added) || 0; say(n ? t("m.env.filled", { n }) : t("m.env.filled_none"), "ok"); } else say(srv(r.data), "err"); }, "ghost"); setTip(fb, t("m.env.fill_tip")); acts.push(fb); }
   if (editing()) acts.push(btn(t("m.env.copy"), "copy", () => { menvDialog(null, e.name); }, "ghost"), btn(t("m.env.rename_btn"), "edit", () => menvDialog(e), "ghost"), btn(t("m.btn.delete"), "archive", () => mdelete(t("m.env.delete_title", { name: e.name }), t("m.env.delete_note"), "m-env", { action: "delete", name: e.name }), "ghost danger"));
+  { const all = [].concat(e.general, ...e.sites.map((s) => s.vars), ...e.products.map((p) => [].concat(p.vars, p.sub ? p.sub.vars : []))); const n = all.filter((r) => r.system).length;
+    if (n) { const ab = btn(t(mshowauto ? "m.auto.hide" : "m.auto.show", { n }), mshowauto ? "eye-off" : "eye", () => { mshowauto = !mshowauto; storeSet("icevault.showauto", mshowauto ? "1" : "0"); renderMMain(); }, "ghost"); ab.setAttribute("aria-pressed", String(mshowauto)); setTip(ab, t("m.auto.tip")); acts.push(ab); } }
   mhead(main, "layers", e.title || e.name, e.title ? e.name : "", acts);
+  { const hd = main.querySelector(".head"); hd.classList.add("sticky"); main.style.setProperty("--headh", hd.offsetHeight + "px"); }   // the header stays at the top while the sections scroll; table headings stick below it
   // General: the settings of the whole environment, with the imported shared variables
   const g = mblock(main, t("m.env.general"), "layers", [editing() ? btn(t("m.env.import"), "link", () => mimportDialog(e)) : null, editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/general", null)) : null], t("m.env.general_note"));
   mvars(g, e.general, "env/" + e.name + "/general", { general: true });
@@ -2877,6 +2918,7 @@ function mselectRow(parent, label, box) { const row = el("div", "mfield"); row.a
 
 function msite(parent, e, x) {
   const card = el("div", "mcard"); const h = el("div", "mcard-h"); h.append(icon("server"), el("b", "", x.name), el("span", "tag", skTitle(x.kind)));
+  mfold(card, h, mscope() + "|site|" + x.name);
   h.append(el("span", "dim", x.users.length ? t("m.site.used_by", { list: x.users.join(", ") }) : t("m.site.unused"))); h.append(el("span", "grow"));
   if (editing()) h.append(ibtn("edit", t("m.site.rename", { name: x.name }), () => msiteDialog(e, x)), ibtn("archive", t("m.site.delete", { name: x.name }), () => mdelete(t("m.site.delete_title", { name: x.name }), x.users.length ? t("m.site.delete_used", { list: x.users.join(", ") }) : t("m.site.delete_note"), "m-site", { env: e.name, action: "delete", name: x.name }), "danger"));
   card.append(h);
@@ -2893,8 +2935,8 @@ function msite(parent, e, x) {
     if (x.state_kind) { const sc = connOf(x.state); mselectRow(ctl, t("m.site.state"), el("b", "", sc ? sc.name : t("m.site.no_connection"))); }
   }
   card.append(ctl);
-  const vs = el("div", "msub"); vs.append(el("div", "msub-h", t("m.site.settings")));
-  if (editing()) vs.firstChild.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/site/" + x.name, null)));
+  const vs = el("div", "msub"); const vh = el("div", "msub-h"); vh.append(el("span", "", t("m.site.settings")), el("span", "grow")); vs.append(vh); mfold(vs, vh, mscope() + "|site|" + x.name + "|vars");
+  if (editing()) vh.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/site/" + x.name, null)));
   mvars(vs, x.vars, "env/" + e.name + "/site/" + x.name); card.append(vs); parent.append(card);
 }
 
@@ -2907,6 +2949,7 @@ function msiteDialog(e, x) {
 
 function mproduct(parent, e, p) {
   const card = el("div", "mcard" + (p.enabled ? "" : " off")); const h = el("div", "mcard-h"); h.append(icon("package"), el("b", "", prodTitle(p)));
+  mfold(card, h, mscope() + "|product|" + p.name);
   if (prodTitle(p) !== p.name) h.append(el("span", "quiet mono", p.name));
   if (editing()) { const id = "on-" + e.name + "-" + p.name; const lab = el("label", "mswitch"); lab.htmlFor = id; const cb = el("input"); cb.type = "checkbox"; cb.id = id; cb.checked = p.enabled; cb.addEventListener("change", () => mwrite("m-product", { env: e.name, action: "update", name: p.name, enabled: cb.checked })); lab.append(cb, el("span", "", t("m.product.switch"))); h.append(lab); }
   else h.append(el("span", "tag" + (p.enabled ? "" : " warn"), p.enabled ? t("m.product.on") : t("m.product.off")));
@@ -2929,15 +2972,15 @@ function mproduct(parent, e, p) {
   if (p.needs.length) mselectRow(ctl, t("m.product.needs"), el("span", "dim", p.needs.map((n) => ckTitle(n.kind) + (n.optional ? " (" + t("m.product.optional") + ")" : "")).join(", ")));
   card.append(ctl);
   if (p.enabled) {
-    const m = el("div", "banner" + (p.missing.length ? " warn" : "")); m.append(icon(p.missing.length ? "alert" : "ok"));
+    const m = el("div", "banner" + (p.missing.length ? " warn" : " ok")); m.append(icon(p.missing.length ? "alert" : "ok"));
     const d = el("div"); d.append(el("div", "", p.missing.length ? tn("m.missing_n", p.missing.length) : t("m.product.ready")));
     if (p.missing.length) { const ul = el("ul", "mmissing"); p.missing.forEach((x) => ul.append(el("li", "", mmissText(x)))); d.append(ul); }
     m.append(d); card.append(m);
   }
-  const vs = el("div", "msub"); vs.append(el("div", "msub-h", t("m.product.vars")));
-  if (editing()) vs.firstChild.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/product/" + p.name, null)));
+  const vs = el("div", "msub"); const vh = el("div", "msub-h"); vh.append(el("span", "", t("m.product.vars")), el("span", "grow")); vs.append(vh); mfold(vs, vh, mscope() + "|product|" + p.name + "|vars");
+  if (editing()) vh.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/product/" + p.name, null)));
   mvars(vs, p.vars, "env/" + e.name + "/product/" + p.name); card.append(vs);
-  if (p.sub) { const ss = el("div", "msub"); ss.append(el("div", "msub-h", t("m.product.on_kind", { kind: skTitle(p.sub.kind) }))); mvars(ss, p.sub.vars, "env/" + e.name + "/product/" + p.name + "/" + p.sub.kind); card.append(ss); }
+  if (p.sub) { const ss = el("div", "msub"); const sh = el("div", "msub-h"); sh.append(el("span", "", t("m.product.on_kind", { kind: skTitle(p.sub.kind) })), el("span", "grow")); ss.append(sh); mfold(ss, sh, mscope() + "|product|" + p.name + "|sub"); mvars(ss, p.sub.vars, "env/" + e.name + "/product/" + p.name + "/" + p.sub.kind); card.append(ss); }
   parent.append(card);
 }
 

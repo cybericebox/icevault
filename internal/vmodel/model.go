@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cybericebox/icevault/internal/kinds"
+	"github.com/cybericebox/icevault/internal/model"
 )
 
 // Format is the version of the vault model this tool reads and writes. A vault without one is in the layout before the model (IceVault 0.2), which this version does not read.
@@ -270,6 +271,9 @@ func (v *Vault) Check() []string {
 	names := map[string]bool{}
 	for _, c := range v.Connections {
 		known[c] = true
+		if strings.EqualFold(c.Name, model.SelfRef) {
+			add("connection %q: 'self' is the word references use for the environment itself", c.Name)
+		}
 		if !ValidConnectionName(c.Name) {
 			add("connection %q: not a name (1-64 characters, no slash)", c.Name)
 		}
@@ -309,6 +313,22 @@ func (v *Vault) Check() []string {
 		}
 	}
 	checkVars("shared", v.Shared)
+	noSelf := func(where, value string) {
+		for _, r := range model.ReferencesIn(value) {
+			if r[0] == model.SelfRef {
+				add("%s: a reference to self has no environment here (self is for the values of an environment)", where)
+				return
+			}
+		}
+	}
+	for _, x := range v.Shared {
+		noSelf("shared "+x.Key, x.Value)
+	}
+	for _, c := range v.Connections {
+		for _, f := range c.Fields {
+			noSelf("connection "+c.Name+" field "+f.Name, f.Value)
+		}
+	}
 	shared := map[*Var]bool{}
 	for _, s := range v.Shared {
 		shared[s] = true
@@ -316,6 +336,9 @@ func (v *Vault) Check() []string {
 	envs := map[string]bool{}
 	for _, e := range v.Envs {
 		w := "environment " + e.Name
+		if e.Name == model.SelfRef {
+			add("environment %q: 'self' is the word references use for the environment itself", e.Name)
+		}
 		if !EnvNameRE.MatchString(e.Name) {
 			add("environment %q: not an environment name", e.Name)
 		}
@@ -334,6 +357,9 @@ func (v *Vault) Check() []string {
 		for _, s := range e.Sites {
 			sites[s] = true
 			sw := w + " site " + s.Name
+			if s.Name == model.SelfRef {
+				add("%s: 'self' is the word references use for the environment itself", sw)
+			}
 			if !ThingNameRE.MatchString(s.Name) || sn[s.Name] {
 				add("%s: not a name, or twice", sw)
 			}

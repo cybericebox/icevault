@@ -76,14 +76,26 @@ func (s *Snapshot) Target(name, key, site string) (*Entry, string) {
 	return t.e, t.msg
 }
 
+// SelfLookup finds the value self.<key> stands for: the variable of the
+// environment (and site pair) the expanded value lives in. It returns the entry
+// or a message that says why there is none.
+type SelfLookup func(key string) (*Entry, string)
+
 // Expand returns the value with its references replaced, the visibility (the
 // strictest of the value's own and every target's) and the errors. A reference
 // that cannot be resolved gives an error and an empty text; a cycle names its chain.
+// The value lives in no environment here, so a reference to self is an error.
 func (s *Snapshot) Expand(value, vis, site string) (string, string, []string) {
-	return s.expand(value, vis, site, nil)
+	return s.expand(value, vis, site, nil, nil)
 }
 
-func (s *Snapshot) expand(value, vis, site string, stack []string) (string, string, []string) {
+// ExpandIn is Expand for a value of an environment: self.<key> refers to the
+// variable of that environment that self finds.
+func (s *Snapshot) ExpandIn(value, vis, site string, self SelfLookup) (string, string, []string) {
+	return s.expand(value, vis, site, nil, self)
+}
+
+func (s *Snapshot) expand(value, vis, site string, stack []string, self SelfLookup) (string, string, []string) {
 	var out strings.Builder
 	var errs []string
 	pos := 0
@@ -106,12 +118,27 @@ func (s *Snapshot) expand(value, vis, site string, stack []string) (string, stri
 			errs = append(errs, fmt.Sprintf("references go deeper than %d: %s", MaxRefDepth, chain()))
 			continue
 		}
-		t := s.target(name, key, site)
+		var t target
+		inner := SelfLookup(nil) // a global value or an external system has no environment: self is an error there
+		if name == SelfRef {
+			if self == nil {
+				msg := fmt.Sprintf("self.%s: there is no environment here (self refers to a variable of the environment the value lives in)", key)
+				if len(stack) > 0 { // reached through a reference: the value that has no environment is a global one or a system's
+					msg = fmt.Sprintf("self.%s: there is no environment here (a global value or an external system has none; reached through %s)", key, chain())
+				}
+				errs = append(errs, msg)
+				continue
+			}
+			t.e, t.msg = self(key)
+			inner = self
+		} else {
+			t = s.target(name, key, site)
+		}
 		if t.e == nil {
 			errs = append(errs, t.msg)
 			continue
 		}
-		text, tvis, e2 := s.expand(t.e.Value, t.e.Vis, site, append(append([]string{}, stack...), ref))
+		text, tvis, e2 := s.expand(t.e.Value, t.e.Vis, site, append(append([]string{}, stack...), ref), inner)
 		errs = append(errs, e2...)
 		if VisRank(tvis) > VisRank(vis) {
 			vis = tvis
@@ -345,6 +372,21 @@ func (s *Snapshot) Resolve(section, name, site string, siteBound func(rel string
 			}
 		}
 	}
+	// self.KEY: the winning variable of the pair, as stored (before its own references are expanded)
+	stored := map[string][]*Resolved{}
+	for k, rs := range res.ByKey {
+		stored[k] = append([]*Resolved(nil), rs...)
+	}
+	self := func(key string) (*Entry, string) {
+		switch rs := stored[key]; len(rs) {
+		case 0:
+			return nil, "no value " + SelfRef + "." + key
+		case 1:
+			return rs[0].Entry, ""
+		default:
+			return nil, fmt.Sprintf("%s.%s exists %d times: a key is unique there", SelfRef, key, len(rs))
+		}
+	}
 	done := map[*Resolved]*Resolved{}
 	effective := func(r *Resolved) *Resolved {
 		if !strings.Contains(r.Entry.Value, "${{") {
@@ -353,7 +395,11 @@ func (s *Snapshot) Resolve(section, name, site string, siteBound func(rel string
 		if n, ok := done[r]; ok {
 			return n
 		}
-		text, vis, errs := s.Expand(r.Entry.Value, r.Entry.Vis, site)
+		var lookup SelfLookup // only a value of the environment or of its site has an environment
+		if r.Section == SecEnvs || r.Section == SecSites {
+			lookup = self
+		}
+		text, vis, errs := s.ExpandIn(r.Entry.Value, r.Entry.Vis, site, lookup)
 		cp := *r.Entry
 		raw := r.Entry.Value
 		cp.Value, cp.Vis, cp.Raw = text, vis, &raw

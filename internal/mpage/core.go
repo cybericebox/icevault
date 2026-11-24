@@ -27,6 +27,8 @@ const (
 	jList     = "list"
 	jTitle    = "title"
 	jWhere    = "where"
+	jSite     = "site"
+	jProduct  = "product"
 	actCreate = "create"
 	actUpdate = "update"
 	actDelete = "delete"
@@ -201,7 +203,7 @@ func (c *Core) usersOf(x *vmodel.Connection) []map[string]string {
 	for _, e := range c.m.Envs {
 		for _, s := range e.Sites {
 			if s.Connection == x {
-				out = append(out, map[string]string{jEnv: e.Name, jKind: "site", jName: s.Name})
+				out = append(out, map[string]string{jEnv: e.Name, jKind: jSite, jName: s.Name})
 			}
 			if s.State == x {
 				out = append(out, map[string]string{jEnv: e.Name, jKind: jState, jName: s.Name})
@@ -210,7 +212,7 @@ func (c *Core) usersOf(x *vmodel.Connection) []map[string]string {
 		for _, p := range e.Products {
 			for _, pc := range p.Connections {
 				if pc == x {
-					out = append(out, map[string]string{jEnv: e.Name, jKind: "product", jName: p.Name})
+					out = append(out, map[string]string{jEnv: e.Name, jKind: jProduct, jName: p.Name})
 				}
 			}
 		}
@@ -341,10 +343,15 @@ func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(s
 	if p.Site != nil {
 		siteKind = p.Site.Kind
 	}
-	out := map[string]any{"uuid": p.UUID, jName: p.Name, jTitle: text(title), "help": text(help), "enabled": p.Enabled, "place": p.Place, "site": "", "connections": []string{},
+	if p.Site != nil && dp != nil {
+		if h, ok := dp.HelpOnSiteKind[p.Site.Kind]; ok && len(h) > 0 {
+			help = h // the text follows the placement
+		}
+	}
+	out := map[string]any{"uuid": p.UUID, jName: p.Name, jTitle: text(title), "help": text(help), "enabled": p.Enabled, "place": p.Place, jSite: "", "connections": []string{},
 		"vars": c.vars(p.Vars, desc, vals), "needs": needs, "site_kind": siteKind}
 	if p.Site != nil {
-		out["site"] = p.Site.UUID
+		out[jSite] = p.Site.UUID
 	}
 	cs := []string{}
 	for _, x := range p.Connections {
@@ -379,17 +386,22 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 			}
 		}
 	}
-	scan("product", view["vars"].([]map[string]any))
+	scan(jProduct, view["vars"].([]map[string]any))
 	if sub, ok := view["sub"].(map[string]any); ok {
-		scan("product", sub["vars"].([]map[string]any))
+		scan(jProduct, sub["vars"].([]map[string]any))
 	}
 	scan("general", c.vars(e.GeneralValues(), c.d.General.Variables, vals))
 	if p.Site == nil {
-		out = append(out, map[string]any{jWhere: "site", jKey: ""})
+		out = append(out, map[string]any{jWhere: jSite, jKey: ""})
 	} else {
-		scan("site", c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals))
+		scan(jSite, c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals))
 		if sk, _ := kinds.SiteKind(p.Site.Kind); sk.Connection != "" && p.Site.Connection == nil {
 			out = append(out, map[string]any{jWhere: "site_connection", jKey: sk.Connection})
+		}
+	}
+	for _, b := range c.m.BrokenRefs(c.d, e) {
+		if b.Where == "general" || (b.Where == jSite && p.Site != nil && b.Name == p.Site.Name) || (b.Where == jProduct && b.Name == p.Name) {
+			out = append(out, map[string]any{jWhere: "reference", jKey: b.Key, "why": b.Msg})
 		}
 	}
 	if dp := c.d.Product(p.Name); dp != nil {
@@ -485,12 +497,88 @@ func (c *Core) Nav() map[string]any {
 		"products": products, "shared": sharedRows, "connections": conns, "other": other, "envs": envs, "sections": []any{}}
 }
 
-// Read answers the read ops of the model ("nav").
-func (c *Core) Read(op string, _ map[string]any) (any, error) {
-	if op == "nav" {
+// Read answers the read ops of the model: "nav", "references" {scope}, "preview-value" {scope, key, value, visibility}.
+func (c *Core) Read(op string, a map[string]any) (any, error) {
+	switch op {
+	case "nav":
 		return c.Nav(), nil
+	case "references":
+		return c.references(str(a, "scope"))
+	case "preview-value":
+		return c.previewValue(a)
 	}
 	return nil, &desktop.Error{Status: 404, Code: "not_found", Params: map[string]any{}}
+}
+
+// place is where the variables of a scope name live (see scope for the names).
+func (c *Core) place(name string) (vmodel.Place, error) {
+	if name == "shared" {
+		return vmodel.Place{}, nil
+	}
+	p := strings.Split(name, "/")
+	if _, err := c.scope(name); err != nil {
+		return vmodel.Place{}, err
+	}
+	e := c.m.Env(p[1])
+	pl := vmodel.Place{Env: e}
+	switch p[2] {
+	case jSite:
+		pl.Site = e.Site(p[3])
+	case jProduct:
+		pl.Product = e.Product(p[3])
+		if len(p) == 5 {
+			pl.Kind = p[4]
+		}
+	}
+	return pl, nil
+}
+
+// references lists what a value of the scope can refer to: variables of its environment (self), shared variables and served connections. Names,
+// descriptions and visibility only, never a value.
+func (c *Core) references(scope string) (any, error) {
+	pl, err := c.place(scope)
+	if err != nil {
+		return nil, err
+	}
+	out := []map[string]any{}
+	for _, t := range c.m.RefTargets(c.d, pl) {
+		out = append(out, map[string]any{"system": t.System, jKey: t.Key, jTitle: t.Title, "description": t.Description, "labels": []string{}, "vis": t.Vis})
+	}
+	return map[string]any{"targets": out}, nil
+}
+
+// previewValue resolves a value as typed (not saved): the references with their state, the strictest visibility and why, the text only when plain.
+func (c *Core) previewValue(a map[string]any) (any, error) {
+	pl, err := c.place(str(a, "scope"))
+	if err != nil {
+		return nil, err
+	}
+	pv := c.m.PreviewValue(c.d, pl, str(a, jKey), str(a, "value"), str(a, "visibility"))
+	refs := []map[string]any{}
+	for _, r := range pv.Refs {
+		row := map[string]any{"system": r.System, jKey: r.Key, "title": r.System, "ok": r.OK}
+		if !r.OK {
+			row["why"] = r.Why
+		}
+		refs = append(refs, row)
+	}
+	var text any
+	if len(pv.Errors) == 0 && pv.Vis == vmodel.VisPlain {
+		text = pv.Text
+	}
+	because := pv.Because
+	if because == nil {
+		because = []string{}
+	}
+	sites := []map[string]any{}
+	for _, s := range pv.Sites {
+		row := map[string]any{"site": s.Site, "ref_errors": len(s.Errors), "why": strings.Join(s.Errors, "; ")}
+		if len(s.Errors) == 0 && s.Vis == vmodel.VisPlain {
+			row["preview"] = s.Text
+		}
+		sites = append(sites, row)
+	}
+	return map[string]any{"refs": refs, "ref_errors": len(pv.Errors), "errors": pv.Errors, "preview": text, "eff_vis": pv.Vis, "because": because, "sites": sites}, nil
 }
 
 // Reveal returns one secret value: section "m", name the scope (shared, conn/<uuid>, other/<uuid>, env/<e>/general, env/<e>/site/<s>,
@@ -568,15 +656,15 @@ func (c *Core) scope(name string) (*varList, error) {
 	switch {
 	case p[2] == "general" && len(p) == 3:
 		return &varList{func() []*vmodel.Var { return e.General }, func(l []*vmodel.Var) { e.General = l }}, nil
-	case p[2] == "site" && len(p) == 4:
+	case p[2] == jSite && len(p) == 4:
 		if s := e.Site(p[3]); s != nil {
 			return &varList{func() []*vmodel.Var { return s.Vars }, func(l []*vmodel.Var) { s.Vars = l }}, nil
 		}
-	case p[2] == "product" && len(p) == 4:
+	case p[2] == jProduct && len(p) == 4:
 		if pr := e.Product(p[3]); pr != nil {
 			return &varList{func() []*vmodel.Var { return pr.Vars }, func(l []*vmodel.Var) { pr.Vars = l }}, nil
 		}
-	case p[2] == "product" && len(p) == 5:
+	case p[2] == jProduct && len(p) == 5:
 		if pr := e.Product(p[3]); pr != nil {
 			if _, ok := kinds.SiteKind(p[4]); !ok {
 				return nil, bad("bad_scope")

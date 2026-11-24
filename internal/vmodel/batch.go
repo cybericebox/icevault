@@ -207,7 +207,11 @@ func Batches(m *Vault, d *project.Description, env string, sel Selection) ([]*Ba
 			head = append(head, x)
 		}
 	}
-	return append(head, tail...), nil
+	out := append(head, tail...)
+	if err := m.expandBatches(d, e, out); err != nil {
+		return nil, fmt.Errorf("a reference does not resolve in %s", err)
+	}
+	return out, nil
 }
 
 func names[T any](xs []T, n func(T) string) string {

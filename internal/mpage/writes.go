@@ -551,8 +551,8 @@ func (c *Core) writeProduct(a map[string]any) error {
 			p.Place = ""
 		}
 	}
-	if has(a, "site") {
-		u := str(a, "site")
+	if has(a, jSite) {
+		u := str(a, jSite)
 		p.Site = nil
 		for _, s := range e.Sites {
 			if s.UUID == u && u != "" {
