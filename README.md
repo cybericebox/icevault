@@ -19,7 +19,7 @@ Or download a release: `IceVault-vX.Y.Z-macos.dmg` (the window with the command 
 ## Commands
 
 ```
-icevault init-vault                    a new vault at the path the description names
+icevault init-vault [--generate]        a new vault at the path the description names; --generate makes a six-word passphrase
 icevault project check                 validate the project description
 icevault project used --env E          which files an environment reads (JSON)
 icevault trust [--forget]              trust the description and its required-check script
@@ -40,6 +40,14 @@ icevault help [COMMAND]                every command and flag
 ```
 
 Environment variables: `ICEVAULT_ROOT` (the checkout; otherwise the nearest folder above the working directory with `icevault-project.yaml`), `ICEVAULT_PROJECT` (another description file), `ICEVAULT_VAULT` (the vault file; `--vault PATH` wins), `ICEVAULT_KEYFILE`, `ICEVAULT_NO_VAULT=1`, `ICEVAULT_NO_TOUCHID=1`.
+
+## The master password
+
+A new vault (`init-vault`, or **New vault** in the window) needs a master password of at least 12 characters that a strength estimate ([zxcvbn](https://github.com/trustelem/zxcvbn)) does not find easy to guess: dictionary words (also with digits, case changes and l33t), keyboard walks, repeats, sequences and dates are refused however long the password is, with the reason and a pointer to the generator. A vault that is protected by a key file alone (an empty password and `ICEVAULT_KEYFILE`) stays possible with `init-vault`. The policy applies only when a vault is made: nothing changes in how an existing vault opens.
+
+`icevault init-vault --generate` makes a passphrase of six random words from the [EFF large wordlist](https://www.eff.org/dice) (drawn from the system's random source), shows it once on the terminal and asks for it to be typed back before anything is made. It is never written to a file or a log.
+
+In the window, **New vault** (on the lock screen, beside Open vault) asks for the place (the system save dialog), a password with a live strength meter or **Generate**, and the password again. It can also switch on Touch ID for the new vault and save a **recovery kit**: a small text file (mode 0600) with the vault's name and path, the date and the password, to a place you choose with the save dialog. Keep it away from the vault file (another device, paper, a password manager). It is the only time the window writes the password anywhere, and nothing is written unless you choose a place.
 
 ## Development
 

@@ -60,8 +60,8 @@ func envFlag() flagSpec  { return val("env", "env", "the environment", completeE
 func siteFlag() flagSpec { return val("site", "site", "the site of the environment", completeNone) }
 
 var specs = map[string]cmdSpec{
-	"init-vault": {Summary: "Make the vault (KDBX 4, Argon2d)", Usage: "init-vault [--decryption-time MS]\n  Make the vault (KDBX 4, Argon2d, 64 MiB). ICEVAULT_KEYFILE adds a key file. Asks the new password twice.",
-		Flags: []flagSpec{val("decryption-time", "ms", "key derivation time in ms, 100 to 5000", completeNone)}},
+	"init-vault": {Summary: "Make the vault (KDBX 4, Argon2d)", Usage: "init-vault [--generate] [--decryption-time MS]\n  Make the vault (KDBX 4, Argon2d, 64 MiB). ICEVAULT_KEYFILE adds a key file. Asks the new password twice. The password has at least 12 characters and\n  is refused when it is easy to guess (dictionary words, keyboard walks, repeats, dates), however long; an empty password is allowed only with a key file.\n  --generate: makes a random passphrase of six words instead, shows it once on the terminal and asks for it to be typed back; it is never written anywhere.",
+		Flags: []flagSpec{sw("generate", "a random six-word passphrase, shown once and typed back"), val("decryption-time", "ms", "key derivation time in ms, 100 to 5000", completeNone)}},
 	"ui": {Summary: "Open the settings window (IceVault.app)", Usage: "ui [--env E] [--demo]\n  Start the settings window: the application IceVault.app next to this program (or this program inside it). Everything is typed in the window. --demo: a throwaway in-memory vault, password demo.",
 		Flags: []flagSpec{envFlag(), sw("demo", "a throwaway in-memory vault (password demo)")}},
 	"keyfile": {Summary: "Make a KeePass key file", Usage: "keyfile new PATH\n  Make a KeePass key file (XML v2, mode 0600) for ICEVAULT_KEYFILE. It never overwrites.",

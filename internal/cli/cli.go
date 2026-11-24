@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cybericebox/icevault/internal/password"
 	"github.com/cybericebox/icevault/internal/project"
 	"github.com/cybericebox/icevault/internal/version"
 	"github.com/cybericebox/icevault/internal/vmodel"
@@ -109,6 +111,8 @@ type Env struct {
 	descErr error
 	// StartWindow starts the window program (tests replace it; nil replaces this process with it).
 	StartWindow func(path string, argv, env []string) error
+	// Rand is the source of randomness of generated passphrases (nil: crypto/rand; tests give a fixed one).
+	Rand io.Reader
 }
 
 // DefaultEnv is the real process environment.
@@ -364,8 +368,10 @@ func unlock(path string, e *Env) (*vault.Vault, error) {
 
 func cmdInit(args []string, e *Env) error {
 	var ms int
+	var generate bool
 	if _, err := parse("init-vault", args, e, 0, func(fs *flag.FlagSet) {
 		fs.IntVar(&ms, "decryption-time", 0, "key derivation time in ms, 100 to 5000")
+		fs.BoolVar(&generate, "generate", false, "make a random passphrase of six words, show it once and ask for it again")
 	}); err != nil {
 		return err
 	}
@@ -382,28 +388,109 @@ func cmdInit(args []string, e *Env) error {
 			return fail("the key file %s does not exist (`keyfile new PATH` makes one)", kf)
 		}
 	}
-	pw, err := e.Ask("Enter password to encrypt database: ")
-	if err != nil {
-		return err
+	var pw []byte
+	if generate {
+		pw, err = e.generatedPassword()
+	} else {
+		pw, err = e.askNewPassword(kf)
 	}
 	defer wipeBytes(pw)
-	again, err := e.Ask("Repeat password: ")
 	if err != nil {
 		return err
-	}
-	defer wipeBytes(again)
-	if string(pw) != string(again) {
-		return fail("the passwords do not match; nothing was made")
-	}
-	if len(pw) == 0 && kf == "" {
-		return fail("an empty password needs a key file (ICEVAULT_KEYFILE); nothing was made")
 	}
 	name := "IceVault"
 	if d, derr := e.description(); derr == nil {
 		name = d.Name
 	}
-	c := vault.Credentials{Password: pw, KeyFile: kf}
-	v, err := vault.Create(path, c, vault.CreateOptions{DecryptionTime: time.Duration(ms) * time.Millisecond, Name: name})
+	if err := e.NewVault(path, pw, kf, name, time.Duration(ms)*time.Millisecond); err != nil {
+		return err
+	}
+	fmt.Fprintf(e.Out, "made the vault %s (mode 0600). Next:\n"+
+		"  1. write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault\n"+
+		"  2. icevault import --env <env>      (an existing plaintext tree of the environment into the vault; asks the password once)\n"+
+		"  3. icevault status --env <env>, then purge-plaintext once the vault is verified\n"+
+		"  4. icevault copy --to <dir>         to at least two other places (another disk, a synced folder)\n", path)
+	return nil
+}
+
+// askNewPassword asks the new password twice. Nothing is made before the policy accepted it.
+func (e *Env) askNewPassword(kf string) ([]byte, error) {
+	pw, err := e.Ask("Enter password to encrypt database: ")
+	if err != nil {
+		return nil, err
+	}
+	again, err := e.Ask("Repeat password: ")
+	if err != nil {
+		return pw, err
+	}
+	defer wipeBytes(again)
+	if string(pw) != string(again) {
+		return pw, fail("the passwords do not match; nothing was made")
+	}
+	if len(pw) == 0 && kf == "" {
+		return pw, fail("an empty password needs a key file (ICEVAULT_KEYFILE); nothing was made")
+	}
+	if err := checkNewPassword(pw, kf); err != nil {
+		return pw, err
+	}
+	return pw, nil
+}
+
+const generateTries = 3
+
+// generatedPassword makes the passphrase, shows it once on the terminal (the stream of the prompts, never the output that may be redirected) and asks
+// for it to be typed back, so that the person has really got it.
+func (e *Env) generatedPassword() ([]byte, error) {
+	r := e.Rand
+	if r == nil {
+		r = rand.Reader
+	}
+	p, err := password.PassphraseFrom(r)
+	if err != nil {
+		return nil, fail("%v", err)
+	}
+	pw := []byte(p)
+	fmt.Fprintf(e.Err, "The new master password (shown once, here only):\n\n    %s\n\n"+
+		"Write it down now and keep it away from the vault file. Nothing is saved anywhere for you.\n", p)
+	for i := 0; i < generateTries; i++ {
+		again, err := e.Ask("Type the password again to confirm you have it: ")
+		if err != nil {
+			wipeBytes(pw)
+			return nil, err
+		}
+		same := string(again) == p
+		wipeBytes(again)
+		if same {
+			return pw, nil
+		}
+		fmt.Fprintln(e.Err, "that is not the password shown above")
+	}
+	wipeBytes(pw)
+	return nil, fail("the password was not typed back correctly; nothing was made")
+}
+
+// checkNewPassword is the policy of a new master password. An empty one stays possible only with a key file.
+func checkNewPassword(pw []byte, keyFile string) error {
+	if len(pw) == 0 && keyFile != "" {
+		return nil
+	}
+	if err := password.Check(pw); err != nil {
+		return fail("%v; nothing was made", err)
+	}
+	return nil
+}
+
+// NewVault makes the vault file at path: the policy for the password first, then the file (KDBX 4, mode 0600), its empty vault model and its
+// info file. The window and init-vault both come here. Nothing is written when the policy refuses or the path is taken.
+func (e *Env) NewVault(path string, pw []byte, keyFile, name string, decryption time.Duration) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fail("%s already exists: not overwritten", path)
+	}
+	if err := checkNewPassword(pw, keyFile); err != nil {
+		return err
+	}
+	c := vault.Credentials{Password: append([]byte(nil), pw...), KeyFile: keyFile}
+	v, err := vault.Create(path, c, vault.CreateOptions{DecryptionTime: decryption, Name: name})
 	if err != nil {
 		return fail("the vault could not be made: %v", err)
 	}
@@ -418,15 +505,7 @@ func cmdInit(args []string, e *Env) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
-	if err := writeInfo(path, freshInfo()); err != nil {
-		return err
-	}
-	fmt.Fprintf(e.Out, "made the vault %s (mode 0600). Next:\n"+
-		"  1. write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault\n"+
-		"  2. icevault import --env <env>      (an existing plaintext tree of the environment into the vault; asks the password once)\n"+
-		"  3. icevault status --env <env>, then purge-plaintext once the vault is verified\n"+
-		"  4. icevault copy --to <dir>         to at least two other places (another disk, a synced folder)\n", path)
-	return nil
+	return writeInfo(path, freshInfo())
 }
 
 func wipeBytes(b []byte) {

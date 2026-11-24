@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
-const pw = "pw-throwaway-1"
+const pw = "Tj7#kQ2!vLxR9mZb" // a throwaway that passes the policy of a new master password
 
 type harness struct {
 	t    *testing.T
@@ -26,6 +27,7 @@ type harness struct {
 	root string
 	// asked counts the password prompts: a refusal that needs no vault must leave it at 0
 	asked int
+	rand  io.Reader // the source of generated passphrases (nil: crypto/rand)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -41,7 +43,7 @@ func (h *harness) run(args ...string) int {
 	h.out.Reset()
 	h.errb.Reset()
 	asks := append([]string(nil), h.pw...)
-	e := &Env{Getenv: func(k string) string { return h.env[k] }, Out: &h.out, Err: &h.errb, Now: time.Now, Exec: h.exec, TouchID: h.tid, Root: h.root,
+	e := &Env{Getenv: func(k string) string { return h.env[k] }, Out: &h.out, Err: &h.errb, Now: time.Now, Exec: h.exec, TouchID: h.tid, Root: h.root, Rand: h.rand,
 		Ask: func(string) ([]byte, error) {
 			h.asked++
 			if len(asks) == 0 {
