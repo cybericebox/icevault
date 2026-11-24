@@ -354,6 +354,9 @@ func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	if len(h.vault.opened) != 0 {
 		t.Fatalf("a vault never unlocked was recorded as opened: %v", h.vault.opened)
 	}
+	if len(h.vault.added) != 1 || h.vault.added[0] != p {
+		t.Fatalf("the new vault is not in the recent list at once: %v", h.vault.added)
+	}
 	cur, _ := dataOf(h.app.ListVaults())["current"].(VaultInfo)
 	if cur.Path != p {
 		t.Fatalf("the new vault is not the chosen one: %+v", cur)
@@ -394,7 +397,7 @@ func TestCreateVaultFailureLeaksNothing(t *testing.T) {
 	if r.Status != 500 || codeOf(r) != "new_failed" || strings.Contains(toJSON(r), "SECRET") {
 		t.Fatalf("%+v", r)
 	}
-	if len(h.vault.opened) != 0 {
+	if len(h.vault.opened) != 0 || len(h.vault.added) != 0 {
 		t.Fatal("a vault that was not made was listed")
 	}
 	if r := h.app.SaveRecoveryKit("t", "{password}"); codeOf(r) != "kit_none" {

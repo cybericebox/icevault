@@ -204,3 +204,18 @@ func TestRootOf(t *testing.T) {
 		t.Fatal("the info file")
 	}
 }
+
+func TestAddRecentPutsANewVaultFirstWithoutATime(t *testing.T) {
+	list := []RecentVault{{Path: "/v/a.kdbx", LastOpened: "2026-11-01T10:12:00Z"}}
+	list = AddRecent(list, RecentVault{Path: "/v/new.kdbx", LastOpened: "ignored"})
+	if len(list) != 2 || list[0].Path != "/v/new.kdbx" || list[0].LastOpened != "" || list[0].Label != "new.kdbx" {
+		t.Fatalf("%+v", list)
+	}
+	if again := AddRecent(list, RecentVault{Path: "/v/a.kdbx"}); len(again) != 2 || again[1].LastOpened == "" {
+		t.Fatalf("a listed vault changed: %+v", again)
+	}
+	list = TouchRecent(list, RecentVault{Path: "/v/new.kdbx"}, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
+	if list[0].LastOpened != "2026-11-02T00:00:00Z" {
+		t.Fatalf("the first unlock sets the time: %+v", list[0])
+	}
+}

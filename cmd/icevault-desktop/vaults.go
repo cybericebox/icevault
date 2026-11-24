@@ -196,6 +196,13 @@ func (f *fileVaults) save() error {
 	return nil
 }
 
+func (f *fileVaults) Added(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.list = cli.AddRecent(f.list, cli.RecentVault{Path: path, Root: f.roots[path]})
+	return f.save()
+}
+
 func (f *fileVaults) Opened(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

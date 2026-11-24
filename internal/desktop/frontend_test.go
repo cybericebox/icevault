@@ -199,3 +199,25 @@ func TestModelScreenLayoutWiring(t *testing.T) {
 		t.Error("a name cell of the model tables is a flex box again: its row grows unevenly")
 	}
 }
+
+// The model screen's dialogs: a secret value is typed masked (and follows the visibility chosen in the dialog), a key file is a masked multi-line
+// field that can be read from a file, a bad variable name is an error beside its field, an environment can be created from the view mode, and a
+// recovery kit that was not saved is asked about before the step is left.
+func TestModelDialogsHideSecretsAndGuardTheKit(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"maskIf: fresh ?", `classList.add("masked")`, "fromFile: multi", "textarea.masked {", `bad_key: "key"`, `check: (v) => (v.trim() && !/^[A-Za-z_]`,
+		"function leaveKit(", `kit.dataset.saved = "1"`, "leaveKit(() => kitEl, finish)", `if (!editing() && !(await setMode("edit"))) return; menvDialog(null);`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if ms := regexp.MustCompile(`(?s)function renderMSide\(\) \{(.*?)\n\}\n`).FindStringSubmatch(page); ms == nil || strings.Contains(ms[1], `if (editing()) { const a = el("button", "side-add")`) {
+		t.Error("the new environment button is back to edit mode only")
+	}
+}

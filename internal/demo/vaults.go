@@ -82,6 +82,9 @@ func (v *Vaults) Prepare(path string) (desktop.Target, error) {
 
 func (v *Vaults) SetRoot(string, string) error { return nil }
 
+// Added: the demo makes no vaults.
+func (v *Vaults) Added(string) error { return nil }
+
 func (v *Vaults) Opened(path string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

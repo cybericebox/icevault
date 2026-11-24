@@ -341,7 +341,8 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .fld { margin-top:12px; } .fld > label { display:block; margin:0 0 4px; font-size:13px; font-weight:500; color:var(--ib-dim); }
 .fst { min-height:0; margin-top:4px; } .fst:empty { display:none; }
 .valbox { display:flex; align-items:center; gap:8px; min-height:36px; }
-.valbox .input { flex:1; }
+.valbox .input { flex:1; } .valbox.top { align-items:flex-start; } .valbox textarea.input { height:auto; min-height:96px; padding:8px 10px; font:400 13px/1.4 var(--ib-mono); }
+textarea.masked { -webkit-text-security:disc; text-security:disc; }
 .mono-in { font-family:var(--ib-mono); font-size:13px; }
 .input[readonly] { background:var(--ib-paper); }
 .chips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-height:36px; padding:3px 8px; border:1px solid var(--ib-control); border-radius:var(--ib-r); background:var(--ib-surface); cursor:text; }
@@ -479,6 +480,9 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .mtwrap { border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); overflow:clip; }
 .mtwrap table.rows th.h { border-top:0; } .mtwrap table.rows tr:last-child td { border-bottom:0; }
 .mtable td, .mtable th { vertical-align:middle; }
+.mtable .kname { white-space:normal; overflow-wrap:anywhere; flex:0 1 auto; min-width:0; } .mtable .ktitle { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }   /* narrow: the key is cut, the name stays */
+.mtable .islot { display:inline-block; width:32px; height:1px; }
+.mblock > .empty.block, main > .empty.block { min-height:min(50vh, 360px); justify-content:center; padding:24px 0; }
 .mtable td.mk { padding-top:6px; padding-bottom:6px; } .mtable td.mk .kcell { min-height:36px; }
 .mblock-h .grow, .mcard-h .grow, .msub-h .grow { flex:1; }
 .mblock.folded > :not(.mblock-h), .mcard.folded > :not(.mcard-h), .msub.folded > :not(.msub-h) { display:none; }
@@ -949,7 +953,7 @@ function confirmBox(title, note, okText, o) {
   cancel.focus();
 }
 // small form dialog: fields -> values. Errors stand beside their field (aria-invalid, aria-describedby); Enter in a single-line field = the primary action
-const FIELD_OF = { one_line: "title", section_name: "name", section_exists: "name", item_name: "name", item_taken: "name", group_key: "group", group_exists: "group", key_form: "key", key_exists: "key", type_name: "confirm",
+const FIELD_OF = { one_line: "title", section_name: "name", section_exists: "name", item_name: "name", item_taken: "name", group_key: "group", group_exists: "group", key_form: "key", key_exists: "key", type_name: "confirm", bad_key: "key",
   path_form: "rel", file_exists: "rel", file_size: "file", vis_form: "visibility", description_long: "description", description_reserved: "description", no_group_first: "group", bad_value: "value" };
 // the type a description declares for a variable: the rule a value breaks ("" = fits). The same rules as internal/project/types.go; a pattern is only checked by the program.
 // A value that holds a reference (${{ ... }}) is not checked as typed, only after it resolves.
@@ -984,6 +988,8 @@ function dialog(title, fields, submitText, onSubmit, note) {
   panel.open(title); const box = panel.box;
   if (note) box.append(el("div", "note", note));
   const inputs = {}, errs = {}; let genSeal = null, changed = false;
+  // a value field that follows the visibility chosen in the same dialog (maskIf): masked unless the value is plain, and not flipped back while the owner looks at it
+  const syncMask = () => fields.forEach((f) => { const i = inputs[f.name]; if (f.maskIf && i && i.type !== undefined && i.dataset && i.dataset.shown !== "1") i.type = f.maskIf(inputs) ? "password" : "text"; });
   panel.isDirty = () => changed; box.oninput = () => { changed = true; };
   const clearErr = (name) => { const fe = errs[name]; if (!fe) return; fe.textContent = ""; const c = inputs[name]; const node = c && (c.trig || c); if (node && node.removeAttribute) node.removeAttribute("aria-invalid"); };
   const fieldErr = (name, text) => { const fe = errs[name]; fe.textContent = ""; fe.append(icon("alert"), document.createTextNode(text)); const c = inputs[name]; const node = c && (c.trig || c); if (node && node.setAttribute) node.setAttribute("aria-invalid", "true"); };
@@ -1002,7 +1008,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
       wrap.append(g); inputs.__gen = g; box.append(wrap);
       if (f.ref) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => (inputs.visibility && inputs.visibility.value) || inputs.__autoVis || "secret", out); }
     } else if (f.type === "select") {
-      inp = selectBox({ id, value: f.value !== undefined ? f.value : f.options[0][0], options: f.options, label: f.label, placeholder: f.placeholder, onChange: (v) => { changed = true; clearErr(f.name); if (f.onChange) f.onChange(v, inputs); } });
+      inp = selectBox({ id, value: f.value !== undefined ? f.value : f.options[0][0], options: f.options, label: f.label, placeholder: f.placeholder, onChange: (v) => { changed = true; clearErr(f.name); if (f.onChange) f.onChange(v, inputs); syncMask(); } });
       box.append(inp.el); inputs[f.name] = inp; focusNode = inp.trig;
     } else if (f.type === "switch") {
       inp = switchBox(id, f.value || "", () => { changed = true; clearErr(f.name); }); box.append(inp); inputs[f.name] = inp; focusNode = inp.trig;
@@ -1012,10 +1018,23 @@ function dialog(title, fields, submitText, onSubmit, note) {
       if (f.type === "textarea") { inp = el("textarea", "input"); inp.value = f.value || ""; }
       else { inp = el("input", "input lg"); inp.type = f.type || "text"; if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
       inp.id = id; inputs[f.name] = inp; focusNode = inp;
-      if (f.ref && f.ref.scope) {     // a value that may refer to other values: Insert reference, the ${{ trigger, the live resolved preview
-        const wrap = el("div", "valbox"); wrap.append(inp); refControls(inp, wrap, f.ref.scope); box.append(wrap);
-        const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw);
-        liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) }));
+      const area = inp.tagName === "TEXTAREA";
+      if (area && f.mask) inp.classList.add("masked");   // a key file or another multi-line secret: dots until the eye is pressed
+      const maskable = inp.type === "password" || !!f.maskIf || (area && !!f.mask);   // a secret value is typed masked, with a toggle to look at it
+      const hasRef = !!(f.ref && f.ref.scope);
+      if (hasRef || maskable || f.fromFile) {
+        const wrap = el("div", "valbox" + (area ? " top" : "")); wrap.append(inp);
+        if (maskable) wrap.append(ibtn("eye", t("val.reveal_field"), () => {
+          if (area) inp.classList.toggle("masked");
+          else { const hide = inp.type === "text"; inp.dataset.shown = hide ? "" : "1"; inp.type = hide ? "password" : "text"; }
+        }));
+        if (f.fromFile) {   // read a key file in the page: its text goes into the field, nothing is kept elsewhere
+          const pick = el("input"); pick.type = "file"; pick.hidden = true; pick.addEventListener("change", async () => { const file = pick.files && pick.files[0]; if (!file) return; inp.value = await file.text(); pick.value = ""; inp.dispatchEvent(new Event("input", { bubbles: true })); });
+          wrap.append(pick, btn(t("val.from_file"), "folder-open", () => pick.click(), "ghost"));
+        }
+        if (hasRef) refControls(inp, wrap, f.ref.scope);
+        box.append(wrap);
+        if (hasRef) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) })); }
       } else box.append(inp);
       inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value); if (m) fieldErr(f.name, m); } if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
@@ -1026,6 +1045,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
     if (focusNode && focusNode.setAttribute) focusNode.setAttribute("aria-describedby", [hp ? hp.id : "", f.warn ? id + "-w" : "", fe.id].filter(Boolean).join(" "));
     if (f.required && focusNode && focusNode.setAttribute) focusNode.setAttribute("aria-required", "true");
   });
+  syncMask();
   const actions = el("div", "actions");
   // a type-the-name confirmation is a destructive action (archive an item): the solid red button, like every other archive confirmation
   const ok = btn(submitText, "", null, (fields.some((f) => f.name === "confirm") ? "danger-solid" : "primary") + " lg"), cancel = btn(t("btn.cancel"), "", () => panel.close(), "lg");
@@ -1042,7 +1062,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
     }
     const done = busy(ok, busyFor(submitText)); lastCode = ""; const r = await onSubmit(vals);
     if (r === true) { panel.close(); return; }
-    done(); const text = typeof r === "string" ? r : t("err.refused"); const fname = FIELD_OF[lastCode];
+    done(); const text = typeof r === "string" ? r : t("err.refused"); let fname = FIELD_OF[lastCode]; if (fname && !errs[fname] && fname === "key" && errs.field) fname = "field";
     if (fname && errs[fname]) { fieldErr(fname, text); const c = inputs[fname]; (c.trig || c).focus(); } else err.append(icon("alert"), document.createTextNode(text));
   });
   const first = Object.values(inputs).find((x) => x && x.nodeType !== 8 && !(x.classList && x.classList.contains("valbox"))); const firstNode = first && (first.trig || first); if (firstNode && firstNode.focus) firstNode.focus(); else cancel.focus();
@@ -1362,19 +1382,23 @@ function kitSection() {
     const r = await api("/api/kit-save", { title: t("nv.kit_dialog"), template: t("nv.kit_text", { name: "{name}", path: "{path}", created: "{created}", password: "{password}" }) }); idle();
     if (r.status !== 200) { out.append(icon("alert"), document.createTextNode(srv(r.data))); return; }
     if (r.data.cancelled) return;
-    out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true;
+    out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true; kit.dataset.saved = "1";
     if (r.data.same_folder) note.textContent = t("nv.kit_same_folder");
   });
   return kit;
 }
+// leaving the step without a saved recovery kit asks first: the kit is the only way back in when the password is lost
+function leaveKit(getKit, finish) {
+  return () => { const k = getKit(); if (!k || k.dataset.saved === "1") return finish(); confirmBox(t("nv.kit_unsaved_title"), t("nv.kit_unsaved_note"), t("nv.kit_leave"), { danger: true, cancelText: t("nv.kit_back"), onOk: async () => { await finish(); return true; } }); };
+}
 // the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
 function newVaultDone(d) {
-  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
-  panel.open(t("nv.done_title"), finish); const box = panel.box;
+  let kitEl = null; const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); }; const leave = leaveKit(() => kitEl, finish);
+  panel.open(t("nv.done_title"), leave); const box = panel.box;
   box.append(el("div", "note", t("nv.done_note", { file: d.file })));
   if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
-  box.append(kitSection());
-  const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
+  kitEl = kitSection(); box.append(kitEl);
+  const actions = el("div", "actions"), done = btn(t("nv.done"), "", leave, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
 // ---------------------------------------------------------------- change the master password (unlocked vault): current, new with the live meter, typed again, Touch ID, copies, recovery kit
 // The passwords go to the program in one call and are cleared from the page at once; the recovery kit is made there from the new password.
@@ -1469,8 +1493,8 @@ async function openChangePassword() {
 }
 // the password is changed: what happened to Touch ID and the copies, and the recovery kit (the new password, to a place the person chooses)
 function changePasswordDone(d) {
-  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); };
-  panel.open(t("cp.done_title"), finish); const box = panel.box;
+  let kitEl = null; const finish = async () => { await api("/api/kit-discard", {}); panel.close(); }; const leave = leaveKit(() => kitEl, finish);
+  panel.open(t("cp.done_title"), leave); const box = panel.box;
   box.append(el("div", "note", t("cp.done_note", { file: d.file })));
   if (d.touchid_remove_failed) box.append(el("p", "note err", t("cp.touch_remove_failed")));
   if (d.touchid === "on") box.append(el("p", "note", t("cp.touch_on")));
@@ -1480,8 +1504,8 @@ function changePasswordDone(d) {
     const sec = el("section", "nvkit"); sec.append(el("h3", "", t("cp.stale_title")), el("div", "note", t("cp.stale_note")));
     const list = el("ul", "help"); d.stale.forEach((f) => { const li = el("li"); li.append(midPath(f)); list.append(li); }); sec.append(list); box.append(sec);
   }
-  box.append(kitSection());
-  const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
+  kitEl = kitSection(); box.append(kitEl);
+  const actions = el("div", "actions"), done = btn(t("nv.done"), "", leave, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
 $("pwbtn").addEventListener("click", () => openChangePassword());
 // the icevault command: the program inside the application, linked into a folder of the PATH (the window asks nothing in a terminal and runs no installer)
@@ -2662,7 +2686,8 @@ function renderMSide() {
   item("other", "", "key", t("m.side.other"));
   const se = el("div", "side-sec"); se.append(el("span", "t", t("m.side.envs"))); box.append(se);
   (nav.envs || []).forEach((e) => item("env", e.name, "layers", e.title || e.name, e.missing, tn("m.missing_n", e.missing)));
-  if (editing()) { const a = el("button", "side-add"); a.type = "button"; a.append(icon("plus"), el("span", "t", t("m.side.new_env"))); a.addEventListener("click", () => menvDialog(null)); box.append(a); }
+  { const a = el("button", "side-add"); a.type = "button"; a.append(icon("plus"), el("span", "t", t("m.side.new_env")));   // in view mode too: one click switches to edit mode and opens the dialog
+    a.addEventListener("click", async () => { if (!editing() && !(await setMode("edit"))) return; menvDialog(null); }); box.append(a); }
   const stops = [...box.querySelectorAll("button")]; const curIdx = Math.max(0, stops.findIndex((b) => b.getAttribute("aria-current") === "true"));
   stops.forEach((b, i) => { b.tabIndex = i === curIdx ? 0 : -1; });
   box.onkeydown = (e) => { const i = stops.indexOf(document.activeElement); if (i < 0) return; const go = e.key === "ArrowDown" ? stops[i + 1] : e.key === "ArrowUp" ? stops[i - 1] : null; if (go) { e.preventDefault(); stops.forEach((b) => { b.tabIndex = -1; }); go.tabIndex = 0; go.focus(); } };
@@ -2698,6 +2723,7 @@ function mvars(parent, rows, scope, opts) {
   const shown = rows.filter((r) => (munused || r.active !== false) && (mshowauto || !r.system)); const hidden = rows.filter((r) => r.active === false).length; const auto = rows.filter((r) => r.system).length;
   if (!rows.length) { parent.append(mempty(opts.empty || t("m.empty.vars"))); return; }
   if (!shown.length && auto && !mshowauto) { parent.append(el("p", "dim mnote", t("m.empty.auto", { n: auto }))); return; }
+  const anyEye = shown.some((r) => r.state !== "empty" && r.visibility === "secret" && !r.imported);
   const tb = el("table", "rows mtable"); const cg = el("colgroup"); ["34%", "36%", "18%", "136px"].forEach((w) => { const c = el("col"); c.style.width = w; cg.append(c); }); tb.append(cg);
   const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
   const body = el("tbody");
@@ -2720,6 +2746,7 @@ function mvars(parent, rows, scope, opts) {
     kc.append(tags);
     const ac = el("td", "acts");
     if (r.state !== "empty" && r.visibility === "secret" && !r.imported) ac.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k)));
+    else if (anyEye) ac.append(el("span", "islot"));   // the icons stay in their columns whether a row has an eye or not
     if (editing() && !r.system && !(r.imported && !r.overridden && opts.general)) ac.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mvarDialog(scope, r)));
     if (editing() && !r.missing && !(r.imported && !r.overridden) && r.system) ac.append(el("span", "islot")); // keeps the delete button in its column
     if (editing() && !r.missing && !(r.imported && !r.overridden)) ac.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
@@ -2739,10 +2766,10 @@ async function mreveal(scope, key, k) {
 
 function mvarDialog(scope, r) {
   const fresh = !r; const fields = [];
-  if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help") });
+  if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
   const secret = r ? r.visibility !== "plain" : false;
   const refCtx = { scope, key: (inp) => (fresh ? String((inp.key && inp.key.value) || "").trim() : r.key), vis: (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility) };
-  const f = { name: "value", ref: refCtx, label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
+  const f = { name: "value", ref: refCtx, maskIf: fresh ? (inp) => !(inp.visibility && inp.visibility.value === "plain") : null, label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
   const ty = r && r.type;
   const word = (rule) => t("m.type." + rule, { min: r && r.min != null ? r.min : "-∞", max: r && r.max != null ? r.max : "∞" });
   const stored = r && r.visibility === "plain" ? (r.value || "") : "";
@@ -2775,7 +2802,7 @@ function renderMMain() {
 
 function mShared(main) {
   mhead(main, "share", t("m.side.shared"), t("m.shared.note"));
-  const sec = mblock(main, t("m.side.shared"), "share", [editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("shared", null)) : null]);
+  const sec = mblock(main, t("m.shared.vars"), "share", [editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("shared", null)) : null]);
   const rows = (nav.shared || []).map((r) => Object.assign({}, r));
   if (!rows.length) { sec.append(mempty(t("m.empty.shared"))); return; }
   mvars(sec, rows, "shared");
@@ -2831,9 +2858,10 @@ function mconnDialog(c) {
 }
 
 function mfieldDialog(c, r) {
-  const fields = []; if (!r) fields.push({ name: "field", label: t("m.f.field"), required: true, help: t("m.field.help") });
+  const fields = []; if (!r) fields.push({ name: "field", label: t("m.f.field"), required: true, help: t("m.field.help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
   const secret = r ? r.visibility !== "plain" : false;
-  fields.push({ name: "value", label: t("m.var.value"), type: secret ? "password" : "text", value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
+  const multi = !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key);   // a key file: several lines, masked, can be read from a file
+  fields.push({ name: "value", label: t("m.var.value"), type: multi ? "textarea" : secret ? "password" : "text", mask: multi, fromFile: multi, maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
   if (!r) fields.push({ name: "secret", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   dialog(r ? t("m.var.edit", { name: mlabel(r) }) : t("m.field.new_title", { name: c.name }), fields, t("btn.save"), (v) => {
     const body = { uuid: c.uuid, field: r ? r.key : v.field.trim(), secret: r ? secret : v.secret === "secret" };
@@ -2917,6 +2945,7 @@ function mimportDialog(e) {
 function mselectRow(parent, label, box) { const row = el("div", "mfield"); row.append(el("span", "lbl", label), box); parent.append(row); }
 
 function msite(parent, e, x) {
+  x = Object.assign({}, x, { users: x.users.map((u) => { const p = e.products.find((q) => q.name === u); return p ? prodTitle(p) : u; }) });   // product titles, not their keys
   const card = el("div", "mcard"); const h = el("div", "mcard-h"); h.append(icon("server"), el("b", "", x.name), el("span", "tag", skTitle(x.kind)));
   mfold(card, h, mscope() + "|site|" + x.name);
   h.append(el("span", "dim", x.users.length ? t("m.site.used_by", { list: x.users.join(", ") }) : t("m.site.unused"))); h.append(el("span", "grow"));
@@ -2936,14 +2965,14 @@ function msite(parent, e, x) {
   }
   card.append(ctl);
   const vs = el("div", "msub"); const vh = el("div", "msub-h"); vh.append(el("span", "", t("m.site.settings")), el("span", "grow")); vs.append(vh); mfold(vs, vh, mscope() + "|site|" + x.name + "|vars");
-  if (editing()) vh.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/site/" + x.name, null)));
+  if (editing()) vh.append(btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/site/" + x.name, null)));
   mvars(vs, x.vars, "env/" + e.name + "/site/" + x.name); card.append(vs); parent.append(card);
 }
 
 function msiteDialog(e, x) {
   if (x) { dialog(t("m.site.rename", { name: x.name }), [{ name: "name", label: t("m.f.name"), value: x.name, required: true, help: t("m.thing.name_help") }], t("btn.save"), (v) => mwrite("m-site", { env: e.name, action: "update", name: x.name, new_name: v.name.trim() })); return; }
   const kinds = (nav.site_kinds || []).filter((k) => k.supported).map((k) => [k.id, skTitle(k.id)]);
-  dialog(t("m.site.new_title", { env: e.name }), [{ name: "name", label: t("m.f.name"), value: e.sites.length ? "" : "main", required: true, help: t("m.thing.name_help") }, { name: "kind", label: t("m.site.kind"), type: "select", value: kinds.length ? kinds[0][0] : "", options: kinds }],
+  dialog(t("m.site.new_title", { env: e.title || e.name }), [{ name: "name", label: t("m.f.name"), value: e.sites.length ? "" : "main", required: true, help: t("m.thing.name_help") }, { name: "kind", label: t("m.site.kind"), type: "select", value: kinds.length ? kinds[0][0] : "", options: kinds }],
     t("btn.create"), (v) => mwrite("m-site", { env: e.name, action: "create", name: v.name.trim(), kind: v.kind }));
 }
 
@@ -2978,7 +3007,7 @@ function mproduct(parent, e, p) {
     m.append(d); card.append(m);
   }
   const vs = el("div", "msub"); const vh = el("div", "msub-h"); vh.append(el("span", "", t("m.product.vars")), el("span", "grow")); vs.append(vh); mfold(vs, vh, mscope() + "|product|" + p.name + "|vars");
-  if (editing()) vh.append(ibtn("plus", t("m.btn.add_var"), () => mvarDialog("env/" + e.name + "/product/" + p.name, null)));
+  if (editing()) vh.append(btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/product/" + p.name, null)));
   mvars(vs, p.vars, "env/" + e.name + "/product/" + p.name); card.append(vs);
   if (p.sub) { const ss = el("div", "msub"); const sh = el("div", "msub-h"); sh.append(el("span", "", t("m.product.on_kind", { kind: skTitle(p.sub.kind) })), el("span", "grow")); ss.append(sh); mfold(ss, sh, mscope() + "|product|" + p.name + "|sub"); mvars(ss, p.sub.vars, "env/" + e.name + "/product/" + p.name + "/" + p.sub.kind); card.append(ss); }
   parent.append(card);
@@ -2998,7 +3027,7 @@ function mproductDialog(e, p) {
   if (p) { dialog(t("m.product.rename", { name: p.name }), [{ name: "name", label: t("m.f.name"), value: p.name, required: true, help: t("m.thing.name_help") }], t("btn.save"), (v) => mwrite("m-product", { env: e.name, action: "update", name: p.name, new_name: v.name.trim() })); return; }
   const known = (nav.products || []).filter((x) => !e.products.some((y) => y.name === x.name)).map((x) => [x.name, mtext(x.title) || x.name]);
   const fields = known.length ? [{ name: "name", label: t("m.f.product"), type: "select", value: known[0][0], options: known }] : [{ name: "name", label: t("m.f.name"), required: true, help: t("m.thing.name_help") }];
-  dialog(t("m.product.new_title", { env: e.name }), fields, t("btn.create"), (v) => mwrite("m-product", { env: e.name, action: "create", name: String(v.name).trim() }));
+  dialog(t("m.product.new_title", { env: e.title || e.name }), fields, t("btn.create"), (v) => mwrite("m-product", { env: e.name, action: "create", name: String(v.name).trim() }));
 }
 
 // ---------------------------------------------------------------- the move of a vault of the layout before the model (offered on its pages)

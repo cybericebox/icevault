@@ -146,6 +146,19 @@ func TouchRecent(list []RecentVault, v RecentVault, now time.Time) []RecentVault
 	return cleanRecent(out)
 }
 
+// AddRecent puts a vault that was never unlocked (a new one) first in the list, without a time: the lock screen says it was not opened yet. A vault
+// the list has already keeps its entry.
+func AddRecent(list []RecentVault, v RecentVault) []RecentVault {
+	v.Path = filepath.Clean(v.Path)
+	v.LastOpened = ""
+	for _, o := range list {
+		if filepath.Clean(o.Path) == v.Path {
+			return list
+		}
+	}
+	return cleanRecent(append([]RecentVault{v}, list...))
+}
+
 // ForgetRecent drops the entry of path from the list. The file itself is never touched.
 func ForgetRecent(list []RecentVault, path string) []RecentVault {
 	path = filepath.Clean(path)

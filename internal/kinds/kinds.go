@@ -46,7 +46,7 @@ const (
 
 var connections = []Connection{
 	{ID: AWS, Title: "AWS", Fields: []Field{{"access_key_id", "Access key id", true}, {"secret_access_key", "Secret access key", true}, {"region", "Region", false}, {"account_id", "Account id", false}}},
-	{ID: Google, Title: "Google Cloud", Fields: []Field{{"project", "Project id", false}, {"credentials", "Service account key file", false}}},
+	{ID: Google, Title: "Google Cloud", Fields: []Field{{"project", "Project id", false}, {"credentials", "Service account key file", true}}},
 	{ID: Cloudflare, Title: "Cloudflare", Fields: []Field{{"api_token", "API token", true}, {"account_id", "Account id", false}, {"zone_id", "Zone id", false}}},
 	{ID: DockerHub, Title: "Docker Hub", Fields: []Field{{"username", "User name", false}, {"token", "Access token", true}}},
 	{ID: HCP, Title: "HCP Terraform", Fields: []Field{{"organization", "Organization", false}, {"token", "API token", true}}},

@@ -43,6 +43,8 @@ type Vaults interface {
 	SetNoProject(path string) error
 	// SetRoot names the checkout of a vault (the folder dialog); vault_bad_root when the folder has no project description.
 	SetRoot(path, root string) error
+	// Added puts a vault that was just made in the list at once, marked as not opened yet (LastOpened ""); Opened sets the time at its first unlock.
+	Added(path string) error
 	// Opened records that the file was unlocked: it goes first in the list.
 	Opened(path string) error
 	// Forget drops the file from the list. The file is never touched.
