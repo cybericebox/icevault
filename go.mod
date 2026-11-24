@@ -5,14 +5,17 @@ go 1.27.4
 require (
 	github.com/tobischo/argon2 v0.2.0
 	github.com/tobischo/gokeepasslib/v3 v3.7.1
+	github.com/trustelem/zxcvbn v1.0.1
 	github.com/wailsapp/wails/v2 v2.17.1
 	golang.org/x/sys v0.50.0
 	golang.org/x/term v0.48.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
+	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.16 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
@@ -31,6 +34,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/samber/lo v1.49.1 // indirect
+	github.com/test-go/testify v1.1.4 // indirect
 	github.com/tkrajina/go-reflector v0.5.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
@@ -38,5 +42,4 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

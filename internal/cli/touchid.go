@@ -226,6 +226,17 @@ func (e *Env) touchIDEnable(vaultFile string) error {
 		return fail("%v", err)
 	}
 	v.Close()
+	if err := e.touchIDStore(vaultFile, pw); err != nil {
+		return err
+	}
+	key, blob := e.touchIDFiles(vaultFile)
+	fmt.Fprintf(e.Out, "Touch ID unlock is on: %s (the key is bound to this Mac's chip) and %s. Change the vault password: run `touchid enable` again. Off: `touchid disable`\n", key, blob)
+	return nil
+}
+
+// touchIDStore makes the Secure Enclave key and keeps the password encrypted to it (the password goes to age on stdin, never to a file). The caller has
+// checked that the password opens the vault, and that the tools are there.
+func (e *Env) touchIDStore(vaultFile string, pw []byte) error {
 	if err := e.touchIDMakeDir(); err != nil {
 		return fail("the Touch ID folder cannot be made: %v", err)
 	}
@@ -243,7 +254,6 @@ func (e *Env) touchIDEnable(vaultFile string) error {
 		return fail("age could not encrypt the password to the Secure Enclave key")
 	}
 	_ = os.Chmod(blob, 0o600)
-	fmt.Fprintf(e.Out, "Touch ID unlock is on: %s (the key is bound to this Mac's chip) and %s. Change the vault password: run `touchid enable` again. Off: `touchid disable`\n", key, blob)
 	return nil
 }
 

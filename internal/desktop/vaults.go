@@ -1,6 +1,10 @@
 package desktop
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/cybericebox/icevault/internal/password"
+)
 
 // The choice of the vault. The window opens any vault of our kind: the lock screen lists the recent ones (Vaults), opens another through the system
 // file dialog, and takes a file macOS hands over (Open With, a double click in Finder). Choosing a vault locks the one that is open first; unlocking a
@@ -114,7 +118,7 @@ func (a *App) OpenVault(title string) Response {
 		return fail(500, "pick_failed")
 	}
 	if p == "" {
-		return ok(map[string]any{"cancelled": true})
+		return ok(cancelledAnswer())
 	}
 	return a.selectVault(p)
 }
@@ -138,7 +142,7 @@ func (a *App) ChooseRoot(title string) Response {
 		return fail(500, "pick_failed")
 	}
 	if dir == "" {
-		return ok(map[string]any{"cancelled": true})
+		return ok(cancelledAnswer())
 	}
 	if err := a.o.Vaults.SetRoot(path, dir); err != nil {
 		return answer(err)
@@ -161,7 +165,7 @@ func (a *App) ChooseProject(title string) Response {
 		return fail(500, "pick_failed")
 	}
 	if p == "" {
-		return ok(map[string]any{"cancelled": true})
+		return ok(cancelledAnswer())
 	}
 	data, err := c.Write("m-project", map[string]any{"path": p})
 	if err != nil {
@@ -187,7 +191,7 @@ func (a *App) ForgetVault(path string) Response {
 // ListVaults answers the recent vaults (most recent first), the chosen one and what stops it from being unlocked.
 func (a *App) ListVaults() Response {
 	if a.o.Vaults == nil {
-		return ok(map[string]any{"enabled": false, "vaults": []VaultInfo{}, "current": nil, "problem": nil, "can_pick": false})
+		return ok(map[string]any{"enabled": false, "vaults": []VaultInfo{}, "current": nil, "problem": nil, "can_pick": false, "can_create": false})
 	}
 	list := a.o.Vaults.List()
 	if list == nil {
@@ -204,7 +208,7 @@ func (a *App) ListVaults() Response {
 	if problem != nil {
 		pr = answer(problem).Data
 	}
-	return ok(map[string]any{"enabled": true, "vaults": list, "current": cur, "problem": pr, "can_pick": a.o.Pick != nil})
+	return ok(map[string]any{"enabled": true, "vaults": list, "current": cur, "problem": pr, "can_pick": a.o.Pick != nil, "can_create": a.canCreate(), "min_password": password.MinLength})
 }
 
 // opened records a successful unlock in the list; a list that cannot be saved does not stop the window.

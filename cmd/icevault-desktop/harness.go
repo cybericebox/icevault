@@ -237,11 +237,34 @@ func main() {
 		p := filepath.Join(dir, "icevault-project.yaml")
 		return p, os.WriteFile(p, example.Description(), 0o600)
 	}
+	// the stand-in of the save dialog (a new vault, its recovery kit): a fresh name in one temp folder of the harness
+	var saveDir string
+	pickSave := func(_, name string) (string, error) {
+		if saveDir == "" {
+			d, err := os.MkdirTemp("", "icevault-harness-save-")
+			if err != nil {
+				return "", err
+			}
+			saveDir = d
+			prev := cleanup
+			cleanup = func() { prev(); _ = os.RemoveAll(d) }
+		}
+		base, ext := strings.TrimSuffix(name, filepath.Ext(name)), filepath.Ext(name)
+		for i := 0; ; i++ {
+			p := filepath.Join(saveDir, base+ext)
+			if i > 0 {
+				p = filepath.Join(saveDir, fmt.Sprintf("%s-%d%s", base, i, ext))
+			}
+			if _, err := os.Lstat(p); err != nil {
+				return p, nil
+			}
+		}
+	}
 	var upd desktop.Updater
 	if *updMode != "" {
 		upd = newHarnessUpdater(*updMode)
 	}
-	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Clipboard: &memClipboard{}, Idle: *idle, PickDescription: pickDescription,
+	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Clipboard: &memClipboard{}, Idle: *idle, PickDescription: pickDescription, PickSave: pickSave, Maker: makerFor(vaults),
 		Update: upd, OpenURL: func(url string) { fmt.Fprintln(os.Stderr, "ui-harness: open in the browser:", url) },
 		Quit:   func() { end("the page ended the program") },
 		Say:    func(text string) { fmt.Fprintln(os.Stderr, "ui-harness: settings screen:", text) },

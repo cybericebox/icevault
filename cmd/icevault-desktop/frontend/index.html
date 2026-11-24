@@ -270,6 +270,15 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 #lockedbody .err { min-height:0; margin:0 0 12px; } #lockedbody .err:empty { display:none; }   /* no reserved empty block on the lock screen */
 #lockedbody .lk { margin-bottom:8px; } #lockedbody h1 { margin-bottom:16px; } #lockedbody p:not(.fine) { margin:0 0 8px; }
 .vlist-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.vacts { display:flex; gap:8px; }
+.nvplace .vcur { flex:1; margin:0; } .nvplace .btn { flex:none; }
+.pwm { display:flex; gap:4px; margin-top:8px; } .pwm i { flex:1; height:4px; border-radius:2px; background:var(--ib-line); }
+.pwm[data-l="1"] i:nth-child(-n+1), .pwm[data-l="2"] i:nth-child(-n+2) { background:var(--ib-danger); }
+.pwm[data-l="3"] i:nth-child(-n+3) { background:var(--ib-warn); } .pwm[data-l="4"] i { background:var(--ib-ok); }
+.pwtxt { margin-top:4px; font-size:13px; color:var(--ib-dim); } .pwtxt b { font-weight:600; color:var(--ib-ink); } .pwtxt.ok b { color:var(--ib-ok); }
+.nvtouch { margin-top:16px; padding:0; } .nvtouch[hidden] { display:none; }
+.nvkit { margin-top:20px; padding-top:16px; border-top:1px solid var(--ib-line); } .nvkit h3 { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ib-ink); } .nvkit .btn { margin-top:12px; }
+.ferr.okline { color:var(--ib-ok); }
 .vlist-head h2 { margin:0; font-size:14px; font-weight:600; color:var(--ib-ink); }
 .vlist { display:flex; flex-direction:column; gap:2px; min-height:112px; }
 .vempty { flex:1; justify-content:center; padding:16px 0; }
@@ -975,7 +984,7 @@ async function write(path, body, after, before) {
   return srv(r.data);
 }
 // the calls that change nothing: everything else is a write on its way (the page never redraws under it when the vault changes on disk)
-const QUIET_OPS = new Set(["status", "ping", "refresh", "cli", "vaults", "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value"]);
+const QUIET_OPS = new Set(["vault-new-strength", "status", "ping", "refresh", "cli", "vaults", "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value"]);
 async function api(path, body) {
   const w = !QUIET_OPS.has(path.replace(/^\/api\//, "").split("?")[0]); if (w) writing++;
   try { return await window.icevaultApi(path, body); } finally { if (w) writing--; }          // adapter.js: the bound methods of the window instead of HTTP
@@ -1112,7 +1121,9 @@ function vaultList(V, showErr) {
     if (r.status !== 200) { showErr(srv(r.data)); return; }
     if (!r.data.cancelled) await redrawLocked();
   });
-  head.append(ob); wrap.append(head);
+  const acts = el("div", "vacts");
+  if (V.can_create) acts.append(btn(t("nv.new"), "plus", () => openNewVault(), ""));
+  acts.append(ob); head.append(acts); wrap.append(head);
   const list = el("div", "vlist"); list.setAttribute("role", "radiogroup"); list.setAttribute("aria-labelledby", "vlist-h");
   if (!V.vaults.length) { const e = el("div", "empty vempty"); e.append(icon("tray"), el("span", "", t("vaults.empty"))); list.append(e); }
   const cur = V.current;
@@ -1141,6 +1152,121 @@ function vaultList(V, showErr) {
   });
   wrap.append(list);
   return wrap;
+}
+// ---------------------------------------------------------------- a new vault (lock screen): place, password with the live meter, typed again, Touch ID, recovery kit
+// The page never names a path: the save dialog is shown by the program, which keeps the place. The password goes to the program in one call; the
+// recovery kit is made there from the password that made the vault, never from anything the page sends back.
+function openNewVault() {
+  let placed = false, touchAvail = false, seq = 0, timer = 0; const min = (vaultsData && vaultsData.min_password) || 12;
+  panel.open(t("nv.title"), () => panel.close()); const box = panel.box;
+  box.append(el("div", "note", t("nv.intro")));
+  const errs = {}, nodes = {};
+  const clearErr = (n) => { errs[n].textContent = ""; if (nodes[n]) nodes[n].removeAttribute("aria-invalid"); };
+  const fieldErr = (n, text) => { errs[n].textContent = ""; errs[n].append(icon("alert"), document.createTextNode(text)); if (nodes[n]) { nodes[n].setAttribute("aria-invalid", "true"); if (nodes[n].focus) nodes[n].focus(); } };
+  const addErr = (n, node, help) => {
+    const fe = el("div", "ferr"); fe.id = "nv-" + n + "-e"; fe.setAttribute("role", "alert"); errs[n] = fe; nodes[n] = node;
+    node.setAttribute("aria-describedby", [help ? help.id : "", fe.id].filter(Boolean).join(" ")); box.append(fe);
+  };
+  const secret = (id, label) => { const i = el("input", "input lg"); i.type = "password"; i.id = id; i.autocomplete = "off"; i.spellcheck = false; i.setAttribute("aria-label", label);
+    ["data-lpignore", "data-1p-ignore", "data-bwignore", "data-form-type"].forEach((a) => i.setAttribute(a, a === "data-form-type" ? "other" : "true")); return i; };
+  // 1. the place
+  const lp = el("label", "", t("nv.place_label")); box.append(lp);
+  const prow = el("div", "valbox nvplace"), where = el("div", "vcur"); where.append(el("span", "quiet", t("nv.no_place")));
+  const pbtn = btn(t("nv.choose_place"), "folder", null, ""); prow.append(where, pbtn); box.append(prow);
+  const phelp = el("div", "help", t("nv.place_help")); phelp.id = "nv-place-h"; box.append(phelp); addErr("place", pbtn, phelp);
+  pbtn.addEventListener("click", async () => {
+    clearErr("place"); const idle = busy(pbtn, t("busy.opening")); const r = await api("/api/vault-new-place", { title: t("nv.dialog_place") }); idle();
+    if (r.status !== 200) return fieldErr("place", srv(r.data));
+    if (r.data.cancelled) return;
+    placed = true; where.textContent = ""; where.append(el("b", "", r.data.file), (() => { const f = midPath(r.data.folder); f.classList.add("small"); return f; })());
+    pbtn.lastChild.textContent = t("nv.change_place");
+    touchAvail = !!r.data.touchid; trow.hidden = !touchAvail;
+  });
+  // 2. the password: typed, or generated
+  const lw = el("label", "", t("nv.pw_label")); lw.htmlFor = "nv-pw"; box.append(lw);
+  const pw = secret("nv-pw", t("nv.pw_label")), wrap = el("div", "valbox");
+  const gen = btn(t("nv.generate"), "key", null, ""); setTip(gen, t("nv.generate_tip"));
+  const genNote = el("div", "help", t("nv.generated_note")); genNote.hidden = true;
+  const trow = el("label", "mcheck nvtouch"), tcb = el("input"); tcb.type = "checkbox"; tcb.id = "nv-touch"; trow.htmlFor = "nv-touch"; trow.append(tcb, el("span", "", t("nv.touch"))); trow.hidden = true;
+  wrap.append(pw, ibtn("eye", t("val.reveal_field"), () => { pw.type = pw.type === "text" ? "password" : "text"; }), gen); box.append(wrap);
+  const bar = el("div", "pwm"); bar.setAttribute("aria-hidden", "true"); for (let i = 0; i < 4; i++) bar.append(el("i"));
+  const mtxt = el("div", "pwtxt"); mtxt.id = "nv-pw-h"; mtxt.setAttribute("role", "status"); mtxt.setAttribute("aria-live", "polite"); box.append(bar, mtxt);
+  addErr("pw", pw, mtxt);
+  const paint = (d) => {
+    bar.dataset.l = String(d ? d.level : 0); mtxt.textContent = ""; mtxt.classList.toggle("ok", !!(d && d.ok));
+    if (!d) { mtxt.textContent = t("nv.help_pw", { min }); return; }
+    const hint = d.ok ? "" : d.code === "password_too_short" ? t("nv.short", { n: d.length, min: d.min }) : d.code === "password_too_long" ? t("nv.long", { n: d.length, max: d.max }) : t("nv.reason." + d.reason);
+    mtxt.append(el("b", "", t("nv.meter." + d.level)), document.createTextNode(hint ? " " + hint : ""));
+  };
+  paint(null);
+  // the meter: one call in flight, and only the latest typed value waits behind it (a fast typist never queues calls)
+  let inflight = false, waiting = false;
+  const run = async () => {
+    if (inflight) { waiting = true; return; }
+    inflight = true; waiting = false; const my = ++seq; const v = pw.value; if (!v) { inflight = false; paint(null); return; }
+    const r = await api("/api/vault-new-strength", { password: v }); inflight = false;
+    if (my === seq && r.status === 200 && pw.value === v) paint(r.data);
+    if (waiting) run();
+  };
+  const judge = () => { clearTimeout(timer); if (!pw.value) { seq++; paint(null); return; } timer = setTimeout(run, 120); };
+  pw.addEventListener("input", () => { clearErr("pw"); judge(); });
+  // 3. typed again
+  const lc = el("label", "", t("nv.confirm_label")); lc.htmlFor = "nv-cf"; box.append(lc);
+  const cf = secret("nv-cf", t("nv.confirm_label")); box.append(cf); addErr("cf", cf, null);
+  cf.addEventListener("input", () => clearErr("cf"));
+  gen.addEventListener("click", async () => {
+    const idle = busy(gen, t("busy.generating")); const r = await api("/api/vault-new-generate", {}); idle();
+    if (r.status !== 200) return fieldErr("pw", srv(r.data));
+    clearErr("pw"); clearErr("cf"); pw.type = "text"; pw.value = r.data.password; cf.value = ""; judge(); genNote.hidden = false; cf.focus();
+  });
+  box.append(genNote);
+  // 4. Touch ID (only where this Mac can: the save dialog's answer says)
+  box.append(trow);
+  const err = el("div", "err"); err.setAttribute("role", "alert");
+  const actions = el("div", "actions"), cancel = btn(t("btn.cancel"), "", () => panel.close(), "lg"), ok = btn(t("nv.create"), "", null, "primary lg");
+  actions.append(cancel, ok); box.append(err, actions);
+  const failAt = (d) => {
+    const c = d && d.code;
+    if (c === "password_too_short" || c === "password_weak" || c === "password_too_long") return fieldErr("pw", srv({ code: c, params: { min: d.params.min, max: d.params.max, why: d.params.reason ? t("nv.reason." + d.params.reason) : "" } }));
+    if (c === "new_password_mismatch") return fieldErr("cf", srv(d));
+    if (c === "new_no_place" || c === "vault_exists") return fieldErr("place", srv(d));
+    err.textContent = ""; err.append(icon("alert"), document.createTextNode(srv(d)));
+  };
+  ok.addEventListener("click", async () => {
+    ["place", "pw", "cf"].forEach(clearErr); err.textContent = "";
+    if (!placed) return fieldErr("place", t("srv.new_no_place"));
+    if (!pw.value) return fieldErr("pw", t("err.required"));
+    if (!cf.value) return fieldErr("cf", t("err.required"));
+    if (pw.value !== cf.value) return fieldErr("cf", t("srv.new_password_mismatch"));
+    const idle = busy(ok, t("busy.creating")); cancel.disabled = true;
+    const r = await api("/api/vault-new-create", { password: pw.value, confirm: cf.value, touchid: touchAvail && tcb.checked });
+    if (r.status !== 200) { idle(); cancel.disabled = false; failAt(r.data); return; }
+    pw.value = ""; cf.value = ""; clearTimeout(timer); seq++; waiting = false;                       // out of the page before the next step
+    newVaultDone(r.data);
+  });
+  [pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));
+  pbtn.focus();
+}
+// the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
+function newVaultDone(d) {
+  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
+  panel.open(t("nv.done_title"), finish); const box = panel.box;
+  box.append(el("div", "note", t("nv.done_note", { file: d.file })));
+  if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
+  const kit = el("section", "nvkit"); kit.append(el("h3", "", t("nv.kit_title")), el("div", "note", t("nv.kit_note")));
+  const out = el("div", "ferr"); out.setAttribute("role", "status"); const note = el("div", "help");
+  const save = btn(t("nv.kit_save"), "download", null, "");
+  kit.append(save, out, note); box.append(kit);
+  save.addEventListener("click", async () => {
+    out.textContent = ""; out.classList.remove("okline"); note.textContent = "";
+    const idle = busy(save, t("busy.kit"));
+    const r = await api("/api/kit-save", { title: t("nv.kit_dialog"), template: t("nv.kit_text", { name: "{name}", path: "{path}", created: "{created}", password: "{password}" }) }); idle();
+    if (r.status !== 200) { out.append(icon("alert"), document.createTextNode(srv(r.data))); return; }
+    if (r.data.cancelled) return;
+    out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true;
+    if (r.data.same_folder) note.textContent = t("nv.kit_same_folder");
+  });
+  const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
 // the icevault command: the program inside the application, linked into a folder of the PATH (the window asks nothing in a terminal and runs no installer)
 async function openCliPanel() {

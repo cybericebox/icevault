@@ -128,6 +128,7 @@ func main() {
 	clip := &lateClipboard{}
 	var ctx context.Context
 	var pick desktop.Picker
+	var pickSave desktop.SavePicker
 	if !*demo { // the demo opens no vault file: its list is made up
 		pick = func(kind, title string) (string, error) {
 			if ctx == nil {
@@ -138,6 +139,13 @@ func main() {
 			}
 			return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{Title: title, Filters: []runtime.FileFilter{{DisplayName: "KeePass (*.kdbx)", Pattern: "*.kdbx"}}})
 		}
+		// the place of a new vault and of its recovery kit; the dialog itself asks before replacing a file, and nothing is written before the person chose
+		pickSave = func(title, name string) (string, error) {
+			if ctx == nil {
+				return "", errors.New("the window has not started")
+			}
+			return runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{Title: title, DefaultFilename: name, CanCreateDirectories: true})
+		}
 	}
 	// the project description (read once, never written): also in the demo
 	pickDescription := func(title string) (string, error) {
@@ -146,7 +154,7 @@ func main() {
 		}
 		return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{Title: title, Filters: []runtime.FileFilter{{DisplayName: "YAML (*.yaml, *.yml)", Pattern: "*.yaml;*.yml"}}})
 	}
-	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Pick: pick, PickDescription: pickDescription, Focus: *focus, Clipboard: clip, CLI: cliInst,
+	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Pick: pick, PickSave: pickSave, Maker: makerFor(vaults), PickDescription: pickDescription, Focus: *focus, Clipboard: clip, CLI: cliInst,
 		Update: updater, OpenURL: func(url string) {
 			if ctx != nil {
 				runtime.BrowserOpenURL(ctx, url)

@@ -34,6 +34,12 @@
       case "vault-open": return app.OpenVault(String(b.title || ""));
       case "vault-root": return app.ChooseRoot(String(b.title || ""));
       case "vault-forget": return app.ForgetVault(String(b.path || ""));
+      case "vault-new-place": return app.NewVaultPlace(String(b.title || ""));
+      case "vault-new-strength": return app.PasswordStrength(typeof b.password === "string" ? b.password : "");
+      case "vault-new-generate": return app.GeneratePassword();
+      case "vault-new-create": return app.CreateVault(typeof b.password === "string" ? b.password : "", typeof b.confirm === "string" ? b.confirm : "", !!b.touchid);
+      case "kit-save": return app.SaveRecoveryKit(String(b.title || ""), String(b.template || ""));
+      case "kit-discard": return app.DiscardRecoveryKit();
       case "project-choose": return app.ChooseProject(String(b.title || ""));
       case "update": return app.UpdateStatus();
       case "update-check": return app.UpdateCheck();

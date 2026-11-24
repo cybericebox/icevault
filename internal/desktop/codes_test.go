@@ -187,7 +187,7 @@ func assertCoded(t *testing.T, what string, r Response) {
 		}
 	}
 	for k, v := range data {
-		if s, isStr := v.(string); isStr && k != "code" && k != "value" && k != "mode" && k != "password" {
+		if s, isStr := v.(string); isStr && k != "code" && k != "value" && k != "mode" && k != "password" && k != "file" && k != "folder" {
 			t.Errorf("%s: unexpected string field %s=%q", what, k, s)
 		}
 	}
@@ -276,6 +276,30 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 		assertCoded(t, "OpenVault pick fails", w.OpenVault("t"))
 		assertCoded(t, "ChooseRoot without a vault", w.ChooseRoot("t"))
 		assertCoded(t, "Unlock without a vault", w.Unlock("password", "pw"))
+	}
+	// a new vault: every step refuses with a code, whatever the maker, the dialog and the vault list fail with
+	for _, e := range bad {
+		fv := &fakeVaults{}
+		m := &fakeMaker{createErr: e, bindErr: e, touchReady: true}
+		n := New(Options{Vaults: fv, Maker: m, PickSave: func(string, string) (string, error) { return filepath.Join(t.TempDir(), "n.kdbx"), nil }})
+		assertCoded(t, "NewVaultPlace", n.NewVaultPlace("t"))
+		assertCoded(t, "CreateVault fails", n.CreateVault("k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ", true))
+		assertCoded(t, "CreateVault weak", n.CreateVault("Qwerty123!", "Qwerty123!", true))
+		assertCoded(t, "SaveRecoveryKit none", n.SaveRecoveryKit("t", "{password}"))
+		bad := New(Options{Vaults: fv, Maker: m, PickSave: func(string, string) (string, error) { return "", e }})
+		assertCoded(t, "NewVaultPlace pick fails", bad.NewVaultPlace("t"))
+		covered["NewVaultPlace"], covered["CreateVault"], covered["SaveRecoveryKit"] = true, true, true
+	}
+	assertCoded(t, "NewVaultPlace off", l.NewVaultPlace("t"))
+	assertCoded(t, "CreateVault off", l.CreateVault("a", "a", false))
+	assertCoded(t, "SaveRecoveryKit off", l.SaveRecoveryKit("t", "{password}"))
+	for _, r := range []Response{l.PasswordStrength("x"), l.GeneratePassword(), l.DiscardRecoveryKit()} { // answers without refusals: success shapes only
+		if r.Status != 200 {
+			t.Errorf("%+v", r)
+		}
+	}
+	for _, name := range []string{"PasswordStrength", "GeneratePassword", "DiscardRecoveryKit"} {
+		covered[name] = true
 	}
 	assertCoded(t, "SelectVault off", l.SelectVault("/v/a.kdbx"))
 	assertCoded(t, "OpenVault off", l.OpenVault("t"))

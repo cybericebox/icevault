@@ -5,6 +5,7 @@ flag "--vault <path>" help=#"the vault file (wins over ICEVAULT_VAULT)"# global=
   }
 }
 cmd "init-vault" help=#"Make the vault (KDBX 4, Argon2d)"# {
+  flag "--generate" help=#"a random six-word passphrase, shown once and typed back"#
   flag "--decryption-time <ms>" help=#"key derivation time in ms, 100 to 5000"# {
     arg "<ms>" {
       complete type="none"
