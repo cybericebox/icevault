@@ -262,6 +262,13 @@ cmd "status" help=#"What the vault holds for an environment"# {
     }
   }
 }
+cmd "expiring" help=#"Values that have expired or expire soon (never values)"# {
+  flag "--days <N>" help=#"how many days ahead (default 14)"# {
+    arg "<N>" {
+      complete type="none"
+    }
+  }
+}
 cmd "visibility" help=#"Visibility of the variables (never values)"# {
   flag "--env <env>" help=#"the environment"# {
     arg "<env>" {

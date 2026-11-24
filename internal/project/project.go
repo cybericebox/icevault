@@ -62,6 +62,9 @@ type Variable struct {
 	Temporary bool `yaml:"temporary,omitempty"`
 	// Field is the field of the connection kind this variable carries (connection uses only).
 	Field string `yaml:"field,omitempty"`
+	// Expires: the value is a token with a lifetime; the window asks for the date it expires (optional, "never" is allowed) and the tool warns
+	// when it has expired or is about to.
+	Expires bool `yaml:"expires,omitempty"`
 	// Type is what a filled value must be: string (the default, free text), bool (true or false), int, email, url, domain or enum (one of Choices).
 	// A value that is a reference (${{ ... }}) is checked after it resolves.
 	Type    string   `yaml:"type,omitempty"`

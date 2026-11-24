@@ -110,6 +110,19 @@ func (c *Core) commit() error {
 	return c.v.Save()
 }
 
+// setExpires reads the "expires" argument (a date YYYY-MM-DD, "" = never) into dst when it is given.
+func setExpires(a map[string]any, dst *string) error {
+	if !has(a, "expires") {
+		return nil
+	}
+	d := str(a, "expires")
+	if _, err := vmodel.ParseDay(d); err != nil {
+		return refuse("bad_date", nil)
+	}
+	*dst = d
+	return nil
+}
+
 func validKey(k string) bool { return vmodel.KeyRE.MatchString(k) }
 
 func (c *Core) writeVar(a map[string]any) error {
@@ -196,7 +209,7 @@ func (c *Core) writeVar(a map[string]any) error {
 	if has(a, "description") {
 		x.Description = str(a, "description")
 	}
-	return nil
+	return setExpires(a, &x.Expires)
 }
 
 func (c *Core) env(a map[string]any) (*vmodel.Environment, error) {
@@ -376,10 +389,10 @@ func (c *Core) writeField(a map[string]any) error {
 			f.Value = v
 		}
 		f.Secret = f.Secret || secret
-	} else {
-		x.Set(name, v, secret)
+		return setExpires(a, &f.Expires)
 	}
-	return nil
+	x.Set(name, v, secret)
+	return setExpires(a, &x.Field(name).Expires)
 }
 
 func (c *Core) writeSite(a map[string]any) error {
@@ -718,7 +731,11 @@ func (c *Core) writeOther(a map[string]any) error {
 				return refuse("name_exists", map[string]any{jName: title})
 			}
 		}
-		c.m.Other = append(c.m.Other, &vmodel.Other{Title: title, Value: str(a, "value"), Notes: str(a, "notes")})
+		o := &vmodel.Other{Title: title, Value: str(a, "value"), Notes: str(a, "notes")}
+		if err := setExpires(a, &o.Expires); err != nil {
+			return err
+		}
+		c.m.Other = append(c.m.Other, o)
 		return nil
 	case actUpdate:
 		o := find()
@@ -737,7 +754,7 @@ func (c *Core) writeOther(a map[string]any) error {
 		if has(a, "notes") {
 			o.Notes = str(a, "notes")
 		}
-		return nil
+		return setExpires(a, &o.Expires)
 	case actDelete:
 		o := find()
 		if o == nil {

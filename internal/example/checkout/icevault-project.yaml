@@ -164,7 +164,7 @@ products:
         optional: true
         file: services/portal.env
         variables:
-          - {name: CDN_TOKEN, field: api_token, secret: true}
+          - {name: CDN_TOKEN, field: api_token, secret: true, expires: true}
           - {name: CDN_PURGE_KEY, field: purge_key, secret: true}
           - {name: CDN_SIGNING_KEY, field: signing_key, secret: true}
     variables:

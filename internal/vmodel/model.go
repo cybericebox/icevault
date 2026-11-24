@@ -40,6 +40,7 @@ type Var struct {
 	Vis         string // plain | secret | sealed
 	Labels      []string
 	Changed     string
+	Expires     string // the date the value expires (YYYY-MM-DD), "" = never
 }
 
 // Field is a field of a connection.
@@ -47,6 +48,8 @@ type Field struct {
 	Name   string
 	Value  string
 	Secret bool
+	// Expires is the date the value expires (YYYY-MM-DD), "" = never.
+	Expires string
 }
 
 // Connection is an access to an outside service, on the vault level.
@@ -142,6 +145,8 @@ type Other struct {
 	// Extra is the path below the plaintext folder of a single extra file of the layout before the model (export --file).
 	Extra string
 	Mode  int
+	// Expires is the date the secret expires (YYYY-MM-DD), "" = never.
+	Expires string
 }
 
 // Vault is the whole model.
@@ -294,6 +299,9 @@ func (v *Vault) Check() []string {
 				add("connection %s: field %s twice", c.Name, f.Name)
 			}
 			seen[f.Name] = true
+			if _, err := ParseDay(f.Expires); err != nil {
+				add("connection %s: the expiry of field %s: %v", c.Name, f.Name, err)
+			}
 			_ = k
 		}
 	}
@@ -309,6 +317,9 @@ func (v *Vault) Check() []string {
 			seen[x.Key] = true
 			if strings.ContainsAny(x.Value, "\n\r") {
 				add("%s: the value of %s has a line break", where, x.Key)
+			}
+			if _, err := ParseDay(x.Expires); err != nil {
+				add("%s: the expiry of %s: %v", where, x.Key, err)
 			}
 		}
 	}

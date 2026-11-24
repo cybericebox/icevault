@@ -122,6 +122,9 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		snap, _ := w.Snapshot()
 		return 0, runVisibility(e, args, out, plat, snap, w)
 	}
+	if cmd == cmdExpiring {
+		return 0, runExpiring(e, args, out, v)
+	}
 	mv, err := openModelView(e, v, plat)
 	if err != nil {
 		return 1, err
@@ -135,6 +138,9 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 			return 1, err
 		}
 	}
+	if env := flagVals(cmd, args)["env"]; env != "" && (cmd == cmdExport || cmd == cmdExportApp) {
+		warnExpired(e, mv.m, env)
+	}
 	switch cmd {
 	case cmdView:
 		return 0, runView(e, args, out, plat, snap)
@@ -146,7 +152,15 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 	case cmdExportApp:
 		return 0, runExportApp(e, args, out, plat, snap)
 	case cmdStatus:
-		return 0, runStatus(e, args, out, plat, snap)
+		if err := runStatus(e, args, out, plat, snap); err != nil {
+			return 0, err
+		}
+		if env := flagVals(cmd, args)["env"]; env != "" {
+			if x := mv.m.Env(env); x != nil {
+				printExpiring(out, mv.m.ExpiringIn(x, e.Now(), vmodel.SoonDays), "  ")
+			}
+		}
+		return 0, nil
 	case cmdVisibility:
 		return 0, runVisibility(e, args, out, plat, snap, nil)
 	case cmdPurge:

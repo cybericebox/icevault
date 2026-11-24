@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cybericebox/icevault/internal/desktop"
 	"github.com/cybericebox/icevault/internal/kinds"
@@ -46,6 +47,20 @@ type Core struct {
 	NoProject bool
 	// Remember saves a description path the window was given (cli.RememberProject); nil: not offered.
 	Remember func(path string) error
+	// Now is the clock the expiry states are read against (nil: the real one).
+	Now func() time.Time
+}
+
+func (c *Core) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
+
+// expiryState is the state of an expiry date today: "", "soon" or "expired".
+func (c *Core) expiryState(date string) string {
+	return vmodel.ExpiryState(date, c.now(), vmodel.SoonDays)
 }
 
 // New loads the model of an open vault. d may be nil (no description): the vault still opens.
@@ -87,6 +102,7 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 	out := map[string]any{jState: state}
 	if x != nil {
 		out[jKey], out["visibility"], out["managed"], out["description"], out["changed"] = x.Key, x.Vis, x.Managed, x.Description, x.Changed
+		out["expires"], out["expiry"] = x.Expires, c.expiryState(x.Expires)
 		if x.Vis == vmodel.VisPlain {
 			out["value"] = x.Value
 		}
@@ -102,6 +118,7 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 			required = true // required-when holds: the variable is needed now
 		}
 		out["required"], out["when"], out["secret"], out["system"] = required, h.When, h.Secret, h.System()
+		out["expires_flag"] = h.Expires
 		if h.Type != "" {
 			out["type"] = h.Type
 		}
@@ -204,6 +221,18 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			})
 		}
 		row["variables"] = used
+		flag := false
+		if c.d != nil {
+			c.d.Walk(func(h project.Home) {
+				if h.Conn != nil && h.Conn.Kind == x.Kind && h.Var.Field == name && h.Var.Expires {
+					flag = true
+				}
+			})
+		}
+		row["expires_flag"] = flag
+		if f != nil {
+			row["expires"], row["expiry"] = f.Expires, c.expiryState(f.Expires)
+		}
 		fields = append(fields, row)
 		names[name] = true
 	}
@@ -527,7 +556,7 @@ func (c *Core) Nav() map[string]any {
 		if o.Value == "" && len(o.Data) == 0 {
 			state = "empty"
 		}
-		other = append(other, map[string]any{"uuid": o.UUID, jTitle: o.Title, "notes": o.Notes, jState: state, "file": len(o.Data) > 0 || o.Extra != ""})
+		other = append(other, map[string]any{"uuid": o.UUID, jTitle: o.Title, "notes": o.Notes, jState: state, "file": len(o.Data) > 0 || o.Extra != "", "expires": o.Expires, "expiry": c.expiryState(o.Expires)})
 	}
 	envs := []map[string]any{}
 	for _, e := range c.m.Envs {
@@ -539,12 +568,22 @@ func (c *Core) Nav() map[string]any {
 			products = append(products, map[string]any{jName: p.Name, jTitle: text(p.Title)})
 		}
 	}
+	expiring := []map[string]any{}
+	nExpired, nSoon := 0, 0
+	for _, it := range c.m.Expiring(c.now(), vmodel.SoonDays) {
+		expiring = append(expiring, map[string]any{"scope": it.Place.Scope, jEnv: it.Place.Env, "place": it.Place.Name, jName: it.Name, "date": it.Date, jState: it.State})
+		if it.State == "expired" {
+			nExpired++
+		} else {
+			nSoon++
+		}
+	}
 	desc := map[string]any{"found": c.d != nil, "path": c.DescPath, "error": c.DescErr, "can_remember": c.Remember != nil, "no_project": c.NoProject}
 	if c.d != nil {
 		desc[jName] = c.d.Name
 	}
 	return map[string]any{"model": true, "format": c.m.Format, "read_only": c.m.ReadOnly, "problems": c.m.Problems, "description": desc, "connection_kinds": ck, "site_kinds": sk,
-		"products": products, "shared": sharedRows, "connections": conns, "other": other, "envs": envs, "sections": []any{}}
+		"products": products, "expiring": expiring, "expired_count": nExpired, "soon_count": nSoon, "shared": sharedRows, "connections": conns, "other": other, "envs": envs, "sections": []any{}}
 }
 
 // Read answers the read ops of the model: "nav", "references" {scope}, "preview-value" {scope, key, value, visibility}.
