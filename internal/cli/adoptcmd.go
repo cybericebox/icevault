@@ -24,7 +24,7 @@ func runAdopt(e *Env, a envArgs, out io.Writer, v *vault.Vault, plat *render.Pro
 	moved := 0
 	for _, x := range plan {
 		moved += x.Count()
-		made := " (" + map[string]string{"new": "new connection", "product": "the product's connection", "environment": "a connection this environment uses", "named": "the connection the description names"}[x.Chosen] + ")"
+		made := " (" + map[string]string{"new": "new connection", "product": "the product's connection", "this-environment": "a connection this environment uses", "named": "the connection the description names"}[x.Chosen] + ")"
 		if x.Count() > 0 {
 			fmt.Fprintf(out, "  %s: %s -> connection %s [%s]%s\n", x.Product, strings.Join(x.Variables, ", "), x.Connection, x.Kind, made)
 		}

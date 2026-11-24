@@ -18,7 +18,7 @@ type Adoption struct {
 	// Connection is the name of the connection that gets the values; New says the adoption makes it.
 	Connection string
 	New        bool
-	// Chosen says why this connection: "product" (the product already has one of the kind), "environment" (another product or site of the
+	// Chosen says why this connection: "product" (the product already has one of the kind), "this-environment" (another product or site of the
 	// environment uses it), "named" (the one the description names) or "new".
 	Chosen string
 	// Variables are the names that move (in the order of the description).
@@ -216,14 +216,14 @@ func adoptTarget(m *Vault, d *project.Description, e *Environment, p *Product, u
 	for _, o := range e.Products {
 		for _, x := range o.Connections {
 			if x.Kind == use.Kind {
-				return x, "environment"
+				return x, "this-environment"
 			}
 		}
 	}
 	for _, s := range e.Sites {
 		for _, x := range []*Connection{s.Connection, s.State} {
 			if x != nil && x.Kind == use.Kind {
-				return x, "environment"
+				return x, "this-environment"
 			}
 		}
 	}
