@@ -76,6 +76,11 @@ func (defaultModel) Check(e *Env, cmd string, args []string) (int, bool, error) 
 	case cmdStatus, cmdVisibility, cmdRecover:
 		_, err := envContext(e, v["env"])
 		return 1, err != nil, err
+	case cmdExpiring:
+		if _, err := expiringDays(args); err != nil {
+			return 2, true, err
+		}
+		return 0, false, nil
 	case cmdPurge:
 		return checkPurge(e, v)
 	case cmdImport:

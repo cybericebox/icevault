@@ -54,6 +54,9 @@ func Build(dir, password string) (string, string, error) {
 			return "", "", err
 		}
 	}
+	if err := markExpiries(v); err != nil {
+		return "", "", err
+	}
 	if err := os.WriteFile(path+".info.json", []byte("{\"copies\": [], \"sealed\": {}}\n"), 0o600); err != nil {
 		return "", "", err
 	}
@@ -80,4 +83,31 @@ func importEnv(v *vault.Vault, plat *render.Project, root, env string) error {
 		return err
 	}
 	return w.Commit()
+}
+
+// markExpiries gives a few values of the demo an expiry, relative to today, so that the window shows each state: one token expired two days ago, one
+// expires in five days, one in a year.
+func markExpiries(v *vault.Vault) error {
+	m, err := vmodel.Load(v)
+	if err != nil {
+		return err
+	}
+	day := func(n int) string { return time.Now().UTC().AddDate(0, 0, n).Format(vmodel.DayFormat) }
+	if len(m.Envs) > 0 && len(m.Envs[0].General) > 0 {
+		m.Envs[0].General[0].Expires = day(-2)
+	}
+	for _, c := range m.Connections {
+		for _, f := range c.Fields {
+			if f.Name == "api_token" {
+				f.Expires = day(5)
+			}
+		}
+	}
+	if len(m.Shared) > 0 {
+		m.Shared[0].Expires = day(365)
+	}
+	if err := vmodel.Sync(v, m); err != nil {
+		return err
+	}
+	return v.Save()
 }

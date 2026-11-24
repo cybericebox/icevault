@@ -36,6 +36,7 @@ icevault export-app --env E --app A    write the env file of an app into <dir>/.
                                        relative to the checkout; ../<name> without one; --to DIR names another)
 icevault status --env E                what is set, what is missing, what is still on disk
 icevault view --env E                  the variables of an environment (names only, never a value)
+icevault expiring [--days N]           the values that have expired or expire within N days (default 14): names and dates only
 icevault session run --env E -- CMD    run CMD with a private tree of the environment
 icevault purge-plaintext --env E       remove the plaintext files the vault holds
 icevault copies | copy --to DIR        copies of the vault on other volumes

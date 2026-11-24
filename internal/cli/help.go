@@ -111,6 +111,8 @@ var specs = map[string]cmdSpec{
 		Flags: []flagSpec{envFlag(), siteFlag(), val("app", "app", "the app", completeNone), val("to", "dir", "the app's directory", completeDir), sw("force", "replace an existing file"), sw("dry-run", "print the variable names, write nothing")}},
 	"status": {Summary: "What the vault holds for an environment", Usage: "status --env E [--site S]\n  What the vault holds for an environment and what is still missing (asks the password).",
 		Flags: []flagSpec{envFlag(), siteFlag()}},
+	cmdExpiring: {Summary: "Values that have expired or expire soon (never values)", Usage: "expiring [--days N]\n  List the values that have expired or expire within N days (default 14) by date: where they live and their names, never a value (asks the password).\n  A date is set in the window; status lists the ones of an environment, export and session warn on stderr about the expired ones they use.",
+		Flags: []flagSpec{val("days", "N", "how many days ahead (default 14)", completeNone)}},
 	cmdVisibility: {Summary: "Visibility of the variables (never values)", Usage: "visibility --env E [--apply]\n  Print variable / current / proposed visibility, never values; --apply changes the marked ones.",
 		Flags: []flagSpec{envFlag(), siteFlag(), sw("apply", "change the variables marked change")}},
 	cmdPurge: {Summary: "Delete the plaintext files once the vault is verified", Usage: "purge-plaintext --env E [--site S] [--yes] [--force]\n  Delete the plaintext files of the environment once the vault is verified and copied to another volume.",
@@ -124,7 +126,7 @@ var specs = map[string]cmdSpec{
 
 // commandNames is the order of the overview and of the completion.
 var commandNames = []string{"init-vault", "change-password", "keyfile", "ui", "where", "project", cmdEnv, "trust", "guard", "settings", "session", "external", "touchid", "copies", "copy", cmdView, cmdExport, cmdExportApp,
-	cmdStatus, cmdVisibility, cmdPurge, cmdImport, cmdRecover, cmdImportHCP}
+	cmdStatus, cmdExpiring, cmdVisibility, cmdPurge, cmdImport, cmdRecover, cmdImportHCP}
 
 // flagTable is the checkable form of the flags of a command: name -> takes a value. --vault is taken by Run before and is accepted everywhere.
 func (s cmdSpec) flagTable() map[string]bool {

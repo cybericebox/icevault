@@ -998,7 +998,7 @@ function confirmBox(title, note, okText, o) {
 }
 // small form dialog: fields -> values. Errors stand beside their field (aria-invalid, aria-describedby); Enter in a single-line field = the primary action
 const FIELD_OF = { one_line: "title", section_name: "name", section_exists: "name", item_name: "name", item_taken: "name", group_key: "group", group_exists: "group", key_form: "key", key_exists: "key", type_name: "confirm", bad_key: "key",
-  path_form: "rel", file_exists: "rel", file_size: "file", vis_form: "visibility", description_long: "description", description_reserved: "description", no_group_first: "group", bad_value: "value" };
+  path_form: "rel", file_exists: "rel", file_size: "file", vis_form: "visibility", description_long: "description", description_reserved: "description", no_group_first: "group", bad_value: "value", bad_date: "expires" };
 // the type a description declares for a variable: the rule a value breaks ("" = fits). The same rules as internal/project/types.go; a pattern is only checked by the program.
 // A value that holds a reference (${{ ... }}) is not checked as typed, only after it resolves.
 function typeProblem(type, choices, v, min, max) {
@@ -1107,6 +1107,8 @@ function dialog(title, fields, submitText, onSubmit, note) {
         if (hasRef) refControls(inp, wrap, f.ref.scope, () => f.ref.key(inputs));
         box.append(wrap);
         if (hasRef) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) })); }
+      } else if (f.type === "date") {   // an optional date: the clear button says "never"
+        const wrap = el("div", "valbox"); wrap.append(inp, btn(t("m.exp.never"), "", () => { inp.value = ""; changed = true; clearErr(f.name); }, "ghost")); box.append(wrap);
       } else box.append(inp);
       inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value, inputs); if (m) fieldErr(f.name, m); } if (f.recheck) f.recheck.forEach((n) => { const o = fields.find((x) => x.name === n), i = inputs[n]; if (o && o.check && i && i.value !== undefined) { clearErr(n); const m = o.check(i.value, inputs); if (m) fieldErr(n, m); } }); if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
@@ -2766,6 +2768,7 @@ function renderMSide() {
   item("shared", "", "share", t("m.side.shared"));
   item("connections", "", "plug", t("m.side.connections"));
   item("other", "", "key", t("m.side.other"));
+  { const n = (nav.expired_count || 0) + (nav.soon_count || 0); if (n) item("expiring", "", "alert", t("m.side.expiring"), n, t("m.exp.banner", { expired: nav.expired_count || 0, soon: nav.soon_count || 0 })); }
   const se = el("div", "side-sec"); se.append(el("span", "t", t("m.side.envs"))); box.append(se);
   (nav.envs || []).forEach((e) => item("env", e.name, "layers", e.title || e.name, e.missing, tn("m.missing_n", e.missing)));
   { const a = el("button", "side-add"); a.type = "button"; a.append(icon("plus"), el("span", "t", t("m.side.new_env")));   // in view mode too: one click switches to edit mode and opens the dialog
@@ -2784,6 +2787,7 @@ function mhead(main, iconName, title, sub, actions) {
   $("descbtn").classList.toggle("hidden", !(nav.description && !nav.description.found && nav.description.no_project));
   if (nav.description && !nav.description.found && !nav.description.no_project) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
   if (nav.read_only) { const b = el("div", "banner warn"); b.append(icon("lock"), el("div", "", t("m.read_only"))); main.append(b); }
+  if ((nav.expired_count || nav.soon_count) && !(msel && msel.kind === "expiring")) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", t("m.exp.banner", { expired: nav.expired_count || 0, soon: nav.soon_count || 0 })), btn(t("m.exp.show"), "", () => mselect("expiring"))); main.append(b); }
 }
 
 // a card or section that folds: a chevron first in its header, the state remembered per item (the same set the groups of the old screen use)
@@ -2828,7 +2832,7 @@ function mnamecell(label, key, mono, help, sub) {
   if (help) setTip(nc, help); return nc;
 }
 function mactcell() { const td = el("td", "acts"); const box = el("div", "abox"); td.append(box); return [td, box]; }
-function mtable(parent, rows, empty) {
+function mtable(parent, rows, empty, heads) {
   // the buttons of a row sit in fixed slots (eye, edit, remove): a slot that some row of the table uses is an empty placeholder in the rows without it
   const slotOf = (b) => { const u = b.querySelector && b.querySelector("use"); const h = u ? u.getAttribute("href") : ""; return h === "#i-eye" || h === "#i-eye-off" ? 0 : h === "#i-edit" ? 1 : h === "#i-archive" || h === "#i-x" ? 2 : -1; };
   const used = [false, false, false]; rows.forEach((r) => { const ab = r.querySelector(".abox"); if (ab) [...ab.children].forEach((b) => { const s = slotOf(b); if (s >= 0) used[s] = true; }); });
@@ -2836,7 +2840,7 @@ function mtable(parent, rows, empty) {
   const n = Math.max(1, used.filter(Boolean).length);
   const tb = el("table", "rows mtable"); const cg = el("colgroup");
   [["name", "32%"], ["value", "38%"], ["labels", "auto"], ["acts", (n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD) + "px"]].forEach(([c, w]) => { const x = el("col", "c-" + c); if (w !== "auto") x.style.width = w; cg.append(x); }); tb.append(cg);
-  const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
+  const hr = el("tr"); (heads || [t("col.name"), t("col.value"), t("col.kind"), ""]).forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
   const body = el("tbody");
   if (!rows.length) { const tr = el("tr"); const td = el("td", "emptycell"); td.colSpan = 4; td.append(icon("tray"), el("span", "", empty)); tr.append(td); body.append(tr); }
   rows.forEach((r) => body.append(r));
@@ -2860,6 +2864,7 @@ function mvars(parent, rows, scope, opts) {
     if (r.imported) tags.append(el("span", "tag", r.overridden ? t("m.env.overridden") : t("m.env.imported")));
     if (r.system) tags.append(el("span", "tag", t("m.var.system")));
     else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + mvis(r))));
+    { const xt = mexptag(r); if (xt) tags.append(xt); }
     if (r.active === false) { const x = el("span", "tag warn", t("m.var.inactive")); setTip(x, r.when || ""); tags.append(x); }
     kc.append(tags);
     const [ac, ab] = mactcell();
@@ -2890,6 +2895,27 @@ function mrowsOf(scope) {
   const pr = e.products.find((x) => x.name === p[3]); if (!pr) return [];
   return p[4] ? (pr.sub ? pr.sub.vars : []) : pr.vars;
 }
+// ---- expiry: an optional day on a value that has a lifetime (a token). The page shows a badge (soon: warn, passed: red) and lists what needs attention.
+const mexpday = (s, year) => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "." + p[1] + (year ? "." + p[0] : "") : ""; };
+function mexptag(r) {
+  if (!r || !r.expires) return null;
+  if (r.expiry === "expired") return el("span", "tag danger", t("m.exp.expired"));
+  if (r.expiry === "soon") return el("span", "tag warn", t("m.exp.soon", { date: mexpday(r.expires) }));
+  return el("span", "quiet", t("m.exp.until", { date: mexpday(r.expires, true) }));
+}
+function mexpfield(r) { return { name: "expires", label: t("m.exp.label"), type: "date", value: (r && r.expires) || "", help: r && r.expires_flag ? t("m.exp.help_flag") : t("m.exp.help") }; }
+const mexpwhere = (it) => t("m.exp.where." + it.scope, { env: it.env, name: it.place });
+function mExpiring(main) {
+  mhead(main, "alert", t("m.exp.title"), t("m.exp.note"));
+  const list = nav.expiring || [];
+  if (!list.length) { main.append(mempty(t("m.exp.empty"))); return; }
+  const sec = mblock(main, t("m.exp.title"), "alert", []);
+  const trs = list.map((it) => { const tr = el("tr"); const [ac] = mactcell(); const dc = el("td"); dc.append(el("span", "val", mexpday(it.date, true)));
+    const kc = el("td"); kc.append(el("span", "tag " + (it.state === "expired" ? "danger" : "warn"), it.state === "expired" ? t("m.exp.expired") : t("m.exp.soon", { date: mexpday(it.date) })));
+    tr.append(mnamecell(it.name, "", false, "", mexpwhere(it)), dc, kc, ac); return tr; });
+  mtable(sec, trs, t("m.exp.empty"), [t("col.name"), t("m.exp.col.date"), t("col.kind"), ""]);
+}
+
 function mvarDialog(scope, r) {
   const fresh = !r; const fields = [];
   if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
@@ -2918,10 +2944,12 @@ function mvarDialog(scope, r) {
   if (f.refAlt) { f.refAlt.vis = (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility); f.refAlt.key = refCtx.key; }
   fields.push(f);
   if (fresh) fields.push({ name: "visibility", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
+  fields.push(mexpfield(r));
   dialog(fresh ? t("m.var.new_title") : t("m.var.edit", { name: mlabel(r) }), fields, t("btn.save"), (v) => {
     const body = { scope, key: fresh ? v.key.trim() : r.key };
     if (fresh || !secret || v.value !== "") body.value = v.value;
     if (fresh) body.visibility = v.visibility;
+    body.expires = v.expires;
     return mwrite("m-var", body);
   });
 }
@@ -2931,7 +2959,7 @@ function renderMMain() {
   tipOff(); closeList(false);
   const main = $("main"); const keep = main.scrollTop; main.textContent = "";
   if (!msel || (msel.kind === "env" && !envOf(msel.id))) { const e = (nav.envs || [])[0]; msel = e ? { kind: "env", id: e.name } : { kind: "shared", id: "" }; }
-  ({ shared: mShared, connections: mConnections, other: mOther, env: mEnv })[msel.kind](main);
+  ({ shared: mShared, connections: mConnections, other: mOther, expiring: mExpiring, env: mEnv })[msel.kind](main);
   main.scrollTop = keep;
 }
 
@@ -2954,7 +2982,7 @@ function mConnections(main) {
     const sec = mblock(main, c.name, "plug", b);
     const meta = el("div", "mmeta"); meta.append(el("span", "tag", ckTitle(c.kind)));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);
-    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present,
+    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present, expires: f.expires, expiry: f.expiry, expires_flag: f.expires_flag,
       help: f.variables && f.variables.length ? { [lang]: t("m.conn.exported_as", { list: f.variables.join(", ") }) } : null }));
     mfields(sec, rows, c);
   });
@@ -2969,6 +2997,7 @@ function mfields(parent, rows, c) {
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") { w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
     const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + mvis(r))));
+    { const xt = mexptag(r); if (xt) kc.append(" ", xt); }
     const [ac, ab] = mactcell();
     if (mcanreveal(r)) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k, r.resolved ? "resolved" : "")));
     if (editing()) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
@@ -2992,8 +3021,9 @@ function mfieldDialog(c, r) {
   const secret = r ? r.visibility !== "plain" : false;
   fields.push({ name: "value", label: t("m.var.value"), type: secret ? "password" : "text", fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
   if (!r) fields.push({ name: "secret", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
+  fields.push(mexpfield(r));
   dialog(r ? t("m.var.edit", { name: mlabel(r) }) : t("m.field.new_title", { name: c.name }), fields, t("btn.save"), (v) => {
-    const body = { uuid: c.uuid, field: r ? r.key : v.field.trim(), secret: r ? secret : v.secret === "secret" };
+    const body = { uuid: c.uuid, field: r ? r.key : v.field.trim(), secret: r ? secret : v.secret === "secret", expires: v.expires };
     if (!r || !secret || v.value !== "") body.value = v.value;
     return mwrite("m-field", body);
   });
@@ -3010,6 +3040,7 @@ function mOther(main) {
     const nc = mnamecell(o.title, "", false, o.notes);
     const vc = el("td"); const w = el("div", "vcell"); if (o.state === "empty") w.append(el("span", "notset", t("val.notset"))); else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k))); else w.append(el("span", "mask", "••••••")); vc.append(w);
     const kc = el("td"); if (o.file) kc.append(el("span", "tag", t("m.other.file")));
+    { const xt = mexptag(o); if (xt) kc.append(" ", xt); }
     const [ac, ab] = mactcell(); if (o.state !== "empty") ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("other/" + o.uuid, "", k)));
     if (editing()) ab.append(ibtn("edit", t("m.var.edit", { name: o.title }), () => motherDialog(o)), ibtn("archive", t("m.var.delete", { name: o.title }), () => mdelete(t("m.var.delete_title", { name: o.title }), t("m.var.delete_note"), "m-other", { action: "delete", uuid: o.uuid }), "danger"));
     tr.append(nc, vc, kc, ac); trs.push(tr);
@@ -3019,8 +3050,8 @@ function mOther(main) {
 
 function motherDialog(o) {
   dialog(o ? t("m.var.edit", { name: o.title }) : t("m.other.new_title"), [{ name: "title", label: t("m.f.title"), value: o ? o.title : "", required: true }, { name: "value", label: t("m.var.value"), type: "password", help: o ? t("m.var.keep_help") : "" },
-    { name: "notes", label: t("m.f.description"), type: "textarea", value: o ? o.notes || "" : "" }], o ? t("btn.save") : t("btn.create"), (v) => {
-    const body = o ? { action: "update", uuid: o.uuid, title: v.title.trim(), notes: v.notes } : { action: "create", title: v.title.trim(), notes: v.notes, value: v.value };
+    { name: "notes", label: t("m.f.description"), type: "textarea", value: o ? o.notes || "" : "" }, mexpfield(o)], o ? t("btn.save") : t("btn.create"), (v) => {
+    const body = o ? { action: "update", uuid: o.uuid, title: v.title.trim(), notes: v.notes, expires: v.expires } : { action: "create", title: v.title.trim(), notes: v.notes, value: v.value, expires: v.expires };
     if (o && v.value !== "") body.value = v.value;
     return mwrite("m-other", body);
   });

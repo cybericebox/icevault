@@ -50,7 +50,8 @@ type EntryInfo struct {
 	Attachments []string
 	Created     time.Time
 	Modified    time.Time
-	History     int // saved earlier versions
+	History     int       // saved earlier versions
+	Expires     time.Time // the expiry of the entry (zero: it does not expire)
 }
 
 // Entry is a variable: title, secret and notes.
@@ -137,7 +138,7 @@ func (v *Vault) info(group string, e *gokeepasslib.Entry) EntryInfo {
 		att = append(att, b.Name)
 	}
 	return EntryInfo{Title: e.GetTitle(), Group: group, UUID: uuidText(e.UUID), Notes: e.GetContent("Notes"), Attachments: att,
-		Created: tm(e.Times.CreationTime), Modified: tm(e.Times.LastModificationTime), History: n}
+		Created: tm(e.Times.CreationTime), Modified: tm(e.Times.LastModificationTime), History: n, Expires: expiresOf(e)}
 }
 
 func uuidText(u gokeepasslib.UUID) string { return hex.EncodeToString(u[:]) }

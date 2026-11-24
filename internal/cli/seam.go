@@ -722,6 +722,9 @@ func cmdSession(args []string, e *Env) error {
 	if !render.Holds(o.snap, ec.name) {
 		return fail("the vault holds nothing for '%s'", ec.name)
 	}
+	if sub != actClose {
+		warnExpiredVault(e, o.v, ec.name)
+	}
 	s0, err := render.PickSite(o.snap, ec.name, site)
 	if err != nil {
 		return fail("%v", err)

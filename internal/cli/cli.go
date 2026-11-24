@@ -154,7 +154,7 @@ const (
 	actClose      = "close" // session close, and the close message of external serve
 )
 
-var modelCommands = map[string]bool{cmdImport: true, cmdExport: true, cmdExportApp: true, cmdStatus: true, cmdVisibility: true, cmdPurge: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true}
+var modelCommands = map[string]bool{cmdImport: true, cmdExport: true, cmdExportApp: true, cmdStatus: true, cmdVisibility: true, cmdPurge: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true, cmdExpiring: true}
 
 // Run runs one command line (without the program name) and returns the exit code.
 func Run(args []string, e *Env) int {

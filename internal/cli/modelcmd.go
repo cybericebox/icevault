@@ -232,7 +232,7 @@ func runExport(e *Env, args []string, out io.Writer, plat *render.Project, snap 
 	return nil
 }
 
-func runExportApp(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot) error {
+func runExportApp(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot, used func(vaultKeys []string)) error {
 	var app, to string
 	var force, dry bool
 	env, site, err := envFlags("export-app", args, e, func(fs *flag.FlagSet) {
@@ -287,6 +287,15 @@ func runExportApp(e *Env, args []string, out io.Writer, plat *render.Project, sn
 		return fail("%v", err)
 	}
 	target := filepath.Join(appDir, ".env")
+	if used != nil {
+		var keys []string
+		for _, r := range report {
+			if k, ok := strings.CutPrefix(r.Source, "vault "); ok {
+				keys = append(keys, k)
+			}
+		}
+		used(keys)
+	}
 	for _, r := range report {
 		fmt.Fprintf(out, "  %s  <- %s\n", r.Name, r.Source)
 	}

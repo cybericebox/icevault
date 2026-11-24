@@ -121,7 +121,7 @@ func readVar(v *vault.Vault, i vault.EntryInfo) (*Var, error) {
 	}
 	f := fieldsOf(v, p)
 	out := &Var{UUID: i.UUID, Key: i.Title, Value: string(e.Password), Description: e.Notes, Managed: orDefault(f[fManaged].Value, ManagedOwner),
-		Vis: orDefault(f[fVis].Value, VisSecret), Labels: splitList(f[fLabels].Value), Changed: stamp(i)}
+		Vis: orDefault(f[fVis].Value, VisSecret), Labels: splitList(f[fLabels].Value), Changed: stamp(i), Expires: dayOf(i)}
 	wipe(e.Password)
 	return out, nil
 }
@@ -226,7 +226,15 @@ func Load(v *vault.Vault) (*Vault, error) {
 			}
 			sort.Strings(names)
 			for _, n := range names {
-				c.Fields = append(c.Fields, &Field{Name: n, Value: fs[n].Value, Secret: fs[n].Protected})
+				exp := fs[fExpiresPrefix+n].Value
+				if _, err := ParseDay(exp); err != nil {
+					prob("connection %s field %s: the expiry is not a date (YYYY-MM-DD) and is ignored", c.Name, n)
+					exp = ""
+				}
+				c.Fields = append(c.Fields, &Field{Name: n, Value: fs[n].Value, Secret: fs[n].Protected, Expires: exp})
+			}
+			if d := dayOf(i); d != "" && connExpiry(c) == "" {
+				importEntryExpiry(c, d)
 			}
 			m.Connections = append(m.Connections, c)
 			connByUUID[c.UUID] = c
@@ -263,7 +271,7 @@ func Load(v *vault.Vault) (*Vault, error) {
 				return err
 			}
 			fs := fieldsOf(v, p)
-			o := &Other{UUID: i.UUID, Title: strings.TrimPrefix(p, GroupOther+"/"), Value: string(e.Password), Notes: e.Notes, Extra: fs[fExtra].Value}
+			o := &Other{UUID: i.UUID, Title: strings.TrimPrefix(p, GroupOther+"/"), Value: string(e.Password), Notes: e.Notes, Extra: fs[fExtra].Value, Expires: dayOf(i)}
 			wipe(e.Password)
 			if d, err := v.Attachment(p, Attachment); err == nil {
 				o.Data = d
@@ -441,16 +449,17 @@ func Sync(v *vault.Vault, m *Vault) error {
 
 // one entry the model wants
 type wanted struct {
-	uuid   *string
-	group  string
-	title  string
-	notes  string
-	pw     string
-	fields map[string]vault.Field
-	data   []byte // attachment "content" (nil: none)
-	free   bool   // the custom fields not named are removed (a connection: its fields are the model's)
-	byPath bool   // no UUID of its own in the model: the entry at its path is it (a stored layout)
-	after  func() // runs once the entry exists (references to its UUID)
+	uuid    *string
+	group   string
+	title   string
+	notes   string
+	pw      string
+	fields  map[string]vault.Field
+	expires string // the expiry date of the entry (YYYY-MM-DD), "" = never
+	data    []byte // attachment "content" (nil: none)
+	free    bool   // the custom fields not named are removed (a connection: its fields are the model's)
+	byPath  bool   // no UUID of its own in the model: the entry at its path is it (a stored layout)
+	after   func() // runs once the entry exists (references to its UUID)
 }
 
 type syncer struct {
@@ -486,7 +495,7 @@ func varFields(x *Var) map[string]vault.Field {
 }
 
 func (s *syncer) varEntry(group string, x *Var) {
-	s.add(&wanted{uuid: &x.UUID, group: group, title: x.Key, notes: x.Description, pw: x.Value, fields: varFields(x)})
+	s.add(&wanted{uuid: &x.UUID, group: group, title: x.Key, notes: x.Description, pw: x.Value, fields: varFields(x), expires: x.Expires})
 }
 
 func (s *syncer) fileEntries(group string, files []*File) {
@@ -516,8 +525,11 @@ func (s *syncer) plan(m *Vault) {
 		fs := map[string]vault.Field{fKind: {Value: c.Kind}}
 		for _, f := range c.Fields {
 			fs[f.Name] = vault.Field{Value: f.Value, Protected: f.Secret}
+			if f.Expires != "" {
+				fs[fExpiresPrefix+f.Name] = vault.Field{Value: f.Expires}
+			}
 		}
-		s.add(&wanted{uuid: &c.UUID, group: GroupConnections, title: c.Name, notes: c.Description, fields: fs, free: true})
+		s.add(&wanted{uuid: &c.UUID, group: GroupConnections, title: c.Name, notes: c.Description, fields: fs, free: true, expires: connExpiry(c)})
 	}
 	for _, e := range m.Envs {
 		base := join(GroupEnvs, e.Name)
@@ -592,7 +604,7 @@ func (s *syncer) plan(m *Vault) {
 		if o.Mode != 0 && o.Mode != 0o600 {
 			fs[fMode] = vault.Field{Value: fmt.Sprintf("%04o", o.Mode)}
 		}
-		s.add(&wanted{uuid: &o.UUID, group: group, title: name, notes: o.Notes, pw: o.Value, fields: fs, data: o.Data})
+		s.add(&wanted{uuid: &o.UUID, group: group, title: name, notes: o.Notes, pw: o.Value, fields: fs, data: o.Data, expires: o.Expires})
 	}
 }
 
@@ -659,6 +671,13 @@ func (s *syncer) apply() error {
 			w.after()
 		}
 		p := join(w.group, w.title)
+		day, err := ParseDay(w.expires)
+		if err != nil {
+			return err
+		}
+		if err := v.SetExpiry(p, day); err != nil {
+			return err
+		}
 		if len(w.fields) > 0 {
 			if err := v.SetFields(p, w.fields); err != nil {
 				return err
