@@ -71,6 +71,9 @@ type Options struct {
 	Update Updater
 	// OpenURL opens an address in the browser; nil where there is none.
 	OpenURL func(url string)
+	// Maker and PickSave make "New vault" possible (newvault.go): both are needed, and the list of Vaults; nil: the page offers no new vault.
+	Maker    VaultMaker
+	PickSave SavePicker
 }
 
 // CLIInstaller is internal/cliinstall as the window needs it.
@@ -92,11 +95,13 @@ type App struct {
 	unlockState string
 	clipHash    [32]byte
 	clipStop    func()
-	rev         int       // how many times the vault was read again after another writer saved it (the page compares it)
-	cur         Target    // how the chosen vault is unlocked
-	vault       string    // the chosen vault file ("" without a list of vaults or before one is chosen)
-	problem     error     // why the chosen vault cannot be unlocked (a coded *Error), nil when it can
-	lastSync    time.Time // the last background check of the vault file
+	rev         int          // how many times the vault was read again after another writer saved it (the page compares it)
+	cur         Target       // how the chosen vault is unlocked
+	vault       string       // the chosen vault file ("" without a list of vaults or before one is chosen)
+	problem     error        // why the chosen vault cannot be unlocked (a coded *Error), nil when it can
+	lastSync    time.Time    // the last background check of the vault file
+	newPath     string       // the place the person chose for a new vault (newvault.go)
+	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 
 	unlocking  sync.Mutex // one unlock at a time
 	confirming sync.Mutex // never two Touch ID dialogs at once
@@ -324,6 +329,7 @@ func Watch(ctx context.Context, a *App, interval time.Duration) {
 // ---- lock, status
 
 func (a *App) lock() {
+	a.dropKit()
 	a.mu.Lock()
 	c := a.core
 	a.core, a.mode = nil, "view"

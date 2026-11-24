@@ -22,6 +22,7 @@ func TestPageEndpointsAreBound(t *testing.T) {
 	}
 	lifecycle := map[string]bool{"status": true, "ping": true, "close": true, "lock": true, "mode": true, "unlock": true, "reveal": true, "cli": true, "cli-install": true, "refresh": true,
 		"vaults": true, "vault-select": true, "vault-open": true, "vault-root": true, "vault-forget": true, "project-choose": true,
+		"vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "kit-save": true, "kit-discard": true,
 		"update": true, "update-check": true, "update-fetch": true, "update-apply": true, "update-auto": true, "update-release": true}
 	reads := map[string]bool{"nav": true, "item": true, "compare": true, "references": true, "pull-candidates": true, "shared": true, "visibility": true, "preview-value": true, "migrate-plan": true}
 	found := map[string]bool{}
