@@ -3,6 +3,7 @@ package mpage
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,6 +56,40 @@ func code(err error) string {
 		return de.Code
 	}
 	return ""
+}
+
+func TestUnimportAsksWhenValuesUseIt(t *testing.T) {
+	c, _ := newCore(t)
+	for _, w := range []map[string]any{
+		{"scope": "shared", "key": "PAIR_ONE", "value": "one", "visibility": "plain"},
+		{"scope": "shared", "key": "PAIR_TWO", "value": "two", "visibility": "plain"},
+		{"scope": "env/prod/general", "key": "PAIR_JOIN", "value": "${{ self.PAIR_ONE }}-x", "visibility": "plain"},
+	} {
+		if _, err := c.Write("m-var", w); err != nil {
+			t.Fatalf("%v: %v", w, err)
+		}
+	}
+	both := []any{"PAIR_ONE", "PAIR_TWO"}
+	if _, err := c.Write("m-import", map[string]any{"env": "prod", "keys": both}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{"PAIR_ONE"}}); err != nil {
+		t.Fatalf("taking out a value nobody uses: %v", err)
+	}
+	_, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{}})
+	if code(err) != "confirm_unimport_used" {
+		t.Fatalf("taking out a value other values use: %v", err)
+	}
+	var de *desktop.Error
+	if !errors.As(err, &de) || !strings.Contains(fmt.Sprint(de.Params["list"]), "PAIR_JOIN") {
+		t.Fatalf("the refusal does not name where it is used: %v", err)
+	}
+	if len(c.Model().Env("prod").Imports) != 1 {
+		t.Fatal("a refused change was kept")
+	}
+	if _, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{}, "confirm": true}); err != nil {
+		t.Fatalf("confirmed: %v", err)
+	}
 }
 
 func TestReferencesAndPreview(t *testing.T) {

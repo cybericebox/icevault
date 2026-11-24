@@ -236,7 +236,29 @@ func (c *Core) writeImports(a map[string]any) error {
 		}
 		imp = append(imp, s)
 	}
+	before := c.m.BrokenRefs(c.d, e)
+	old := e.Imports
 	e.Imports = imp
+	if !flag(a, "confirm") && len(old) > len(imp) {
+		known := map[string]bool{}
+		for _, b := range before {
+			known[b.Where+"/"+b.Name+"/"+b.Key] = true
+		}
+		var list []string
+		for _, b := range c.m.BrokenRefs(c.d, e) {
+			if known[b.Where+"/"+b.Name+"/"+b.Key] {
+				continue
+			}
+			if b.Name != "" {
+				list = append(list, b.Name+" / "+b.Key)
+			} else {
+				list = append(list, b.Key)
+			}
+		}
+		if len(list) > 0 {
+			return refuse("confirm_unimport_used", map[string]any{jList: list})
+		}
+	}
 	return nil
 }
 

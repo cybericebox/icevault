@@ -2709,7 +2709,7 @@ async function mwrite(op, body) {
   if (r.status === 409 && r.data && /^confirm_/.test(r.data.code || "")) {
     const code = r.data.code, p = r.data.params || {}; const v = { name: p.name || "", list: (p.list || []).join(", ") };
     await mreload();
-    confirmBox(t("m." + code + ".title", v), t("m." + code + ".note", v), t("m." + code + ".ok"), { danger: /delete/.test(code), onOk: async () => { const x = await api("/api/" + op, Object.assign({}, body, { confirm: true })); if (x.status === 200) { await mreload(); return true; } return srv(x.data); } });
+    confirmBox(t("m." + code + ".title", v), t("m." + code + ".note", v), t("m." + code + ".ok"), { danger: /delete|unimport/.test(code), onOk: async () => { const x = await api("/api/" + op, Object.assign({}, body, { confirm: true })); if (x.status === 200) { await mreload(); return true; } return srv(x.data); } });
     return true;
   }
   if (r.data && r.data.code === "vault_changed") { const x = await api("/api/refresh", {}); if (x.status === 200) { seenRev = x.data.rev; await mreload(); } }
