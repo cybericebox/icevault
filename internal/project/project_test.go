@@ -190,3 +190,10 @@ func TestConditions(t *testing.T) {
 		t.Errorf("keys %v", c.Keys())
 	}
 }
+
+func TestServeAsSelfIsReserved(t *testing.T) {
+	data := strings.Replace(string(example.Description()), "serve-as: monitor", "serve-as: self", 1)
+	if _, err := Parse([]byte(data)); err == nil || !strings.Contains(err.Error(), "serve-as cannot be 'self'") {
+		t.Fatalf("serve-as self was accepted: %v", err)
+	}
+}

@@ -89,3 +89,25 @@ func setGeneral(e *vmodel.Environment, key, value string) {
 	}
 	e.General = append(e.General, &vmodel.Var{Key: key, Value: value, Vis: vmodel.VisPlain})
 }
+
+// The shared variables are a global item of the projection now: view, visibility and status of an environment read the same as without one.
+func TestSharedItemDoesNotChangeTheCommands(t *testing.T) {
+	h := goldenHarness(t)
+	read := func() string {
+		var all strings.Builder
+		for _, args := range [][]string{{"view", "--env", "prod"}, {"visibility", "--env", "prod"}, {"status", "--env", "prod"}} {
+			h.out.Reset()
+			h.errb.Reset()
+			h.run(args...)
+			all.WriteString(stamps(h.out.String()) + h.errb.String())
+		}
+		return all.String()
+	}
+	before := read()
+	h.editModel(func(m *vmodel.Vault) {
+		m.Shared = append(m.Shared, &vmodel.Var{Key: "UNUSED_SHARED", Value: "x", Vis: vmodel.VisPlain})
+	})
+	if after := read(); after != before {
+		t.Fatalf("a shared variable nobody imports changed the commands:\n--- before\n%s--- after\n%s", before, after)
+	}
+}

@@ -122,7 +122,11 @@ func (s *Snapshot) expand(value, vis, site string, stack []string, self SelfLook
 		inner := SelfLookup(nil) // a global value or an external system has no environment: self is an error there
 		if name == SelfRef {
 			if self == nil {
-				errs = append(errs, fmt.Sprintf("self.%s: there is no environment here (self refers to a variable of the environment the value lives in)", key))
+				msg := fmt.Sprintf("self.%s: there is no environment here (self refers to a variable of the environment the value lives in)", key)
+				if len(stack) > 0 { // reached through a reference: the value that has no environment is a global one or a system's
+					msg = fmt.Sprintf("self.%s: there is no environment here (a global value or an external system has none; reached through %s)", key, chain())
+				}
+				errs = append(errs, msg)
 				continue
 			}
 			t.e, t.msg = self(key)

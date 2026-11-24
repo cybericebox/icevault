@@ -978,6 +978,9 @@ func (d *Description) validateRest(add func(string, ...any), files map[string]bo
 		if !serveRE.MatchString(h.Conn.ServeAs) {
 			add("%s: serve-as is lower case letters, digits, _ and -", h.Scope())
 		}
+		if h.Conn.ServeAs == "self" { // the word of a reference to the environment's own variables
+			add("%s: serve-as cannot be 'self' (references use it for the environment itself)", h.Scope())
+		}
 		serve[h.Conn.ServeAs] = true
 	})
 }

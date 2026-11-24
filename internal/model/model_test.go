@@ -275,6 +275,9 @@ func TestSelfReferences(t *testing.T) {
 	if e := errsOf(res, "USE_G"); len(e) != 1 || !strings.Contains(e[0], "no environment") {
 		t.Errorf("global self: %v", e)
 	}
+	if e := errsOf(res, "USE_G"); len(e) == 1 && !strings.Contains(e[0], "shared.G_SELF -> self.ADMIN") {
+		t.Errorf("the chain is not named: %v", e)
+	}
 	_, _, errs := s.Expand("${{ self.ADMIN }}", "plain", "")
 	if len(errs) != 1 || !strings.Contains(errs[0], "no environment") {
 		t.Errorf("Expand: %v", errs)

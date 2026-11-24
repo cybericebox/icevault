@@ -132,6 +132,16 @@ type Preview struct {
 	Refs    []RefInfo
 	Errors  []string
 	Because []string
+	// Sites is set when the environment has several sites and the value lives in none of them: the result per site, when the sites differ.
+	Sites []SitePreview
+}
+
+// SitePreview is the resolution of a value for one site of an environment.
+type SitePreview struct {
+	Site   string
+	Text   string
+	Vis    string
+	Errors []string
 }
 
 func refInfos(value string, errs []string) []RefInfo {
@@ -155,11 +165,46 @@ func (m *Vault) PreviewValue(d *project.Description, p Place, key, value, vis st
 	if pv.Vis != VisPlain { // a secret or sealed result is never handed out: the page shows the text only when it is plain
 		pv.Text = ""
 	}
+	for i := range pv.Sites {
+		if pv.Sites[i].Vis != VisPlain {
+			pv.Sites[i].Text = ""
+		}
+	}
 	return pv
 }
 
-// expand is PreviewValue with the text kept whatever its visibility (the export needs it).
+// expand is PreviewValue with the text kept whatever its visibility (the export needs it). A value of General in an environment with several
+// sites is resolved for each site: one answer when they agree, else the answer of the first with the per-site results in Sites.
 func (m *Vault) expand(d *project.Description, p Place, key, value, vis string) Preview {
+	if p.Env == nil || p.siteOf() != nil || len(p.Env.Sites) < 2 || !strings.Contains(value, "${{") {
+		return m.expandAt(d, p, key, value, vis, nil)
+	}
+	var first Preview
+	var per []SitePreview
+	same := true
+	for i, s := range p.Env.Sites {
+		pv := m.expandAt(d, p, key, value, vis, s)
+		per = append(per, SitePreview{s.Name, pv.Text, pv.Vis, pv.Errors})
+		if i == 0 {
+			first = pv
+		} else if pv.Text != first.Text || pv.Vis != first.Vis || strings.Join(pv.Errors, "|") != strings.Join(first.Errors, "|") {
+			same = false
+		}
+	}
+	if !same {
+		first.Sites = per
+		first.Text = ""
+		first.Errors = nil
+		for _, sp := range per {
+			first.Errors = append(first.Errors, sp.Errors...)
+		}
+		first.Refs = refInfos(value, first.Errors)
+		first.Because = nil
+	}
+	return first
+}
+
+func (m *Vault) expandAt(d *project.Description, p Place, key, value, vis string, site *Site) Preview {
 	vis = orDefault(vis, VisSecret)
 	pv := Preview{Text: value, Vis: vis}
 	if !strings.Contains(value, "${{") {
@@ -176,7 +221,10 @@ func (m *Vault) expand(d *project.Description, p Place, key, value, vis string) 
 		}
 	} else {
 		draft := &Var{Key: key, Value: value, Vis: vis, Managed: ManagedOwner, Description: previewMark}
-		projectEnv(m, d, p.Env, p.siteOf(), draft, p, func(cs *CompatSnapshot) {
+		if site == nil {
+			site = p.siteOf()
+		}
+		projectEnv(m, d, p.Env, site, draft, p, func(cs *CompatSnapshot) {
 			snap = cs.Snap
 			res = snap.Resolve(model.SecEnvs, p.Env.Name, "", nil)
 			for _, h := range res.Holders[key] {
@@ -309,6 +357,8 @@ func (m *Vault) expandBatches(d *project.Description, e *Environment, out []*Bat
 			p = Place{Env: e, Site: e.Site(b.Title)}
 		case BatchProduct:
 			p = Place{Env: e, Product: e.Product(b.Title)}
+		case BatchConnection:
+			p = Place{} // a connection has no environment: self is an error there, shared and served references resolve
 		default:
 			continue
 		}

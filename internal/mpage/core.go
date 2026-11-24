@@ -570,7 +570,15 @@ func (c *Core) previewValue(a map[string]any) (any, error) {
 	if because == nil {
 		because = []string{}
 	}
-	return map[string]any{"refs": refs, "ref_errors": len(pv.Errors), "errors": pv.Errors, "preview": text, "eff_vis": pv.Vis, "because": because}, nil
+	sites := []map[string]any{}
+	for _, s := range pv.Sites {
+		row := map[string]any{"site": s.Site, "ref_errors": len(s.Errors), "why": strings.Join(s.Errors, "; ")}
+		if len(s.Errors) == 0 && s.Vis == vmodel.VisPlain {
+			row["preview"] = s.Text
+		}
+		sites = append(sites, row)
+	}
+	return map[string]any{"refs": refs, "ref_errors": len(pv.Errors), "errors": pv.Errors, "preview": text, "eff_vis": pv.Vis, "because": because, "sites": sites}, nil
 }
 
 // Reveal returns one secret value: section "m", name the scope (shared, conn/<uuid>, other/<uuid>, env/<e>/general, env/<e>/site/<s>,

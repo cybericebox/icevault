@@ -271,6 +271,9 @@ func (v *Vault) Check() []string {
 	names := map[string]bool{}
 	for _, c := range v.Connections {
 		known[c] = true
+		if strings.EqualFold(c.Name, model.SelfRef) {
+			add("connection %q: 'self' is the word references use for the environment itself", c.Name)
+		}
 		if !ValidConnectionName(c.Name) {
 			add("connection %q: not a name (1-64 characters, no slash)", c.Name)
 		}
@@ -333,6 +336,9 @@ func (v *Vault) Check() []string {
 	envs := map[string]bool{}
 	for _, e := range v.Envs {
 		w := "environment " + e.Name
+		if e.Name == model.SelfRef {
+			add("environment %q: 'self' is the word references use for the environment itself", e.Name)
+		}
 		if !EnvNameRE.MatchString(e.Name) {
 			add("environment %q: not an environment name", e.Name)
 		}
@@ -351,6 +357,9 @@ func (v *Vault) Check() []string {
 		for _, s := range e.Sites {
 			sites[s] = true
 			sw := w + " site " + s.Name
+			if s.Name == model.SelfRef {
+				add("%s: 'self' is the word references use for the environment itself", sw)
+			}
 			if !ThingNameRE.MatchString(s.Name) || sn[s.Name] {
 				add("%s: not a name, or twice", sw)
 			}

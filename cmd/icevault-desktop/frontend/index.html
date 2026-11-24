@@ -894,6 +894,9 @@ function refSummary(info, ownVis) {
   const w = el("div", "refprev"); if (!info.refs || !info.refs.length) return null;
   const chips = el("div", "refs"); info.refs.forEach((x) => { const b = el("span", "chip" + (x.ok ? "" : " miss")); b.textContent = refTitle(x) + " / " + x.key; setTip(b, x.ok ? "" : refWhy(x.why)); chips.append(b); }); w.append(chips);
   w.append(el("div", "quiet", info.ref_errors ? t("ref.preview_broken") : info.preview !== null && info.preview !== undefined ? t("ref.preview", { text: info.preview }) : t("ref.preview_hidden", { vis: t("vis.word." + info.eff_vis) })));
+  if (info.sites && info.sites.length) {   // a value of General in an environment with several sites: one line per site
+    const ul = el("ul", "mmissing"); info.sites.forEach((s) => ul.append(el("li", s.ref_errors ? "miss" : "", s.ref_errors ? t("ref.site_broken", { site: s.site, why: refWhy(s.why) }) : s.preview !== undefined ? t("ref.site_text", { site: s.site, text: s.preview }) : t("ref.site_hidden", { site: s.site })))); w.append(el("div", "quiet", t("ref.differs"))); w.append(ul);
+  }
   if (info.because && info.because.length) w.append(withIcon("key", t("ref.because", { vis: t("vis.word." + info.eff_vis), list: info.because.join(", ") }), "tag warn"));
   return w;
 }

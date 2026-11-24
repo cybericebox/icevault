@@ -37,9 +37,13 @@ func TestPreviewSelfReferences(t *testing.T) {
 	if pv := m.PreviewValue(d, Place{Env: prod, Site: main}, "X", "${{ self.GKE_POOL }}", VisPlain); pv.Text != "c1" {
 		t.Fatalf("site: %+v", pv)
 	}
+	// two sites and a value of General: resolved per site, never a false "no value" for the site that has it
 	pv = m.PreviewValue(d, general, "X", "${{ self.GKE_POOL }}", VisPlain)
-	if len(pv.Errors) != 1 || !strings.Contains(pv.Errors[0], "no value self.GKE_POOL") || pv.Refs[0].OK || pv.Text != "" {
+	if len(pv.Sites) != 2 || pv.Sites[0].Site != "main" || pv.Sites[0].Text != "c1" || len(pv.Sites[0].Errors) != 0 || len(pv.Sites[1].Errors) != 1 || !strings.Contains(pv.Sites[1].Errors[0], "no value self.GKE_POOL") {
 		t.Fatalf("two sites, no pair: %+v", pv)
+	}
+	if pv := m.PreviewValue(d, general, "X", "${{ self.PUBLIC_HOST }}", VisPlain); len(pv.Sites) != 0 || pv.Text != "example.org" {
+		t.Fatalf("sites agree: %+v", pv)
 	}
 	// a cycle names its chain; editing a value that refers to itself is one
 	pv = m.PreviewValue(d, general, "PUBLIC_HOST", "${{ self.PUBLIC_HOST }}", VisPlain)
@@ -138,4 +142,47 @@ func contains(l []string, x string) bool {
 		}
 	}
 	return false
+}
+
+func TestSelfIsAReservedNameInTheModel(t *testing.T) {
+	for _, mod := range []func(m *Vault){
+		func(m *Vault) { m.Env("prod").Name = "self" },
+		func(m *Vault) { m.Env("prod").Sites[0].Name = "self" },
+		func(m *Vault) { m.Connections[0].Name = "Self" },
+	} {
+		m := sample()
+		mod(m)
+		found := false
+		for _, e := range m.Check() {
+			found = found || strings.Contains(e, "'self'")
+		}
+		if !found {
+			t.Errorf("a name self was accepted: %v", m.Check())
+		}
+	}
+}
+
+func TestBatchesExpandConnectionFields(t *testing.T) {
+	m := sample()
+	d := desc(t)
+	m.Connections[0].Fields[1].Value = "proj-${{ shared.CONTACT_ADDRESS }}"
+	bs, err := Batches(m, d, "prod", Selection{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := false
+	for _, b := range bs {
+		if b.Kind == BatchConnection {
+			for _, v := range b.Vars {
+				ok = ok || v.Value == "proj-help@example.org"
+			}
+		}
+	}
+	if !ok {
+		t.Fatal("a reference in a connection field is not resolved in the export")
+	}
+	m.Connections[0].Fields[1].Value = "${{ shared.NOPE }}"
+	if _, err := Batches(m, d, "prod", Selection{All: true}); err == nil || !strings.Contains(err.Error(), "shared.NOPE") {
+		t.Fatalf("broken field: %v", err)
+	}
 }
