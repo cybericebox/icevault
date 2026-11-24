@@ -90,6 +90,16 @@ func TestAConnectionOfAnUnknownKindIsReadOnlyAndKept(t *testing.T) {
 	if _, err := bare.Write("m-field", map[string]any{"uuid": u, "field": "token", "value": "t-2"}); code(err) != "unknown_kind" {
 		t.Fatalf("%v", err)
 	}
+	for _, a := range []map[string]any{{"uuid": u, "field": "token", "delete": true}} {
+		if _, err := bare.Write("m-field", a); code(err) != "unknown_kind" {
+			t.Fatalf("a field of an unknown kind is not deleted: %v", err)
+		}
+	}
+	for _, a := range []map[string]any{{"action": "update", "uuid": u, "name": "Renamed"}, {"action": "delete", "uuid": u}} {
+		if _, err := bare.Write("m-connection", a); code(err) != "unknown_kind" {
+			t.Fatalf("%v: %v", a, err)
+		}
+	}
 	if _, err := bare.Write("m-connection", map[string]any{"action": "create", "kind": "aws", "name": "A"}); err != nil {
 		t.Fatalf("other writes still work: %v", err)
 	}

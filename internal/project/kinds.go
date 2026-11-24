@@ -57,7 +57,7 @@ func (d *Description) Kinds() kinds.Set {
 	return kinds.With(out)
 }
 
-// inheritFieldTypes gives a variable of a connection of a declared kind the type, choices and pattern of its field when it names none, so a
+// inheritFieldTypes gives a variable of a connection the secret flag of its field (always: a secret field is never exported as plain) and, for a declared kind, the type, choices and pattern of its field when it names none, so a
 // value is checked wherever it is entered.
 func (d *Description) inheritFieldTypes() {
 	set := d.Kinds()
@@ -66,12 +66,17 @@ func (d *Description) inheritFieldTypes() {
 			return
 		}
 		k, ok := set.Kind(u.Kind)
-		if !ok || !k.Declared {
+		if !ok {
 			return
 		}
 		for i := range u.Variables {
 			v := &u.Variables[i]
-			if f := k.Field(v.Field); f != nil && v.Type == "" && len(v.Choices) == 0 && v.Pattern == "" {
+			f := k.Field(v.Field)
+			if f == nil {
+				continue
+			}
+			v.Secret = v.Secret || f.Secret // a variable never exposes a value its field keeps secret
+			if k.Declared && v.Type == "" && len(v.Choices) == 0 && v.Pattern == "" {
 				v.Type, v.Choices, v.Pattern = f.Type, f.Choices, f.Pattern
 			}
 		}

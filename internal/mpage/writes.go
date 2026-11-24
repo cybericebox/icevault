@@ -315,6 +315,9 @@ func (c *Core) writeConnection(a map[string]any) error {
 		if x == nil {
 			return refuse("not_found", nil)
 		}
+		if _, known := c.kinds().Kind(x.Kind); !known {
+			return refuse("unknown_kind", map[string]any{jKind: x.Kind}) // read only without the description that declares the kind
+		}
 		if name != "" && name != x.Name {
 			if !vmodel.ValidConnectionName(name) {
 				return refuse("bad_name", nil)
@@ -335,6 +338,9 @@ func (c *Core) writeConnection(a map[string]any) error {
 		x := c.connByUUID(str(a, "uuid"))
 		if x == nil {
 			return refuse("not_found", nil)
+		}
+		if _, known := c.kinds().Kind(x.Kind); !known {
+			return refuse("unknown_kind", map[string]any{jKind: x.Kind})
 		}
 		if us := c.usersOf(x); len(us) > 0 && !flag(a, "confirm") {
 			return refuse("confirm_delete_used", map[string]any{jList: userList(us), jName: x.Name})
@@ -379,6 +385,10 @@ func (c *Core) writeField(a map[string]any) error {
 	if !kinds.FieldRE.MatchString(name) {
 		return refuse("bad_key", map[string]any{jKey: name})
 	}
+	k, known := c.kinds().Kind(x.Kind)
+	if !known {
+		return refuse("unknown_kind", map[string]any{jKind: x.Kind}) // read only: this vault was opened without the description that declares the kind
+	}
 	if flag(a, actDelete) {
 		var keep []*vmodel.Field
 		for _, f := range x.Fields {
@@ -388,10 +398,6 @@ func (c *Core) writeField(a map[string]any) error {
 		}
 		x.Fields = keep
 		return nil
-	}
-	k, known := c.kinds().Kind(x.Kind)
-	if !known {
-		return refuse("unknown_kind", map[string]any{jKind: x.Kind}) // read only: this vault was opened without the description that declares the kind
 	}
 	secret := flag(a, "secret")
 	kf := k.Field(name)

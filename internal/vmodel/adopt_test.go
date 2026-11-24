@@ -64,11 +64,11 @@ func TestAdoptConnectionsMovesOwnValues(t *testing.T) {
 func TestAdoptConnectionsFillsAndKeepsConflicts(t *testing.T) {
 	d := descWithKind(t)
 	m, p := portalWithOwnValues(t)
-	have := &Connection{Name: "Stats main", Kind: "stats", Fields: []*Field{{Name: "site_id", Value: "other-1"}, {Name: "token", Value: ""}}}
+	have := &Connection{Name: "Stats", Kind: "stats", Fields: []*Field{{Name: "site_id", Value: "other-1"}, {Name: "token", Value: ""}}}
 	m.Connections = append(m.Connections, have)
 	plan, _ := AdoptConnections(m, d, "prod")
-	if len(plan) != 1 || plan[0].New || plan[0].Connection != "Stats main" || strings.Join(plan[0].Conflicts, ",") != "ANALYTICS_ID" || strings.Join(plan[0].Variables, ",") != "BILLING_ACCOUNT" {
-		t.Fatalf("the only connection of the kind is used: %+v", plan)
+	if len(plan) != 1 || plan[0].New || plan[0].Chosen != "named" || plan[0].Connection != "Stats" || strings.Join(plan[0].Conflicts, ",") != "ANALYTICS_ID" || strings.Join(plan[0].Variables, ",") != "BILLING_ACCOUNT" {
+		t.Fatalf("the connection the description names is used: %+v", plan)
 	}
 	if have.Field("site_id").Value != "other-1" || have.Field("token").Value == "" {
 		t.Fatal("a value that differs stays, an empty field is filled")
@@ -79,6 +79,44 @@ func TestAdoptConnectionsFillsAndKeepsConflicts(t *testing.T) {
 	}
 	if !kept {
 		t.Fatal("a value in conflict stays an own value")
+	}
+}
+
+// A connection of the kind that this environment does not use may belong to other environments: it is never filled; a new one is made.
+func TestAdoptConnectionsLeavesAConnectionOfAnotherEnvironmentAlone(t *testing.T) {
+	d := descWithKind(t)
+	m, _ := portalWithOwnValues(t)
+	other := &Connection{Name: "Stats staging", Kind: "stats", Fields: []*Field{{Name: "site_id", Value: ""}}}
+	m.Connections = append(m.Connections, other)
+	plan, _ := AdoptConnections(m, d, "prod")
+	if len(plan) != 1 || !plan[0].New || plan[0].Chosen != "new" || plan[0].Connection != "Stats" {
+		t.Fatalf("%+v", plan)
+	}
+	if other.Field("site_id").Value != "" || len(other.Fields) != 1 {
+		t.Fatal("another environment's connection was filled")
+	}
+}
+
+// A variable the environment holds in several places with different values moves nowhere and loses nothing.
+func TestAdoptConnectionsKeepsAVariableThatDiffers(t *testing.T) {
+	d := descWithKind(t)
+	m, p := portalWithOwnValues(t)
+	p.Sub = map[string][]*Var{"google-cluster": {{Key: "ANALYTICS_ID", Value: "site-OTHER", Vis: VisPlain}}}
+	plan, _ := AdoptConnections(m, d, "prod")
+	if len(plan) != 1 || strings.Join(plan[0].Differing, ",") != "ANALYTICS_ID" || strings.Join(plan[0].Variables, ",") != "BILLING_ACCOUNT" {
+		t.Fatalf("%+v", plan)
+	}
+	if len(p.Sub["google-cluster"]) != 1 {
+		t.Fatal("the other place lost its value")
+	}
+	n := 0
+	for _, x := range p.Vars {
+		if x.Key == "ANALYTICS_ID" {
+			n++
+		}
+	}
+	if n != 1 || m.Connection("Stats").Field("site_id") != nil {
+		t.Fatal("a differing variable was moved")
 	}
 }
 

@@ -109,3 +109,23 @@ func TestDeclaredKindsNeedFormat3(t *testing.T) {
 		t.Fatal(Format, MinFormat)
 	}
 }
+
+// A variable never exposes what its field keeps secret, even when the description forgot secret: true.
+func TestAVariableInheritsTheSecretFlagOfItsField(t *testing.T) {
+	kind := strings.Replace(mailerKind, "- {name: mode, type: enum, choices: [live, test]}", "- {name: mode, secret: true}", 1)
+	use := mailerUse + "          - {name: MAIL_MODE, field: mode}\n"
+	d, err := withKinds(t, kind, use)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range d.Homes("services/indexer.env", "MAIL_MODE") {
+		if !h.Var.Secret {
+			t.Fatal("a plain variable on a secret field")
+		}
+	}
+	for _, h := range d.Homes("services/indexer.env", "MAIL_FROM") {
+		if h.Var.Secret {
+			t.Fatal("a plain field made secret")
+		}
+	}
+}

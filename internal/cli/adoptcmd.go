@@ -24,14 +24,14 @@ func runAdopt(e *Env, a envArgs, out io.Writer, v *vault.Vault, plat *render.Pro
 	moved := 0
 	for _, x := range plan {
 		moved += x.Count()
-		made := ""
-		if x.New {
-			made = " (new)"
-		}
+		made := " (" + map[string]string{"new": "new connection", "product": "the product's connection", "environment": "a connection this environment uses", "named": "the connection the description names"}[x.Chosen] + ")"
 		if x.Count() > 0 {
 			fmt.Fprintf(out, "  %s: %s -> connection %s [%s]%s\n", x.Product, strings.Join(x.Variables, ", "), x.Connection, x.Kind, made)
 		}
-		if rest := without(x.Conflicts, x.Sealed); len(rest) > 0 {
+		if len(x.Differing) > 0 {
+			fmt.Fprintf(out, "  %s: kept as they are, held in several places with different values: %s\n", x.Product, strings.Join(x.Differing, ", "))
+		}
+		if rest := without(without(x.Conflicts, x.Sealed), x.Differing); len(rest) > 0 {
 			fmt.Fprintf(out, "  %s: kept as they are, the connection %s holds another value: %s\n", x.Product, x.Connection, strings.Join(rest, ", "))
 		}
 		if len(x.Sealed) > 0 {

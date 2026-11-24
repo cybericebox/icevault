@@ -18,6 +18,9 @@ type Adoption struct {
 	// Connection is the name of the connection that gets the values; New says the adoption makes it.
 	Connection string
 	New        bool
+	// Chosen says why this connection: "product" (the product already has one of the kind), "environment" (another product or site of the
+	// environment uses it), "named" (the one the description names) or "new".
+	Chosen string
 	// Variables are the names that move (in the order of the description).
 	Variables []string
 	// Conflicts are variables whose connection field already holds another value: they stay where they are.
@@ -25,6 +28,8 @@ type Adoption struct {
 	// Sealed are variables that stay where they are because their value is sealed (never shown, never moved: a connection field can be revealed).
 	// They are also listed in Conflicts.
 	Sealed []string
+	// Differing are variables held in several places of the environment with different values: nothing of them is touched (also in Conflicts).
+	Differing []string
 }
 
 // Count is the number of values the adoption moves.
@@ -98,7 +103,7 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		vis   string
 	}
 	var moves []move
-	var sealed []string
+	var sealed, differing []string
 	for _, v := range use.Variables {
 		if v.Field == "" {
 			continue
@@ -116,7 +121,11 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 			continue
 		}
 		mv := move{name: v.Name, field: v.Field, homes: homes, vis: VisPlain}
+		differ := false
 		for _, h := range homes {
+			if h.v.Value != "" && mv.value != "" && h.v.Value != mv.value {
+				differ = true
+			}
 			if mv.value == "" {
 				mv.value = h.v.Value
 			}
@@ -127,14 +136,20 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		if v.Secret {
 			mv.vis = VisSecret
 		}
+		if differ {
+			differing = append(differing, v.Name) // the same variable holds different values in several places: nothing is touched
+			continue
+		}
 		moves = append(moves, mv)
 	}
-	a := Adoption{Product: p.Name, Kind: use.Kind, Sealed: sealed, Conflicts: append([]string(nil), sealed...)}
+	a := Adoption{Product: p.Name, Kind: use.Kind, Sealed: sealed, Differing: differing, Conflicts: append(append([]string(nil), sealed...), differing...)}
 	if len(moves) == 0 {
-		return a, len(sealed) > 0
+		return a, len(a.Conflicts) > 0
 	}
-	c := adoptTarget(m, d, p, use)
+	c, why := adoptTarget(m, d, e, p, use)
+	a.Chosen = why
 	if c == nil {
+		a.Chosen = "new"
 		k, _ := d.Kinds().Kind(use.Kind)
 		name := or(use.Name, or(k.Title, use.Kind))
 		base := name
@@ -182,27 +197,33 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 	return a, true
 }
 
-// adoptTarget is the connection the values go to, nil when a new one is to be made.
-func adoptTarget(m *Vault, d *project.Description, p *Product, use project.ConnectionUse) *Connection {
+// adoptTarget is the connection the values go to and why, nil when a new one is to be made. Only a connection this environment already uses (or the
+// one the description names) is taken: another connection of the kind may belong to other environments, and filling it would change them.
+func adoptTarget(m *Vault, d *project.Description, e *Environment, p *Product, use project.ConnectionUse) (*Connection, string) {
 	for _, x := range p.Connections {
 		if x.Kind == use.Kind {
-			return x
+			return x, "product"
+		}
+	}
+	for _, o := range e.Products {
+		for _, x := range o.Connections {
+			if x.Kind == use.Kind {
+				return x, "environment"
+			}
+		}
+	}
+	for _, s := range e.Sites {
+		for _, x := range []*Connection{s.Connection, s.State} {
+			if x != nil && x.Kind == use.Kind {
+				return x, "environment"
+			}
 		}
 	}
 	k, _ := d.Kinds().Kind(use.Kind)
 	if c := m.Connection(or(use.Name, k.Title)); c != nil && c.Kind == use.Kind {
-		return c
+		return c, "named"
 	}
-	var same []*Connection
-	for _, c := range m.Connections {
-		if c.Kind == use.Kind {
-			same = append(same, c)
-		}
-	}
-	if len(same) == 1 {
-		return same[0]
-	}
-	return nil
+	return nil, "new"
 }
 
 func without(list []*Var, x *Var) []*Var {
