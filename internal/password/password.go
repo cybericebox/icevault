@@ -7,6 +7,7 @@
 package password
 
 import (
+	"bytes"
 	"crypto/rand"
 	_ "embed"
 	"errors"
@@ -27,7 +28,8 @@ const (
 	// 12 random characters reach exactly 1e12 (the shortest password that can pass), and a pattern with a few changes stays far below the line. The line
 	// is set by the vault key derivation: Argon2d with 64 MiB makes one guess cost about a millisecond of a GPU, so one GPU makes about 1e3 guesses a
 	// second and 1e12 guesses take about 30 years on it. A lower line (1e10, about four months) was found too weak; a higher one would refuse
-	// good 12-character random passwords. A phrase of a few common words separated by spaces can still reach the line: the separators count too.
+	// good 12-character random passwords. A phrase of common words does not get past it with separators: the estimate is the lower of the password as typed and with its separators
+	// (space - _ . , ; : / + and tab) removed.
 	MinGuessesLog10 = 12
 	// MaxLength is the most characters of a new master password. zxcvbn takes time about cubic in the length, so a longer one is refused at once
 	// (nothing is estimated), and only the first EstimateLength characters are estimated, as the original zxcvbn does.
@@ -122,7 +124,7 @@ func Estimate(pw []byte) Strength {
 		s.Code, s.Level = CodeTooLong, 1
 		return s
 	}
-	res := zxcvbn.PasswordStrength(firstRunes(pw, EstimateLength), nil)
+	res := weakest(pw)
 	s.Log10 = math.Log10(math.Max(res.Guesses, 1))
 	switch {
 	case res.Guesses >= math.Pow(10, MinGuessesLog10): // not through Log10: a round 1e12 must not fall to 11.999...
@@ -146,6 +148,37 @@ func Estimate(pw []byte) Strength {
 		s.OK = true
 	}
 	return s
+}
+
+// separators are the characters people put between words to make a phrase look random: zxcvbn counts each as one unexplained character (10
+// guesses), so "sunshine monkey dragon" would be judged far above "sunshinemonkeydragon".
+const separators = " \t-_.,;:/+"
+
+// weakest is the estimate of the password as typed and of the password with its separators removed, whichever is lower: a separator buys nothing.
+// Each looks at the first EstimateLength characters. The estimate library takes a Go string; the copies live for the call only.
+func weakest(pw []byte) zxcvbn.Result {
+	raw := zxcvbn.PasswordStrength(firstRunes(pw, EstimateLength), nil)
+	plain := bytes.Map(func(r rune) rune {
+		if strings.ContainsRune(separators, r) {
+			return -1
+		}
+		return r
+	}, pw)
+	defer func() {
+		for i := range plain {
+			plain[i] = 0
+		}
+	}()
+	if len(plain) == len(pw) {
+		return raw // nothing to remove
+	}
+	if len(plain) == 0 {
+		return raw
+	}
+	if bare := zxcvbn.PasswordStrength(firstRunes(plain, EstimateLength), nil); bare.Guesses < raw.Guesses {
+		return bare
+	}
+	return raw
 }
 
 // firstRunes is the first n characters of b as a string.

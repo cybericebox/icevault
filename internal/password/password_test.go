@@ -30,6 +30,11 @@ func TestCheckTable(t *testing.T) {
 		{"twelve random lower case", "bkqzmfwhgtxj", ""},
 		{"twelve lower case with a keyboard run", "qzkxvbnmwjfd", CodeWeak}, // 1e11.9: just under the line
 		{"three common words", "baby love dragon", CodeWeak},
+		{"three common words, spaces", "sunshine monkey dragon", CodeWeak},
+		{"three common words, dashes", "sunshine-monkey-dragon", CodeWeak},
+		{"three common words, dots", "sunshine.monkey.dragon", CodeWeak},
+		{"three common words, mixed separators", "football_monkey, dragon", CodeWeak},
+		{"random with a separator", "k7Qm-2xVb9RtZp", ""},
 		{"six words", "wolf-prism-ladder-oven-brisk-quartz", ""},
 		{"long random", "T9#vLq2!xRb7@mZp4", ""},
 		{"non ASCII random", "щука-Ωmega-7Kq!zXp", ""},
@@ -61,6 +66,27 @@ func TestTheLineIsOneE12(t *testing.T) {
 	on, under := Estimate([]byte("bkqzmfwhgtxj")), Estimate([]byte("qzkxvbnmwjfd"))
 	if !on.OK || on.Log10 < 12 || under.OK || under.Log10 >= 12 || under.Log10 < 11 || under.Level != 3 || under.Code != CodeWeak {
 		t.Fatalf("on %+v under %+v", on, under)
+	}
+}
+
+// A separator buys nothing: the phrase is judged as the words without it, and a generated phrase is far above the line with or without its dashes.
+func TestSeparatorsDoNotAddStrength(t *testing.T) {
+	spaced, bare := Estimate([]byte("sunshine monkey dragon")), Estimate([]byte("sunshinemonkeydragon"))
+	if spaced.OK || spaced.Log10 > bare.Log10+0.001 {
+		t.Fatalf("spaced %+v bare %+v", spaced, bare)
+	}
+	if spaced.Reason != ReasonDictionary {
+		t.Fatalf("reason %q", spaced.Reason)
+	}
+	for i := 0; i < 200; i++ {
+		p, err := Passphrase()
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.ReplaceAll(p, "-", "")
+		if s := Estimate([]byte(joined)); !s.OK || s.Log10 < 20 {
+			t.Fatalf("a generated phrase without its dashes: %+v", s)
+		}
 	}
 }
 
