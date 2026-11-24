@@ -1,6 +1,14 @@
 IceVault {{VERSION}}
 
-## From 0.5
+## From 0.6
+
+- **References inside an environment**: `${{ self.KEY }}` uses another variable of the same environment (and site), e.g. `SUPPORT_EMAIL = ${{ self.SUPER_ADMIN_EMAIL }}`. `${{ shared.KEY }}` and connection references now work on the environment screen too. Every value field has **Insert reference** (or type `${{`) with a live preview; secret results are never shown. A broken reference is listed in "Missing for deploy" and stops an export with the variable's name. `self` is a reserved name.
+- **Value types and choices**: the project description may give a variable a `type` (string, bool, int, email, url, domain, enum), `choices`, `pattern` and `min`/`max`. The window shows a drop-down for an enum, a switch for a bool and checks the others beside the field; `status`, `export`, `export-app` and `session` refuse a value that does not fit (the variable is named, never the value). A description that uses these keys needs IceVault 0.7 or later.
+- **"Missing for deploy" follows required-when** and the place of each product (a product on a cluster needs its cluster settings); things shared by the environment are counted once.
+- **The environment screen**: collapsible sections and cards, add buttons at the top right, a sticky header, aligned tables with a full frame, a green "ready" state, values set by the system hidden behind **Show set automatically (N)**, secret values typed into masked fields, a service-account key read from a file (one line, up to 64 KiB), field errors beside their field, un-importing a shared value that others use asks first.
+- **The window**: the open vault's file name in the sidebar; a new vault shows in Recent at once, marked "not opened yet"; the lock screen and the New vault dialog keep their size; leaving an unsaved recovery kit asks first.
+
+## From 0.5 (in 0.6.x)
 
 - **Change the master password**: `icevault change-password [--generate] [--refresh-copies]` or the key button of an unlocked window. The current password is typed (Touch ID is not accepted for it); the new one follows the same rules as a new vault. The file is rewritten atomically; `<vault>.prev` (which opens with the old password) is removed, the Touch ID binding of the old password is removed (turn Touch ID on again), and every copy that still opens with the old password is listed (`--refresh-copies` rewrites the standing copies; a `.prev` next to a refreshed copy keeps the old password: delete it).
 - **New icon**: the Cyber ICE Box crest as the body of a padlock.
