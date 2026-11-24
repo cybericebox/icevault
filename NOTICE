@@ -1,2 +1,11 @@
 IceVault
 Copyright 2026 Cyber ICE Box
+
+This product includes third-party material:
+
+- zxcvbn-go port by Trustelem (github.com/trustelem/zxcvbn), a Go port of zxcvbn by Dropbox, used to estimate the strength of a new master password.
+  Copyright (c) 2018 Vincent Vanackere and Trustelem. MIT License. The port follows zxcvbn, Copyright (c) 2012-2016 Dropbox, Inc., MIT License.
+
+- The EFF large wordlist for random passphrases (internal/password/eff_large_wordlist.txt, unchanged), by the Electronic Frontier Foundation,
+  https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases. Licensed under Creative Commons Attribution 3.0 United States
+  (CC BY 3.0 US), https://creativecommons.org/licenses/by/3.0/us/.

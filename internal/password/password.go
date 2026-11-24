@@ -1,0 +1,211 @@
+// Package password is the one policy for a new vault master password, shared by the command line (init-vault) and the window (New vault), and the
+// generator of passphrases. It has no say over how an existing vault opens: nothing here runs on unlock.
+//
+// The policy: at least 12 characters AND a strength estimate (zxcvbn, see NOTICE) of at least 1e10 guesses (the top zxcvbn score). The estimate refuses dictionary words
+// (also with digits, case changes and l33t), keyboard walks, repeats, sequences, dates and the common patterns built from them, however long the
+// password is. An empty password stays possible only where a key file stands behind it; that rule is the caller's, not decided here.
+package password
+
+import (
+	"crypto/rand"
+	_ "embed"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/trustelem/zxcvbn"
+	"github.com/trustelem/zxcvbn/match"
+)
+
+const (
+	// MinLength is the least number of characters (runes) of a new master password.
+	MinLength = 12
+	// MinGuessesLog10 is the least estimate, as a power of ten: 1e10 guesses is the top score (4) of zxcvbn. Characters no pattern explains count 10 each
+	// in that estimate, so 12 random characters reach 1e12 and a pattern with a few changes stays far below the line.
+	MinGuessesLog10 = 10
+	// Words is the length of a generated passphrase.
+	Words = 6
+	// MaxLevel is the top of the meter: the level of a password the policy accepts.
+	MaxLevel = 4
+)
+
+// Codes of a refusal (the window translates them: srv.<code> in messages.json).
+const (
+	CodeTooShort = "password_too_short"
+	CodeWeak     = "password_weak"
+)
+
+// Reasons of a weak password: what the estimate found in it.
+const (
+	ReasonDictionary = "dictionary"
+	ReasonKeyboard   = "keyboard"
+	ReasonRepeat     = "repeat"
+	ReasonSequence   = "sequence"
+	ReasonDate       = "date"
+	ReasonCommon     = "common" // nothing single to name: simply too easy to guess
+)
+
+//go:embed eff_large_wordlist.txt
+var wordlistRaw string // the EFF large wordlist, unchanged (CC BY 3.0, see NOTICE): "11111<TAB>abacus" per line
+
+var wordlist = parseWordlist(wordlistRaw)
+
+func parseWordlist(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		if f := strings.Fields(line); len(f) == 2 {
+			out = append(out, f[1])
+		}
+	}
+	return out
+}
+
+// Refusal is a password the policy does not accept. Its text says why and points to the generator; it never holds the password.
+type Refusal struct {
+	Code   string // CodeTooShort or CodeWeak
+	Reason string // for CodeWeak: a Reason* constant
+	Min    int    // MinLength
+}
+
+func (r *Refusal) Error() string {
+	const hint = " Use a generated passphrase instead (init-vault --generate, or Generate in the window)."
+	if r.Code == CodeTooShort {
+		return fmt.Sprintf("the password is too short: use at least %d characters.%s", r.Min, hint)
+	}
+	return "the password is too easy to guess (" + reasonText[r.Reason] + ")." + hint
+}
+
+var reasonText = map[string]string{
+	ReasonDictionary: "it is built from dictionary words or common passwords",
+	ReasonKeyboard:   "it follows a keyboard pattern",
+	ReasonRepeat:     "it is made of repeats",
+	ReasonSequence:   "it is a sequence of characters in order",
+	ReasonDate:       "it contains a date or a year",
+	ReasonCommon:     "it is a common pattern with a few changes",
+}
+
+// Strength is the estimate of one password, for the meter of the window and for Check.
+type Strength struct {
+	Level  int     // 0 empty, 1 very weak, 2 weak, 3 almost there, MaxLevel accepted
+	OK     bool    // the policy accepts it
+	Length int     // characters
+	Log10  float64 // log10 of the estimated guesses
+	Code   string  // "" when OK
+	Reason string  // for CodeWeak
+}
+
+// Estimate judges a password. It does not keep it.
+func Estimate(pw []byte) Strength {
+	s := Strength{Length: utf8.RuneCount(pw)}
+	if s.Length == 0 {
+		s.Code = CodeTooShort
+		return s
+	}
+	res := zxcvbn.PasswordStrength(string(pw), nil)
+	s.Log10 = math.Log10(math.Max(res.Guesses, 1))
+	switch {
+	case s.Log10 >= MinGuessesLog10:
+		s.Level = MaxLevel
+	case s.Log10 >= 8:
+		s.Level = 3
+	case s.Log10 >= 6:
+		s.Level = 2
+	default:
+		s.Level = 1
+	}
+	if s.Level < MaxLevel {
+		s.Reason = reasonOf(res.Sequence)
+	}
+	switch {
+	case s.Length < MinLength:
+		s.Code, s.Level = CodeTooShort, min(s.Level, MaxLevel-1)
+	case s.Level < MaxLevel:
+		s.Code = CodeWeak
+	default:
+		s.OK = true
+	}
+	return s
+}
+
+// reasonOf names the pattern that covers most of the password.
+func reasonOf(seq []*match.Match) string {
+	cover := map[string]int{}
+	for _, m := range seq {
+		r := ""
+		switch m.Pattern {
+		case "dictionary":
+			r = ReasonDictionary
+		case "spatial":
+			r = ReasonKeyboard
+		case "repeat":
+			r = ReasonRepeat
+		case "sequence":
+			r = ReasonSequence
+		case "date", "regex":
+			r = ReasonDate
+		}
+		if r != "" {
+			cover[r] += m.J - m.I + 1
+		}
+	}
+	best, most := ReasonCommon, 0
+	for _, r := range []string{ReasonDictionary, ReasonKeyboard, ReasonRepeat, ReasonSequence, ReasonDate} { // fixed order: a tie is not random
+		if cover[r] > most {
+			best, most = r, cover[r]
+		}
+	}
+	return best
+}
+
+// Check is nil when the policy accepts pw, else a *Refusal.
+func Check(pw []byte) error {
+	s := Estimate(pw)
+	if s.OK {
+		return nil
+	}
+	return &Refusal{Code: s.Code, Reason: s.Reason, Min: MinLength}
+}
+
+// Generate makes a passphrase of n random words of the EFF large list joined with "-". Every word is drawn from r (crypto/rand in Passphrase) by
+// rejection sampling, so no word is likelier than another. A reader that fails is an error: never a shorter passphrase.
+func Generate(r io.Reader, n int) (string, error) {
+	if n < 1 {
+		return "", errors.New("a passphrase needs at least one word")
+	}
+	const span = 1 << 16
+	limit := span - span%len(wordlist) // values from here up would favour the low indexes
+	words := make([]string, 0, n)
+	var buf [2]byte
+	for len(words) < n {
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return "", fmt.Errorf("the random source failed: %w", err)
+		}
+		v := int(buf[0])<<8 | int(buf[1])
+		if v >= limit {
+			continue
+		}
+		words = append(words, wordlist[v%len(wordlist)])
+	}
+	return strings.Join(words, "-"), nil
+}
+
+// Passphrase is a generated passphrase of Words words from crypto/rand that the policy accepts (a draw the estimate would refuse, which
+// needs six unusually common words, is drawn again).
+func Passphrase() (string, error) { return PassphraseFrom(rand.Reader) }
+
+// PassphraseFrom is Passphrase with another source of randomness (tests).
+func PassphraseFrom(r io.Reader) (string, error) {
+	for i := 0; i < 100; i++ {
+		p, err := Generate(r, Words)
+		if err != nil {
+			return "", err
+		}
+		if Check([]byte(p)) == nil {
+			return p, nil
+		}
+	}
+	return "", errors.New("no acceptable passphrase after 100 draws")
+}
