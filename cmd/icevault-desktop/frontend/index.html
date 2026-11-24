@@ -1264,16 +1264,12 @@ function openNewVault() {
   [pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));
   jbtn.focus();
 }
-// the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
-function newVaultDone(d) {
-  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
-  panel.open(t("nv.done_title"), finish); const box = panel.box;
-  box.append(el("div", "note", t("nv.done_note", { file: d.file })));
-  if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
+// the recovery kit step shared by a new vault and a password change: a section with the save button; the program makes the kit from the password it holds
+function kitSection() {
   const kit = el("section", "nvkit"); kit.append(el("h3", "", t("nv.kit_title")), el("div", "note", t("nv.kit_note")));
   const out = el("div", "ferr"); out.setAttribute("role", "status"); const note = el("div", "help");
   const save = btn(t("nv.kit_save"), "download", null, "");
-  kit.append(save, out, note); box.append(kit);
+  kit.append(save, out, note);
   save.addEventListener("click", async () => {
     out.textContent = ""; out.classList.remove("okline"); note.textContent = "";
     const idle = busy(save, t("busy.kit"));
@@ -1283,6 +1279,15 @@ function newVaultDone(d) {
     out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true;
     if (r.data.same_folder) note.textContent = t("nv.kit_same_folder");
   });
+  return kit;
+}
+// the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
+function newVaultDone(d) {
+  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
+  panel.open(t("nv.done_title"), finish); const box = panel.box;
+  box.append(el("div", "note", t("nv.done_note", { file: d.file })));
+  if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
+  box.append(kitSection());
   const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
 // ---------------------------------------------------------------- change the master password (unlocked vault): current, new with the live meter, typed again, Touch ID, copies, recovery kit
@@ -1388,19 +1393,7 @@ function changePasswordDone(d) {
     const sec = el("section", "nvkit"); sec.append(el("h3", "", t("cp.stale_title")), el("div", "note", t("cp.stale_note")));
     const list = el("ul", "help"); d.stale.forEach((f) => { const li = el("li"); li.append(midPath(f)); list.append(li); }); sec.append(list); box.append(sec);
   }
-  const kit = el("section", "nvkit"); kit.append(el("h3", "", t("nv.kit_title")), el("div", "note", t("nv.kit_note")));
-  const out = el("div", "ferr"); out.setAttribute("role", "status"); const note = el("div", "help");
-  const save = btn(t("nv.kit_save"), "download", null, "");
-  kit.append(save, out, note); box.append(kit);
-  save.addEventListener("click", async () => {
-    out.textContent = ""; out.classList.remove("okline"); note.textContent = "";
-    const idle = busy(save, t("busy.kit"));
-    const r = await api("/api/kit-save", { title: t("nv.kit_dialog"), template: t("nv.kit_text", { name: "{name}", path: "{path}", created: "{created}", password: "{password}" }) }); idle();
-    if (r.status !== 200) { out.append(icon("alert"), document.createTextNode(srv(r.data))); return; }
-    if (r.data.cancelled) return;
-    out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true;
-    if (r.data.same_folder) note.textContent = t("nv.kit_same_folder");
-  });
+  box.append(kitSection());
   const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
 $("pwbtn").addEventListener("click", () => openChangePassword());
