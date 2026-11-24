@@ -181,6 +181,11 @@ func (c *Core) writeVar(a map[string]any) error {
 		if strings.ContainsAny(v, "\n\r") {
 			return refuse("line_break", nil)
 		}
+		if c.d != nil {
+			if rule := c.d.ValueProblem(x.Key, v); rule != "" {
+				return refuse("bad_value", map[string]any{jKey: x.Key, "rule": rule})
+			}
+		}
 		x.Value = v
 	}
 	if vis := str(a, "visibility"); vis != "" {

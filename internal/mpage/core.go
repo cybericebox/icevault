@@ -92,6 +92,15 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 		out[jKey] = h.Name
 		out["label"], out["help"] = text(h.Label), text(h.Help)
 		out["required"], out["when"], out["secret"], out["system"] = h.Required, h.When, h.Secret, h.System()
+		if h.Type != "" {
+			out["type"] = h.Type
+		}
+		if len(h.Choices) > 0 {
+			out["choices"] = h.Choices
+		}
+		if h.Pattern != "" {
+			out["has_pattern"] = true
+		}
 		active := true
 		if cond, err := project.ParseWhen(h.When); err == nil && cond != nil && values != nil {
 			active = cond.Holds(values)

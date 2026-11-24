@@ -189,6 +189,17 @@ func runBatches(e *Env, args []string, out io.Writer, mv *modelView) error {
 	if err != nil {
 		return fail("%v", err)
 	}
+	var misfits []string
+	for _, b := range bs {
+		for _, x := range b.Vars {
+			if rule := mv.d.ValueProblem(x.Key, x.Value); rule != "" {
+				misfits = append(misfits, render.TypeProblem{File: b.Name, Name: x.Key, Rule: rule}.String())
+			}
+		}
+	}
+	if len(misfits) > 0 {
+		return fail("a value does not fit its type, nothing is written: %s", strings.Join(misfits, "; "))
+	}
 	if err := os.MkdirAll(to, 0o700); err != nil {
 		return err
 	}

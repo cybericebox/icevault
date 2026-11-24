@@ -114,6 +114,7 @@ general:
       label: {en: Public host, uk: Публічний хост}
       help: {en: The host name readers open the portal at., uk: "Ім'я хоста, за яким читачі відкривають портал."}
       required: true
+      type: domain
 
 site-kinds:
   google-cluster:
@@ -140,7 +141,7 @@ site-kinds:
     file: targets/compose.env
     variables:
       - {name: COMPOSE_PROJECT, label: {en: Compose project}}
-      - {name: LISTEN_PORT, label: {en: Listen port}}
+      - {name: LISTEN_PORT, label: {en: Listen port}, type: int}
       - {name: BUILD_REF, label: {en: Build reference}, managed: system}
 
 products:
@@ -168,13 +169,13 @@ products:
           - {name: CDN_SIGNING_KEY, field: signing_key, secret: true}
     variables:
       - {name: COOKIE_KEY, label: {en: Cookie key}, secret: true, generated: true}
-      - {name: SIGNUP_MODE, label: {en: Sign-up mode}, required: true}
+      - {name: SIGNUP_MODE, label: {en: Sign-up mode}, required: true, type: enum, choices: [open, invite]}
       - {name: ANALYTICS_ID, label: {en: Analytics id}}
       - {name: INVITE_SALT, label: {en: Invite salt}, secret: true, when: "SIGNUP_MODE=invite"}
       - {name: PORTAL_FLAGS, label: {en: Flags}}
       - {name: CHANGELOG_TAG, label: {en: Changelog image tag}, when: "PORTAL_FLAGS has changelog", when-off: drop}
       - {name: THEME_COLOR, label: {en: Theme colour}}
-      - {name: CONTACT_ADDRESS, label: {en: Contact address}}
+      - {name: CONTACT_ADDRESS, label: {en: Contact address}, type: email}
       - {name: BILLING_ACCOUNT, label: {en: Billing account}, secret: true}
     on-site-kind:
       google-cluster:
@@ -194,7 +195,7 @@ products:
     variables:
       - {name: ENGINE_PROFILE_DIR, label: {en: Profile folder}, managed: system}
       - {name: ENGINE_TAG, label: {en: Image tag}}
-      - {name: ENGINE_THREADS, label: {en: Threads}}
+      - {name: ENGINE_THREADS, label: {en: Threads}, type: int}
       - {name: BOOTSTRAP_INVITE, label: {en: First invite}, secret: true, temporary: true}
   - name: indexer
     title: {en: Indexer, uk: Індексатор}

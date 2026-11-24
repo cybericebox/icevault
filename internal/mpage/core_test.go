@@ -191,6 +191,34 @@ func TestEnvFill(t *testing.T) {
 	}
 }
 
+// A value that does not fit the declared type is refused with the variable and the rule (never the value); an empty value and a reference
+// are accepted; the answer carries the type and the choices so the page draws a drop-down.
+func TestTypedVariables(t *testing.T) {
+	c, _ := newCore(t)
+	scope := "env/prod/product/portal"
+	for _, tc := range []struct{ key, value, rule string }{
+		{"SIGNUP_MODE", "closed", "enum"}, {"CONTACT_ADDRESS", "not an address", "email"}, {"ENGINE_THREADS", "x", "int"},
+	} {
+		_, err := c.Write("m-var", map[string]any{"scope": scope, "key": tc.key, "value": tc.value})
+		var de *desktop.Error
+		if !errors.As(err, &de) || de.Code != "bad_value" || de.Params["rule"] != tc.rule || de.Params["key"] != tc.key {
+			t.Fatalf("%s: %v", tc.key, err)
+		}
+		if strings.Contains(err.Error(), tc.value) {
+			t.Fatal("the value is in the error")
+		}
+	}
+	for _, v := range []string{"invite", "", "${{ shared.MODE }}"} {
+		if _, err := c.Write("m-var", map[string]any{"scope": scope, "key": "SIGNUP_MODE", "value": v}); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+	}
+	b, _ := json.Marshal(c.Nav())
+	if !strings.Contains(string(b), `"choices":["open","invite"]`) || !strings.Contains(string(b), `"type":"enum"`) {
+		t.Fatalf("the page is not told the type: %s", b)
+	}
+}
+
 // A vault without a project says so in its navigation, so that the page does not offer the missing description as a problem.
 func TestNavSaysTheVaultHasNoProject(t *testing.T) {
 	c, v := newCore(t)

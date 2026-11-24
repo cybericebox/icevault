@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"encoding/json"
+	"github.com/cybericebox/icevault/internal/project"
 	"io/fs"
 	"os"
 	"regexp"
@@ -107,6 +108,29 @@ func TestLockClearsDecryptedDom(t *testing.T) {
 	for _, want := range []string{`$("main").textContent = ""`, `$("nav").textContent = ""`} {
 		if !strings.Contains(m[1], want) {
 			t.Errorf("renderLocked does not run %s", want)
+		}
+	}
+}
+
+// Every rule a value can break has a sentence in every language, and the page checks the same rules as the program (the type words it switches on).
+func TestEveryTypeRuleHasAMessage(t *testing.T) {
+	raw, err := fs.ReadFile(frontend(t), "messages.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tables map[string]map[string]string
+	if err := json.Unmarshal(raw, &tables); err != nil {
+		t.Fatal(err)
+	}
+	src, _ := fs.ReadFile(frontend(t), "index.html")
+	for _, rule := range []string{project.RuleBool, project.RuleInt, project.RuleEmail, project.RuleURL, project.RuleDomain, project.RuleEnum, project.RulePattern} {
+		for _, lang := range []string{"en", "uk", "ru"} {
+			if strings.TrimSpace(tables[lang]["m.type."+rule]) == "" {
+				t.Errorf("no m.type.%s in %s", rule, lang)
+			}
+		}
+		if rule != project.RulePattern && !strings.Contains(string(src), "case \""+rule+"\":") {
+			t.Errorf("the page does not check %s", rule)
 		}
 	}
 }
