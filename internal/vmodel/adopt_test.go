@@ -21,7 +21,7 @@ func descWithKind(t *testing.T) *project.Description {
 func portalWithOwnValues(t *testing.T) (*Vault, *Product) {
 	m := sample()
 	p := m.Envs[0].Product("portal")
-	p.Vars = append(p.Vars, &Var{Key: "ANALYTICS_ID", Value: "site-77", Vis: VisPlain}, &Var{Key: "BILLING_ACCOUNT", Value: "${{ shared.CONTACT_ADDRESS }}", Vis: VisSecret})
+	p.Vars = append(p.Vars, &Var{Key: "ANALYTICS_ID", Value: "site-77", Vis: VisPlain}, &Var{Key: "BILLING_ACCOUNT", Value: "${{ shared.CONTACT_ADDRESS }}", Vis: VisSecret, Expires: "2027-03-01"})
 	return m, p
 }
 
@@ -38,6 +38,9 @@ func TestAdoptConnectionsMovesOwnValues(t *testing.T) {
 	c := m.Connection("Stats")
 	if c == nil || c.Kind != "stats" || c.Field("site_id").Value != "site-77" || c.Field("site_id").Secret {
 		t.Fatalf("%+v", c)
+	}
+	if c.Field("token").Expires != "2027-03-01" {
+		t.Fatal("the expiry date moves with the value")
 	}
 	if f := c.Field("token"); f == nil || f.Value != "${{ shared.CONTACT_ADDRESS }}" || !f.Secret {
 		t.Fatal("a reference moves as a reference, and a secret stays secret")

@@ -101,6 +101,8 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		homes []ownHome
 		value string
 		vis   string
+		// expires is the expiry date of the value (kept when it moves)
+		expires string
 	}
 	var moves []move
 	var sealed, differing []string
@@ -128,6 +130,9 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 			}
 			if mv.value == "" {
 				mv.value = h.v.Value
+			}
+			if mv.expires == "" {
+				mv.expires = h.v.Expires
 			}
 			if h.v.Vis != VisPlain {
 				mv.vis = VisSecret
@@ -169,10 +174,13 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		}
 		secret := mv.vis != VisPlain
 		if f == nil {
-			c.Fields = append(c.Fields, &Field{Name: mv.field, Value: mv.value, Secret: secret})
+			c.Fields = append(c.Fields, &Field{Name: mv.field, Value: mv.value, Secret: secret, Expires: mv.expires})
 		} else {
 			if f.Value == "" {
 				f.Value = mv.value
+			}
+			if f.Expires == "" {
+				f.Expires = mv.expires
 			}
 			f.Secret = f.Secret || secret
 		}
