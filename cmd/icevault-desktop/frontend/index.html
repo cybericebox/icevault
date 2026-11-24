@@ -397,7 +397,6 @@ tr.grp.unused th { opacity:.75; }
 .ferr.warn { color:var(--ib-warn, var(--ib-danger)); }
 .switch:focus-visible { outline:2px solid var(--ib-action); outline-offset:2px; } .switch[aria-invalid="true"] .knob { border-color:var(--ib-danger); }
 .chk { display:flex; align-items:center; gap:10px; min-height:32px; font-size:14px; cursor:pointer; } .chk input { width:16px; height:16px; accent-color:var(--ib-action); }
-.dline { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:32px; font-size:14px; }
 .ibtn.mini { width:20px; height:20px; } .ibtn.mini .i { width:12px; height:12px; }
 .facts2 { display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; margin:16px 0 0; padding-top:12px; border-top:1px solid var(--ib-line); font-size:13px; }
 .facts2 dt { color:var(--ib-dim); } .facts2 dd { margin:0; color:var(--ib-body); overflow-wrap:anywhere; }
@@ -520,7 +519,8 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mcheck { display:grid; grid-template-columns:20px max-content 1fr; align-items:center; gap:8px; min-height:36px; padding:0 8px; border-radius:var(--ib-r); cursor:pointer; }
 .mcheck:hover { background:var(--ib-hover); }
 .mcheck input { width:16px; height:16px; accent-color:var(--ib-action); }
-.mused { margin-top:12px; font-size:13px; }
+.mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
+.mtable .ksub { margin-top:2px; font-size:12px; line-height:1.3; color:var(--ib-dim); white-space:normal; overflow-wrap:anywhere; }
 .mtoggle { width:auto; margin-top:4px; }
 .mplan { margin-top:12px; }
 .mplan h3 { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ib-ink); }
@@ -2801,9 +2801,10 @@ function mblock(main, title, iconName, buttons, note) {
 // the one table of the model page (variables, connection fields, other secrets): name 32%, value 38%, labels take the rest, the actions column is as wide as its
 // icons (32px buttons, 8px gap, 8px cell padding) and sits flush right; an empty table keeps its header and shows the empty state in the body
 const MT_ICON = 32, MT_GAP = 8, MT_PAD = 8;
-function mnamecell(label, key, mono, help) {
+function mnamecell(label, key, mono, help, sub) {
   const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw);
   kw.append(el("div", "kname" + (!key && mono ? " kmono" : ""), label)); if (key) kw.append(el("div", "ktitle mono", key));
+  if (sub) nc.append(el("div", "ksub", sub));   // a second line of small text under the name, as a description
   if (help) setTip(nc, help); return nc;
 }
 function mactcell() { const td = el("td", "acts"); const box = el("div", "abox"); td.append(box); return [td, box]; }
@@ -2831,7 +2832,7 @@ function mvars(parent, rows, scope, opts) {
   const trs = [];
   shown.forEach((r) => {
     const tr = el("tr", r.active === false ? "dim" : ""); const k = scope + "|" + r.key;
-    const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, mtext(r.help) || r.description);
+    const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, mtext(r.help) || r.description, opts.users ? (r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users")) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(r.required && r.active !== false ? withIcon("alert", t("m.var.required"), "needed") : el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
     else if (r.visibility === "plain") w.append(el("span", "val", r.value || ""));
@@ -2922,9 +2923,7 @@ function mShared(main) {
   mhead(main, "share", t("m.side.shared"), t("m.shared.note"));
   const sec = mblock(main, t("m.shared.vars"), "share", [editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("shared", null)) : null]);
   const rows = (nav.shared || []).map((r) => Object.assign({}, r));
-  mvars(sec, rows, "shared", { empty: t("m.empty.shared") });
-  if (!rows.length) return;
-  const used = el("div", "mused"); rows.forEach((r) => { const line = el("div", "dline"); line.append(el("b", "mono", r.key), el("span", "dim", r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users"))); used.append(line); }); sec.append(used);
+  mvars(sec, rows, "shared", { empty: t("m.empty.shared"), users: true });
 }
 
 function muserText(u) { return t("m.user." + u.kind, { env: u.env, name: u.name }); }
