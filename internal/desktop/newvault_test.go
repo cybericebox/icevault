@@ -465,6 +465,19 @@ func TestWriteKitWipesItsInput(t *testing.T) {
 	}
 }
 
+func TestExpandKitAllocatesOnce(t *testing.T) {
+	vals := map[string][]byte{"name": []byte("v.kdbx"), "path": []byte("/a/b/v.kdbx"), "created": []byte("2026-11-24 10:30"), "password": []byte("correct-horse-battery")}
+	for _, tpl := range []string{"{password}", "x{name}y{path}z{created}w{password}\nkeep it away", "no placeholders", "", "{", "{unknown}{password}{", "{{password}}"} {
+		got := expandKit(tpl, vals)
+		if cap(got) != len(got) {
+			t.Errorf("%q: cap %d, len %d: the buffer was larger than the text, or it grew", tpl, cap(got), len(got))
+		}
+	}
+	if got := expandKit("a{password}b", vals); string(got) != "acorrect-horse-batteryb" {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestExpandKitIsOnePass(t *testing.T) {
 	got := expandKit("a {name} b {password} c {unknown} {", map[string][]byte{"name": []byte("{password}"), "password": []byte("PW")})
 	if string(got) != "a {password} b PW c {unknown} {" {

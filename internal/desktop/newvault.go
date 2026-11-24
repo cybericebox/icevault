@@ -244,23 +244,34 @@ func (a *App) SaveRecoveryKit(title, template string) Response {
 }
 
 // expandKit fills the {name}, {path}, {created} and {password} of the template in one pass over it, as bytes, so that a value that looks like a
-// placeholder is never expanded again and the password is in no string made here. The caller wipes the result.
+// placeholder is never expanded again and the password is in no string made here. The exact size is computed first and the result allocated once:
+// an append that outgrew its buffer would leave an old copy of the password on the heap that nothing can wipe. The caller wipes the result.
 func expandKit(template string, vals map[string][]byte) []byte {
-	out := make([]byte, 0, len(template)+256)
+	size := 0
+	kitWalk(template, vals, func(lit string, v []byte) { size += len(lit) + len(v) })
+	out := make([]byte, 0, size)
+	kitWalk(template, vals, func(lit string, v []byte) { out = append(append(out, lit...), v...) })
+	return out
+}
+
+// kitWalk splits the template into runs of literal text, each followed by the value of the placeholder that ends it (nil at the end or for a
+// brace that is no known placeholder, which stays literal).
+func kitWalk(template string, vals map[string][]byte, emit func(lit string, v []byte)) {
+	start := 0
 	for i := 0; i < len(template); {
 		if template[i] == '{' {
 			if j := strings.IndexByte(template[i:], '}'); j > 0 {
 				if v, found := vals[template[i+1:i+j]]; found {
-					out = append(out, v...)
+					emit(template[start:i], v)
 					i += j + 1
+					start = i
 					continue
 				}
 			}
 		}
-		out = append(out, template[i])
 		i++
 	}
-	return out
+	emit(template[start:], nil)
 }
 
 // writeKit writes the file with mode 0600 before the first byte goes in: an existing file the person chose to replace (a world readable one, say) is
