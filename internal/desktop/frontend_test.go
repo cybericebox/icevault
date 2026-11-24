@@ -280,3 +280,23 @@ func TestAuditLastItems(t *testing.T) {
 		t.Error("the Touch ID row is hidden again instead of kept in place")
 	}
 }
+
+// A JSON key read from a file stays as it is typed unless it has line breaks; a select inside a dialog opens inside the dialog; the lock screen keeps the
+// place of its error line.
+func TestKeyTextAsTypedAndListInsideDialog(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"try { JSON.parse(text); if (/[\\r\\n]/.test(text)) text = JSON.stringify(JSON.parse(text)); }", `trig.closest(".dlgbox")`, "hb.bottom - r.bottom - 8", "#lockedbody .err { min-height:20px;",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if strings.Contains(page, "text = JSON.stringify(JSON.parse(text)); } catch (e) { text = text.trim(); }") {
+		t.Error("a JSON key is re-serialised even when it is one line")
+	}
+}

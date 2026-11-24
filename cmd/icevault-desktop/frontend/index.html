@@ -271,7 +271,7 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .card .vroot { margin-top:12px; }
 .nvloose { margin-top:8px; }
 .vlist-wrap { margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid var(--ib-line); }
-#lockedbody .err { min-height:0; margin:0 0 12px; } #lockedbody .err:empty { display:none; }   /* no reserved empty block on the lock screen */
+#lockedbody .err { min-height:20px; margin:0 0 8px; }   /* the place of the error is kept, so the card does not jump when one appears */
 #lockedbody .lk { margin-bottom:8px; } #lockedbody h1 { margin-bottom:16px; } #lockedbody p:not(.fine) { margin:0 0 8px; }
 .vlist-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
 .vacts { display:flex; flex-wrap:wrap; gap:8px; }
@@ -804,7 +804,12 @@ function selectBox(o) {
       li.addEventListener("click", () => flip(k)); li.addEventListener("pointermove", () => mark(i)); lis.push(li); list.append(li); });
     document.body.append(list); const r = trig.getBoundingClientRect();
     list.style.minWidth = Math.max(r.width, 160) + "px"; list.style.left = Math.min(r.left, innerWidth - list.offsetWidth - 8) + "px";
-    const below = innerHeight - r.bottom; list.style.top = (below < list.offsetHeight + 12 && r.top > below ? r.top - list.offsetHeight - 4 : r.bottom + 4) + "px";
+    // inside a dialog the list stays inside the dialog (it never covers its buttons or sticks out): the side with more room, scrolling when short
+    const host = trig.closest(".dlgbox"), hb = host ? host.getBoundingClientRect() : { top: 0, bottom: innerHeight, left: 0, right: innerWidth };
+    const below = hb.bottom - r.bottom - 8, above = r.top - hb.top - 8, up = list.offsetHeight > below && above > below;
+    list.style.maxHeight = Math.max(96, Math.min(264, up ? above : below)) + "px";
+    list.style.left = Math.max(hb.left + 8, Math.min(r.left, hb.right - list.offsetWidth - 8)) + "px";
+    list.style.top = (up ? r.top - list.offsetHeight - 4 : r.bottom + 4) + "px";
     openList = { list, trig }; trig.setAttribute("aria-expanded", "true"); mark(Math.max(0, o.options.findIndex((x) => x[0] === value)));
   }
   trig.addEventListener("click", () => { if (trig.getAttribute("aria-disabled") === "true") return; openList && openList.trig === trig ? closeList(false) : show(); });
@@ -1056,7 +1061,8 @@ function dialog(title, fields, submitText, onSubmit, note) {
           const pick = el("input"); pick.type = "file"; pick.hidden = true; pick.addEventListener("change", async () => {
             const file = pick.files && pick.files[0]; pick.value = ""; if (!file) return;
             if (file.size > 65536) { fieldErr(f.name, t("val.file_big")); return; }   // checked before the file is read
-            let text = await file.text(); try { text = JSON.stringify(JSON.parse(text)); } catch (e) { text = text.trim(); }   // a JSON key goes in as one line
+            let text = (await file.text()).trim();
+            try { JSON.parse(text); if (/[\r\n]/.test(text)) text = JSON.stringify(JSON.parse(text)); } catch (e) { /* not JSON: kept as it is */ }   // a JSON key is kept as typed; only line breaks are taken out, by writing it compact
             if (/[\r\n]/.test(text)) { fieldErr(f.name, t("val.file_lines")); return; }   // a PEM or other text with line breaks cannot be one value
             clearErr(f.name); inp.value = text; inp.dispatchEvent(new Event("input", { bubbles: true }));
           });
