@@ -106,7 +106,9 @@ type Product struct {
 	Name  string `yaml:"name"`
 	Title Text   `yaml:"title,omitempty"`
 	Help  Text   `yaml:"help,omitempty"`
-	File  string `yaml:"file,omitempty"`
+	// HelpOnSiteKind replaces Help where the product runs on a site of that kind (the text follows the placement: cluster, host, ...).
+	HelpOnSiteKind map[string]Text `yaml:"help-on-site-kind,omitempty"`
+	File           string          `yaml:"file,omitempty"`
 	// PlaceVariable is the variable of the project's files that says where the product runs (cluster, compose, host, none, ...): written from
 	// the product's place on export.
 	PlaceVariable string                `yaml:"place-variable,omitempty"`

@@ -343,6 +343,11 @@ func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(s
 	if p.Site != nil {
 		siteKind = p.Site.Kind
 	}
+	if p.Site != nil && dp != nil {
+		if h, ok := dp.HelpOnSiteKind[p.Site.Kind]; ok && len(h) > 0 {
+			help = h // the text follows the placement
+		}
+	}
 	out := map[string]any{"uuid": p.UUID, jName: p.Name, jTitle: text(title), "help": text(help), "enabled": p.Enabled, "place": p.Place, jSite: "", "connections": []string{},
 		"vars": c.vars(p.Vars, desc, vals), "needs": needs, "site_kind": siteKind}
 	if p.Site != nil {

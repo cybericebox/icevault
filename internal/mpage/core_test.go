@@ -108,6 +108,30 @@ func TestReferencesAndPreview(t *testing.T) {
 	}
 }
 
+func TestProductHelpFollowsThePlacement(t *testing.T) {
+	c, _ := newCore(t)
+	dp := c.d.Product("portal")
+	dp.Help = project.Text{"en": "as host processes"}
+	dp.HelpOnSiteKind = map[string]project.Text{"google-cluster": {"en": "in the cluster"}}
+	helpOf := func() string {
+		for _, e := range c.Nav()["envs"].([]map[string]any) {
+			for _, p := range e["products"].([]map[string]any) {
+				if p["name"] == "portal" {
+					return p["help"].(map[string]string)["en"]
+				}
+			}
+		}
+		return ""
+	}
+	if got := helpOf(); got != "in the cluster" {
+		t.Fatalf("on a cluster site: %q", got)
+	}
+	c.m.Env("prod").Product("portal").Site = nil
+	if got := helpOf(); got != "as host processes" {
+		t.Fatalf("without a site: %q", got)
+	}
+}
+
 func TestBrokenReferenceIsNeededForDeploy(t *testing.T) {
 	c, _ := newCore(t)
 	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/product/portal", "key": "LINK", "value": "${{ self.NOPE }}", "visibility": "plain"}); err != nil {

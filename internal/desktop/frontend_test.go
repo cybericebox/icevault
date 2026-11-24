@@ -178,3 +178,24 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// The model screen: one table layout (a framed wrapper, the name cell stays a table cell), folding cards and sections remembered per item, the
+// system-set rows hidden behind one remembered toggle, the add buttons at the right end of their header, a success tint for a ready product.
+func TestModelScreenLayoutWiring(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		`el("div", "mtwrap")`, `el("td", "mk")`, "function mfold(", `saveCollapsed()`, `mfold(card, h, mscope() + "|site|"`, `mfold(card, h, mscope() + "|product|"`, `mfold(sec, h, mscope()`,
+		"(mshowauto || !r.system)", `storeSet("icevault.showauto"`, `" warn" : " ok"`, ".banner.ok {", ".mblock-h .grow, .mcard-h .grow, .msub-h .grow { flex:1; }", ".mtwrap {",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if mv := regexp.MustCompile(`(?s)function mvars\(.*?\n\}\n`).FindString(page); mv == "" || strings.Contains(mv, `el("td", "kcell")`) {
+		t.Error("a name cell of the model tables is a flex box again: its row grows unevenly")
+	}
+}
