@@ -76,6 +76,9 @@ func TestUnimportAsksWhenValuesUseIt(t *testing.T) {
 	if _, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{"PAIR_ONE"}}); err != nil {
 		t.Fatalf("taking out a value nobody uses: %v", err)
 	}
+	if _, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{"PAIR_TWO"}}); code(err) != "confirm_unimport_used" {
+		t.Fatalf("replacing a value other values use by another one: %v", err)
+	}
 	_, err := c.Write("m-import", map[string]any{"env": "prod", "keys": []any{}})
 	if code(err) != "confirm_unimport_used" {
 		t.Fatalf("taking out a value other values use: %v", err)

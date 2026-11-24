@@ -239,7 +239,7 @@ func (c *Core) writeImports(a map[string]any) error {
 	before := c.m.BrokenRefs(c.d, e)
 	old := e.Imports
 	e.Imports = imp
-	if !flag(a, "confirm") && len(old) > len(imp) {
+	if !flag(a, "confirm") && droppedAny(old, imp) {
 		known := map[string]bool{}
 		for _, b := range before {
 			known[b.Where+"/"+b.Name+"/"+b.Key] = true
@@ -260,6 +260,20 @@ func (c *Core) writeImports(a map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// droppedAny reports whether a key of the old imports is missing from the new ones (a set comparison: a replacement of the same size counts).
+func droppedAny(old, now []*vmodel.Var) bool {
+	for _, o := range old {
+		found := false
+		for _, n := range now {
+			found = found || n == o
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }
 
 func userList(us []map[string]string) []string {
