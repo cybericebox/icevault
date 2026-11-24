@@ -190,3 +190,34 @@ func TestEnvFill(t *testing.T) {
 		t.Fatalf("unknown environment: %v", err)
 	}
 }
+
+// A vault without a project says so in its navigation, so that the page does not offer the missing description as a problem.
+func TestNavSaysTheVaultHasNoProject(t *testing.T) {
+	c, v := newCore(t)
+	desc := func(c *Core) map[string]any {
+		b, err := json.Marshal(c.Nav())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		d, _ := m["description"].(map[string]any)
+		return d
+	}
+	if d := desc(c); d["found"] != true || d["no_project"] != false {
+		t.Fatalf("a vault with its project: %+v", d)
+	}
+	loose, err := New(v, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := desc(loose); d["found"] != false || d["no_project"] != false {
+		t.Fatalf("no description, not marked: %+v", d)
+	}
+	loose.NoProject = true
+	if d := desc(loose); d["found"] != false || d["no_project"] != true {
+		t.Fatalf("marked: %+v", d)
+	}
+}

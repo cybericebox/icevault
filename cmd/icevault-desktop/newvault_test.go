@@ -3,8 +3,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cybericebox/icevault/internal/cli"
@@ -194,8 +196,12 @@ func TestNewVaultWithoutAProjectThroughTheApp(t *testing.T) {
 	if r := a.Unlock("password", newPW); r.Status != 200 {
 		t.Fatalf("the vault without a project does not unlock: %+v", r)
 	}
-	if r := a.Read("nav", map[string]any{}); r.Status != 200 {
+	r := a.Read("nav", map[string]any{})
+	if r.Status != 200 {
 		t.Fatalf("the window cannot read the vault without a project: %+v", r)
+	}
+	if b, _ := json.Marshal(r.Data); !strings.Contains(string(b), `"no_project":true`) {
+		t.Fatalf("the navigation does not say that the vault has no project: %s", b)
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {

@@ -66,7 +66,7 @@ func buildModel(v *vault.Vault, env *cli.Env, root string, loose bool) (*mpage.C
 	if err != nil {
 		return nil, err
 	}
-	mp.DescPath, mp.DescErr = p, why
+	mp.DescPath, mp.DescErr, mp.NoProject = p, why, loose && d == nil
 	if env != nil {
 		mp.Remember = func(path string) error { return cli.RememberProject(env.Getenv, path) }
 	}

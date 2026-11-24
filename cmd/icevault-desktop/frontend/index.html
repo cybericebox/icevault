@@ -555,6 +555,7 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
       <button type="button" class="ibtn" id="themebtn"></button>
       <button type="button" class="ibtn hidden" id="refreshbtn" data-i18n-tip="refresh.tip"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
       <button type="button" class="ibtn hidden" id="updbtn" data-i18n-tip="upd.tip"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg></button>
+      <button type="button" class="ibtn hidden" id="descbtn" data-i18n-tip="m.desc.choose"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button>
       <button type="button" class="ibtn hidden" id="clibtn" data-i18n-tip="cli.tip"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg></button>
       <button type="button" class="ibtn hidden" id="pwbtn" data-i18n-tip="cp.tip"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></button>
       <button type="button" class="ibtn hidden" id="lockbtn" data-i18n-tip="lock"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></button>
@@ -1004,7 +1005,7 @@ async function loadStatus() {
 }
 function renderChrome() {
   const lk = status.locked;
-  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); $("pwbtn").classList.toggle("hidden", lk || !status.can_change_password); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
+  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); if (lk) $("descbtn").classList.add("hidden"); $("pwbtn").classList.toggle("hidden", lk || !status.can_change_password); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
   if (lk) $("disknote").classList.add("hidden");
   $("seg-view").setAttribute("aria-pressed", String(status.mode !== "edit")); $("seg-edit").setAttribute("aria-pressed", String(status.mode === "edit"));
   $("locked").classList.toggle("hidden", !lk); $("main").classList.toggle("hidden", lk); $("side").classList.toggle("hidden", lk);
@@ -1440,6 +1441,7 @@ async function openCliPanel() {
   const r = await api("/api/cli"); if (r.status === 200) render(r.data); else showErr(srv(r.data));
 }
 $("clibtn").addEventListener("click", () => openCliPanel());
+$("descbtn").addEventListener("click", () => mprojectDialog());
 // updates of the application: the program asks GitHub for the latest release, downloads and checks it, and swaps itself only on "Restart and update"
 let upd = null, updTimer = 0;
 function drawUpdChrome() {
@@ -2601,7 +2603,9 @@ function mempty(text, action) { const e = el("div", "empty block"); e.append(ico
 function mhead(main, iconName, title, sub, actions) {
   const crumb = $("crumb"); crumb.textContent = ""; crumb.append(icon(iconName, "lg"), el("b", "", title));
   const head = el("div", "head"); head.append(el("h1", "", title)); const meta = el("div", "meta"); if (sub) meta.append(el("span", "", sub)); (actions || []).forEach((a) => meta.append(a)); head.append(meta); main.append(head);
-  if (nav.description && !nav.description.found) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
+  // a vault without a project has no description on purpose: no warning, but the header button lets one be attached to a project later
+  $("descbtn").classList.toggle("hidden", !(nav.description && !nav.description.found && nav.description.no_project));
+  if (nav.description && !nav.description.found && !nav.description.no_project) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
   if (nav.read_only) { const b = el("div", "banner warn"); b.append(icon("lock"), el("div", "", t("m.read_only"))); main.append(b); }
 }
 
