@@ -105,6 +105,8 @@ type App struct {
 	newDefault  string
 	newPath     string       // the place the person chose for a new vault (newvault.go)
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
+	changeWrong int          // wrong current passwords in a row in the change-password dialog (changepw.go)
+	changing    sync.Mutex   // one password change at a time
 
 	unlocking  sync.Mutex // one unlock at a time
 	confirming sync.Mutex // never two Touch ID dialogs at once
@@ -372,7 +374,7 @@ func (a *App) status() map[string]any {
 		left = 0
 	}
 	return map[string]any{"locked": a.core == nil, "mode": a.mode, "touchid": a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
-		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault}
+		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword()}
 }
 
 // Status is the lock state and the mode.

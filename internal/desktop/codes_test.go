@@ -307,6 +307,26 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 	for _, name := range []string{"PasswordStrength", "GeneratePassword", "DiscardRecoveryKit"} {
 		covered[name] = true
 	}
+	// changing the password: locked, a core that cannot, and every error of a core that can answers a code and no text
+	assertCoded(t, "ChangePasswordInfo locked", l.ChangePasswordInfo())
+	assertCoded(t, "ChangePassword locked", l.ChangePassword("a", "b", "b", false, false))
+	assertCoded(t, "ChangePassword demo core", func() Response {
+		d := New(Options{Unlocker: &MemoryUnlocker{Password: "pw"}})
+		d.Unlock("password", "pw")
+		return d.ChangePassword("pw", "k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ", false, false)
+	}())
+	for _, e := range bad {
+		cc := &changeCore{MemoryCore: &MemoryCore{}, pw: "pw", err: e}
+		cv := New(Options{Vaults: &fakeVaults{unlockers: map[string]Unlocker{"/v/c.kdbx": changeUnlocker{cc}}}, Vault: "/v/c.kdbx", Maker: &fakeMaker{touchReady: true, bindErr: e}})
+		cv.Unlock("password", "pw")
+		assertCoded(t, "ChangePassword fails", cv.ChangePassword("pw", "k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ", true, true))
+		assertCoded(t, "ChangePassword wrong current", cv.ChangePassword("nope", "k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ", true, true))
+		assertCoded(t, "ChangePassword weak", cv.ChangePassword("pw", "Qwerty123!", "Qwerty123!", true, true))
+		if r := cv.ChangePasswordInfo(); r.Status != 200 {
+			t.Errorf("ChangePasswordInfo: %+v", r)
+		}
+	}
+	covered["ChangePasswordInfo"], covered["ChangePassword"] = true, true
 	assertCoded(t, "SelectVault off", l.SelectVault("/v/a.kdbx"))
 	assertCoded(t, "OpenVault off", l.OpenVault("t"))
 	// updates: without an updater every step is refused with a code; with one, its refusals are codes too

@@ -62,6 +62,8 @@ func siteFlag() flagSpec { return val("site", "site", "the site of the environme
 var specs = map[string]cmdSpec{
 	"init-vault": {Summary: "Make the vault (KDBX 4, Argon2d)", Usage: "init-vault [--generate] [--decryption-time MS]\n  Make the vault (KDBX 4, Argon2d, 64 MiB). ICEVAULT_KEYFILE adds a key file. Asks the new password twice. The password has at least 12 characters and\n  is refused when it is easy to guess (dictionary words, keyboard walks, repeats, dates), however long; an empty password is allowed only with a key file.\n  --generate: makes a random passphrase of six words instead, shows it once on the terminal and asks for it to be typed back; it is never written anywhere.",
 		Flags: []flagSpec{sw("generate", "a random six-word passphrase, shown once and typed back"), val("decryption-time", "ms", "key derivation time in ms, 100 to 5000", completeNone)}},
+	"change-password": {Summary: "Change the master password of the vault", Usage: "change-password [--generate] [--refresh-copies]\n  Change the master password of the vault: asks the current one (typed, never the one behind Touch ID), then the new one twice under the policy of init-vault (12 or more characters, hard to guess), or --generate for a random six-word passphrase shown once and typed back. The vault file is re-encrypted in place (atomic, the key derivation settings and the key file stay). The Touch ID binding is removed (touchid enable stores the new password). Copies made before still open with the OLD password: they are listed and never deleted; --refresh-copies writes the new file to the standing destinations now.",
+		Flags: []flagSpec{sw("generate", "a random six-word passphrase, shown once and typed back"), sw("refresh-copies", "write the new file to the standing copy destinations now")}},
 	"ui": {Summary: "Open the settings window (IceVault.app)", Usage: "ui [--env E] [--demo]\n  Start the settings window: the application IceVault.app next to this program (or this program inside it). Everything is typed in the window. --demo: a throwaway in-memory vault, password demo.",
 		Flags: []flagSpec{envFlag(), sw("demo", "a throwaway in-memory vault (password demo)")}},
 	"keyfile": {Summary: "Make a KeePass key file", Usage: "keyfile new PATH\n  Make a KeePass key file (XML v2, mode 0600) for ICEVAULT_KEYFILE. It never overwrites.",
@@ -121,7 +123,7 @@ var specs = map[string]cmdSpec{
 }
 
 // commandNames is the order of the overview and of the completion.
-var commandNames = []string{"init-vault", "keyfile", "ui", "where", "project", cmdEnv, "trust", "guard", "settings", "session", "external", "touchid", "copies", "copy", cmdView, cmdExport, cmdExportApp,
+var commandNames = []string{"init-vault", "change-password", "keyfile", "ui", "where", "project", cmdEnv, "trust", "guard", "settings", "session", "external", "touchid", "copies", "copy", cmdView, cmdExport, cmdExportApp,
 	cmdStatus, cmdVisibility, cmdPurge, cmdImport, cmdRecover, cmdImportHCP}
 
 // flagTable is the checkable form of the flags of a command: name -> takes a value. --vault is taken by Run before and is accepted everywhere.

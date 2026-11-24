@@ -217,6 +217,38 @@ func decode(data []byte, cred *gokeepasslib.DBCredentials) (*gokeepasslib.Databa
 	return db, f, nil
 }
 
+// SetPassword replaces the master password and saves the file at once (the same atomic save as every other: a lock, a temp file, fsync, a read-back that
+// must open with the NEW key, one previous copy, a rename). The key derivation settings are kept (Save only gives the file fresh seeds), and the key file,
+// if the vault has one, stays the same: the composite key keeps its key part. An empty password is accepted only when a key file holds the key. When the
+// save fails the old file is as it was and the open vault keeps the old password, so it can be saved again. The caller wipes pw. The file saved just before
+// stays as <vault>.prev and still opens with the OLD password until the next save overwrites it.
+func (v *Vault) SetPassword(pw []byte) error {
+	if v.db == nil {
+		return errors.New("the vault is closed")
+	}
+	old := v.db.Credentials
+	if len(pw) == 0 && (old == nil || len(old.Key) == 0) {
+		return ErrNoCredentials
+	}
+	next := &gokeepasslib.DBCredentials{}
+	if c := copyCreds(old); c != nil {
+		next.Key, next.Windows = c.Key, c.Windows
+	}
+	if len(pw) > 0 {
+		h := sha256.Sum256(pw)
+		next.Passphrase = append([]byte(nil), h[:]...)
+		wipe(h[:])
+	}
+	v.db.Credentials = next
+	if err := v.Save(); err != nil {
+		v.db.Credentials = old
+		wipeCreds(next)
+		return err
+	}
+	wipeCreds(old)
+	return nil
+}
+
 // Path is the vault file.
 func (v *Vault) Path() string { return v.path }
 
