@@ -219,6 +219,42 @@ func TestTypedVariables(t *testing.T) {
 	}
 }
 
+// "Needed for deploy" follows required-when over the place of the product (BRAIN=cluster needs its tag and keys, BRAIN=none does not) and the
+// defaults of the description; a product that is off needs nothing.
+func TestRequiredWhenFollowsThePlaceOfTheProduct(t *testing.T) {
+	c, _ := newCore(t)
+	e := c.Model().Env("prod")
+	e.Products = append(e.Products, &vmodel.Product{Name: "indexer", Enabled: true, Place: "cluster", Site: e.Sites[0], Sub: map[string][]*vmodel.Var{}})
+	missing := func() []string {
+		var keys []string
+		for _, p := range c.envView(e)["products"].([]map[string]any) {
+			if p["name"] == "indexer" {
+				for _, m := range p["missing"].([]map[string]any) {
+					keys = append(keys, m["key"].(string))
+				}
+			}
+		}
+		return keys
+	}
+	has := func(keys []string, k string) bool { return contains(keys, k) }
+	if m := missing(); !has(m, "BROKER_URL") || !has(m, "BROKER_PASSWORD") {
+		t.Fatalf("on the cluster both are needed: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "host"
+	if m := missing(); has(m, "BROKER_URL") || !has(m, "BROKER_PASSWORD") {
+		t.Fatalf("on a host only the password: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "none"
+	if m := missing(); has(m, "BROKER_URL") || has(m, "BROKER_PASSWORD") {
+		t.Fatalf("not run: nothing: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "cluster"
+	e.Products[len(e.Products)-1].Enabled = false
+	if m := missing(); len(m) != 0 {
+		t.Fatalf("a product that is off needs nothing: %v", m)
+	}
+}
+
 // A vault without a project says so in its navigation, so that the page does not offer the missing description as a problem.
 func TestNavSaysTheVaultHasNoProject(t *testing.T) {
 	c, v := newCore(t)

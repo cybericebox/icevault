@@ -91,7 +91,11 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 	if h != nil {
 		out[jKey] = h.Name
 		out["label"], out["help"] = text(h.Label), text(h.Help)
-		out["required"], out["when"], out["secret"], out["system"] = h.Required, h.When, h.Secret, h.System()
+		required := h.Required
+		if cond, err := project.ParseWhen(h.RequiredWhen); err == nil && cond != nil && values != nil && cond.Holds(values) {
+			required = true // required-when holds: the variable is needed now
+		}
+		out["required"], out["when"], out["secret"], out["system"] = required, h.When, h.Secret, h.System()
 		if h.Type != "" {
 			out["type"] = h.Type
 		}
@@ -216,7 +220,9 @@ func connUUID(x *vmodel.Connection) string {
 }
 
 // values is the namespace of an environment for the conditions (General with imports, the site, every product).
-func values(e *vmodel.Environment) func(string) string {
+// The place variable of a product (BRAIN, INDEXER ...) is written from its place on export, so the conditions read it from there; the defaults of the
+// description apply to what is not set.
+func (c *Core) values(e *vmodel.Environment) func(string) string {
 	m := map[string]string{}
 	for _, x := range e.GeneralValues() {
 		m[x.Key] = x.Value
@@ -230,12 +236,25 @@ func values(e *vmodel.Environment) func(string) string {
 		for _, x := range p.Vars {
 			m[x.Key] = x.Value
 		}
+		if c.d != nil {
+			if dp := c.d.Product(p.Name); dp != nil && dp.PlaceVariable != "" {
+				place := p.Place
+				if !p.Enabled {
+					place = "none"
+				}
+				m[dp.PlaceVariable] = place
+			}
+		}
 	}
-	return func(k string) string { return m[k] }
+	get := func(k string) string { return m[k] }
+	if c.d != nil {
+		return c.d.Getter(get)
+	}
+	return get
 }
 
 func (c *Core) envView(e *vmodel.Environment) map[string]any {
-	vals := values(e)
+	vals := c.values(e)
 	var gdesc []project.Variable
 	if c.d != nil {
 		gdesc = c.d.General.Variables
