@@ -480,12 +480,8 @@ func (c *Core) Nav() map[string]any {
 	for _, r := range sharedRows {
 		k, _ := r[jKey].(string)
 		users := []string{}
-		for _, e := range c.m.Envs {
-			for _, x := range e.Imports {
-				if x.Key == k {
-					users = append(users, e.Name)
-				}
-			}
+		if x := c.m.SharedVar(k); x != nil {
+			users = append(users, c.m.SharedUsers(x)...)
 		}
 		r["users"] = users
 		if c.d != nil {
