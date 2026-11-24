@@ -388,6 +388,8 @@ tr.grp.unused th { opacity:.75; }
 .switch .knob { position:relative; flex:none; width:32px; height:18px; border-radius:9px; border:1.5px solid var(--ib-control); box-sizing:border-box; transition:background 80ms var(--ib-ease); }
 .switch .knob::after { content:""; position:absolute; top:1.5px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--ib-control); transition:transform 80ms var(--ib-ease); }
 .switch[aria-checked="true"] .knob { background:var(--ib-action); border-color:var(--ib-action); } .switch[aria-checked="true"] .knob::after { background:var(--ib-on-action); transform:translateX(14px); }
+.switchrow { display:flex; align-items:center; gap:14px; } .switchrow .linkbtn { border:0; background:none; padding:0; color:var(--ib-action); font:500 13px/1.35 var(--ib-font); cursor:pointer; text-decoration:underline; }
+.ferr.warn { color:var(--ib-warn, var(--ib-danger)); }
 .switch:focus-visible { outline:2px solid var(--ib-action); outline-offset:2px; } .switch[aria-invalid="true"] .knob { border-color:var(--ib-danger); }
 .chk { display:flex; align-items:center; gap:10px; min-height:32px; font-size:14px; cursor:pointer; } .chk input { width:16px; height:16px; accent-color:var(--ib-action); }
 .dline { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:32px; font-size:14px; }
@@ -928,11 +930,16 @@ const FIELD_OF = { one_line: "title", section_name: "name", section_exists: "nam
   path_form: "rel", file_exists: "rel", file_size: "file", vis_form: "visibility", description_long: "description", description_reserved: "description", no_group_first: "group", bad_value: "value" };
 // the type a description declares for a variable: the rule a value breaks ("" = fits). The same rules as internal/project/types.go; a pattern is only checked by the program.
 // A value that holds a reference (${{ ... }}) is not checked as typed, only after it resolves.
-function typeProblem(type, choices, v) {
+function typeProblem(type, choices, v, min, max) {
   if (!v || /(^|[^$])\$\{\{/.test(v)) return "";
+  if (v.length > 4096) return "length";
   switch (type) {
     case "bool": return v === "true" || v === "false" ? "" : "bool";
-    case "int": return /^-?[0-9]+$/.test(v) ? "" : "int";
+    case "int": {
+      if (!/^-?[0-9]+$/.test(v)) return "int";
+      const n = Number(v); if (Math.abs(n) > 9223372036854775807) return "int";       // beyond a 64-bit integer, as in the program
+      return (min != null && n < min) || (max != null && n > max) ? "range" : "";
+    }
     case "email": return v.length <= 254 && /^[^@\s/]+@[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/.test(v) ? "" : "email";
     case "url": try { const u = new URL(v); return u.host && !/\s/.test(v) ? "" : "url"; } catch (e) { return "url"; }
     case "domain": return v === "localhost" || (v.length <= 253 && /^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z][A-Za-z0-9-]{0,61}[A-Za-z0-9]$/.test(v)) ? "" : "domain";
@@ -940,12 +947,15 @@ function typeProblem(type, choices, v) {
   }
   return "";
 }
-// a switch (true / false; untouched while the variable is not set, so saving writes nothing)
+// a switch with a third state, not set: "" (the variable is empty), "true" or "false". A stored value that is none of them is kept as it is until the switch is touched.
 function switchBox(id, value, onChange) {
-  const b = el("button", "switch"); b.type = "button"; b.id = id; b.setAttribute("role", "switch"); let on = value === "true", touched = false;
-  const draw = () => { b.setAttribute("aria-checked", String(on)); b.textContent = ""; b.append(el("span", "knob"), el("span", "t", t(on ? "m.var.on" : value === "" && !touched ? "m.var.not_set" : "m.var.off"))); };
-  Object.defineProperty(b, "value", { get: () => (touched || value !== "" ? String(on) : "") });
-  b.addEventListener("click", () => { on = !on; touched = true; draw(); onChange(); }); draw(); return b;
+  const wrap = el("div", "switchrow"); const b = el("button", "switch"); b.type = "button"; b.id = id; b.setAttribute("role", "switch"); let st = value;
+  const clr = el("button", "linkbtn"); clr.type = "button"; clr.textContent = t("m.var.clear");
+  const draw = () => { b.setAttribute("aria-checked", String(st === "true")); b.textContent = ""; b.append(el("span", "knob"), el("span", "t", t(st === "true" ? "m.var.on" : st === "false" ? "m.var.off" : "m.var.not_set"))); clr.hidden = st === ""; };
+  Object.defineProperty(wrap, "value", { get: () => st });
+  b.addEventListener("click", () => { st = st === "true" ? "false" : "true"; draw(); onChange(); });
+  clr.addEventListener("click", () => { st = ""; draw(); onChange(); b.focus(); });
+  wrap.trig = b; wrap.append(b, clr); draw(); return wrap;
 }
 function dialog(title, fields, submitText, onSubmit, note) {
   panel.open(title); const box = panel.box;
@@ -972,7 +982,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
       inp = selectBox({ id, value: f.value !== undefined ? f.value : f.options[0][0], options: f.options, label: f.label, placeholder: f.placeholder, onChange: (v) => { changed = true; clearErr(f.name); if (f.onChange) f.onChange(v, inputs); } });
       box.append(inp.el); inputs[f.name] = inp; focusNode = inp.trig;
     } else if (f.type === "switch") {
-      inp = switchBox(id, f.value || "", () => { changed = true; clearErr(f.name); }); box.append(inp); inputs[f.name] = inp; focusNode = inp;
+      inp = switchBox(id, f.value || "", () => { changed = true; clearErr(f.name); }); box.append(inp); inputs[f.name] = inp; focusNode = inp.trig;
     } else if (f.type === "chips") {
       inp = chipsInput(f.value || [], false, () => { changed = true; clearErr(f.name); }, f.label, f.suggest, f.copy); box.append(inp.el); inputs[f.name] = inp; focusNode = inp.el.querySelector("input");
     } else {
@@ -983,8 +993,9 @@ function dialog(title, fields, submitText, onSubmit, note) {
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
     }
     const hp = f.help ? el("div", "help", f.help) : null; if (hp) { hp.id = id + "-h"; box.append(hp); }
+    if (f.warn) { const wn = el("div", "ferr warn"); wn.id = id + "-w"; wn.setAttribute("role", "status"); wn.append(icon("alert"), document.createTextNode(f.warn)); box.append(wn); }
     const fe = el("div", "ferr"); fe.id = id + "-e"; fe.setAttribute("role", "alert"); errs[f.name] = fe; box.append(fe);
-    if (focusNode && focusNode.setAttribute) focusNode.setAttribute("aria-describedby", [hp ? hp.id : "", fe.id].filter(Boolean).join(" "));
+    if (focusNode && focusNode.setAttribute) focusNode.setAttribute("aria-describedby", [hp ? hp.id : "", f.warn ? id + "-w" : "", fe.id].filter(Boolean).join(" "));
     if (f.required && focusNode && focusNode.setAttribute) focusNode.setAttribute("aria-required", "true");
   });
   const actions = el("div", "actions");
@@ -2695,9 +2706,16 @@ function mvarDialog(scope, r) {
   const secret = r ? r.visibility !== "plain" : false;
   const f = { name: "value", label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
   const ty = r && r.type;
-  if (ty === "enum" && r.choices && r.choices.length) { f.type = "select"; f.options = [["", t("m.var.not_set")]].concat(r.choices.map((c) => [c, c])); }
-  else if (ty === "bool") f.type = "switch";
-  else if (ty) f.check = (v) => { const rule = typeProblem(ty, r.choices, v); return rule ? t("m.type." + rule) : ""; };
+  const word = (rule) => t("m.type." + rule, { min: r && r.min != null ? r.min : "-∞", max: r && r.max != null ? r.max : "∞" });
+  const stored = r && r.visibility === "plain" ? (r.value || "") : "";
+  if (ty === "enum" && r.choices && r.choices.length) {
+    f.type = "select"; f.options = [["", t("m.var.not_set")]].concat(r.choices.map((c) => [c, c]));
+    if (stored && !r.choices.includes(stored)) { f.options.push([stored, stored]); f.warn = t("m.type.not_in_choices"); }   // shown as it is, with a warning
+  } else if (ty === "bool") { f.type = "switch"; if (stored && stored !== "true" && stored !== "false") f.warn = word("bool"); }
+  else if (ty) {
+    f.check = (v) => { const rule = typeProblem(ty, r.choices, v, r.min, r.max); return rule ? word(rule) : ""; };
+    if (stored && f.check(stored)) f.warn = f.check(stored);
+  }
   fields.push(f);
   if (fresh) fields.push({ name: "visibility", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   dialog(fresh ? t("m.var.new_title") : t("m.var.edit", { name: mlabel(r) }), fields, t("btn.save"), (v) => {

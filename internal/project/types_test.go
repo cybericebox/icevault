@@ -37,6 +37,16 @@ func TestValueProblem(t *testing.T) {
 		{Variable{Name: "D", Type: TypeDomain}, "-bad.example.org", RuleDomain},
 		{Variable{Name: "P", Pattern: "[a-z]{2}-[0-9]+"}, "eu-12", ""},
 		{Variable{Name: "P", Pattern: "[a-z]{2}-[0-9]+"}, "xeu-12x", RulePattern},
+		{Variable{Name: "N", Type: TypeInt, Min: i64(0), Max: i64(7)}, "7", ""},
+		{Variable{Name: "N", Type: TypeInt, Min: i64(0), Max: i64(7)}, "8", RuleRange},
+		{Variable{Name: "N", Type: TypeInt, Min: i64(0), Max: i64(7)}, "-1", RuleRange},
+		{Variable{Name: "N", Type: TypeInt, Min: i64(0)}, "99999999999", ""},
+		{Variable{Name: "N", Type: TypeInt}, "99999999999999999999", RuleInt},
+		{Variable{Name: "P", Pattern: "a)|(b"}, "b", RulePattern}, // a broken pattern never matches, never slips out of its anchors
+		{Variable{Name: "P", Pattern: "a|b"}, "ab", RulePattern},
+		{Variable{Name: "P", Pattern: "a|b"}, "b", ""},
+		{Variable{Name: "S"}, strings.Repeat("x", MaxLength+1), RuleLength},
+		{Variable{Name: "S"}, strings.Repeat("x", MaxLength), ""},
 		// a reference is checked after it resolves
 		{Variable{Name: "N", Type: TypeInt}, "${{ shared.COUNT }}", ""},
 		{enum, "prefix ${{ shared.MODE }}", ""},
@@ -48,6 +58,8 @@ func TestValueProblem(t *testing.T) {
 		}
 	}
 }
+
+func i64(n int64) *int64 { return &n }
 
 func TestIsReference(t *testing.T) {
 	for v, want := range map[string]bool{"${{ a.B }}": true, "x ${{ a.B }} y": true, "$${{ a.B }}": false, "${ a }": false, "": false, "{{ a }}": false} {
@@ -71,6 +83,11 @@ func TestTypeMetadataIsValidated(t *testing.T) {
 		"empty":       {"    - {name: X, type: enum, choices: [a, '']}\n", "choice"},
 		"twice":       {"    - {name: X, type: enum, choices: [a, a]}\n", "twice"},
 		"bad pattern": {"    - {name: X, pattern: '('}\n", "pattern"},
+		"alone":       {"    - {name: X, pattern: 'a)|(b'}\n", "pattern"},
+		"long":        {"    - {name: X, pattern: '" + strings.Repeat("a", MaxLength+1) + "'}\n", "pattern"},
+		"min/max":     {"    - {name: X, type: int, min: 0, max: 7}\n", ""},
+		"min above":   {"    - {name: X, type: int, min: 8, max: 7}\n", "min is above max"},
+		"min on text": {"    - {name: X, type: string, min: 1}\n", "min and max"},
 		"pattern/int": {"    - {name: X, type: int, pattern: '[0-9]+'}\n", "pattern"},
 	} {
 		_, err := Parse(desc(tc.vars))
@@ -104,5 +121,16 @@ func TestSpecOf(t *testing.T) {
 	}
 	if p := d.ValueProblem("MODE", "c"); p != RuleEnum || d.ValueProblem("FREE", "c") != "" {
 		t.Fatal(p)
+	}
+}
+
+func TestWhenFalseVariableIsNotActive(t *testing.T) {
+	d, err := Parse(desc("    - {name: MODE, type: enum, choices: [a, b]}\n    - {name: ONLY_A, type: int, when: 'MODE=a'}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if !d.Active("ONLY_A", get(map[string]string{"MODE": "a"})) || d.Active("ONLY_A", get(map[string]string{"MODE": "b"})) || !d.Active("MODE", get(nil)) || !d.Active("UNKNOWN", get(nil)) {
+		t.Fatal("when decides")
 	}
 }

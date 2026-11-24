@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -30,7 +31,12 @@ const (
 	RuleDomain  = "domain"
 	RuleEnum    = "enum"
 	RulePattern = "pattern"
+	RuleRange   = "range"  // an int outside min..max
+	RuleLength  = "length" // longer than MaxLength
 )
+
+// MaxLength is the longest value, and the longest pattern, a description may declare or a check reads.
+const MaxLength = 4096
 
 var (
 	refRE    = regexp.MustCompile(`(^|[^$])\$\{\{`)
@@ -60,6 +66,9 @@ func (v Variable) ValueProblem(value string) string {
 	if value == "" || IsReference(value) {
 		return ""
 	}
+	if len(value) > MaxLength {
+		return RuleLength
+	}
 	switch v.Type {
 	case TypeBool:
 		if value != "true" && value != "false" {
@@ -68,6 +77,13 @@ func (v Variable) ValueProblem(value string) string {
 	case TypeInt:
 		if !intRE.MatchString(value) {
 			return RuleInt
+		}
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return RuleInt
+		}
+		if (v.Min != nil && n < *v.Min) || (v.Max != nil && n > *v.Max) {
+			return RuleRange
 		}
 	case TypeEmail:
 		if len(value) > 254 || !emailRE.MatchString(value) {
@@ -88,11 +104,31 @@ func (v Variable) ValueProblem(value string) string {
 		}
 	}
 	if v.Pattern != "" {
-		if re, err := regexp.Compile("^(?:" + v.Pattern + ")$"); err != nil || !re.MatchString(value) {
+		if re, err := anchored(v.Pattern); err != nil || !re.MatchString(value) {
 			return RulePattern
 		}
 	}
 	return ""
+}
+
+// anchored compiles a pattern so that it must match the whole value. The pattern has to be a regular expression on its own and keep its groups
+// inside the anchors: "a)|(b" does not compile alone, and so cannot slip out of the anchors.
+func anchored(pattern string) (*regexp.Regexp, error) {
+	if len(pattern) > MaxLength {
+		return nil, fmt.Errorf("longer than %d", MaxLength)
+	}
+	alone, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	re, err := regexp.Compile("^(?:" + pattern + ")$")
+	if err != nil {
+		return nil, err
+	}
+	if re.NumSubexp() != alone.NumSubexp() {
+		return nil, fmt.Errorf("its groups change when it is anchored")
+	}
+	return re, nil
 }
 
 // Typed returns the first variable of that name that declares a type, choices or a pattern, or nil. One name has one type in a description
@@ -127,9 +163,17 @@ func (v Variable) validateType(w string, add func(string, ...any)) {
 	if v.Type != TypeEnum && len(v.Choices) > 0 {
 		add("%s: choices only belong to type enum", w)
 	}
+	if v.Type != TypeInt && (v.Min != nil || v.Max != nil) {
+		add("%s: min and max only belong to type int", w)
+	}
+	if v.Min != nil && v.Max != nil && *v.Min > *v.Max {
+		add("%s: min is above max", w)
+	}
 	seen := map[string]bool{}
 	for _, c := range v.Choices {
 		switch {
+		case len(c) > MaxLength:
+			add("%s: a choice is longer than %d", w, MaxLength)
 		case c == "" || strings.TrimSpace(c) != c || strings.ContainsAny(c, "\r\n"):
 			add("%s: a choice is a non-empty single line without outer spaces", w)
 		case seen[c]:
@@ -141,7 +185,7 @@ func (v Variable) validateType(w string, add func(string, ...any)) {
 		if v.Type != "" && v.Type != TypeString {
 			add("%s: pattern only belongs to a string variable (type %s has its own rule)", w, v.Type)
 		}
-		if _, err := regexp.Compile("^(?:" + v.Pattern + ")$"); err != nil {
+		if _, err := anchored(v.Pattern); err != nil {
 			add("%s: pattern is not a regular expression (%v)", w, err)
 		}
 	}
@@ -149,5 +193,24 @@ func (v Variable) validateType(w string, add func(string, ...any)) {
 
 // sameType reports whether two declarations of one name agree.
 func (v Variable) sameType(o Variable) bool {
-	return v.Kind() == o.Kind() && v.Pattern == o.Pattern && fmt.Sprint(v.Choices) == fmt.Sprint(o.Choices)
+	return v.Kind() == o.Kind() && v.Pattern == o.Pattern && fmt.Sprint(v.Choices) == fmt.Sprint(o.Choices) && sameBound(v.Min, o.Min) && sameBound(v.Max, o.Max)
+}
+
+func sameBound(a, b *int64) bool { return (a == nil && b == nil) || (a != nil && b != nil && *a == *b) }
+
+// Active reports whether a variable of that name is used under these settings: a variable whose when condition is false at every home is not
+// used (it is not rendered, so nothing is checked against its type). A name the description does not know is active.
+func (d *Description) Active(name string, get func(string) string) bool {
+	g := d.Getter(get)
+	known, active := false, false
+	d.Walk(func(h Home) {
+		if h.Var.Name != name {
+			return
+		}
+		known = true
+		if c, err := ParseWhen(h.Var.When); err != nil || c == nil || c.Holds(g) {
+			active = true
+		}
+	})
+	return !known || active
 }

@@ -99,6 +99,12 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 		if h.Type != "" {
 			out["type"] = h.Type
 		}
+		if h.Min != nil {
+			out["min"] = *h.Min
+		}
+		if h.Max != nil {
+			out["max"] = *h.Max
+		}
 		if len(h.Choices) > 0 {
 			out["choices"] = h.Choices
 		}

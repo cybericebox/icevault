@@ -68,6 +68,9 @@ type Variable struct {
 	Choices []string `yaml:"choices,omitempty"`
 	// Pattern is a regular expression (Go syntax) the whole value must match; for a string variable only.
 	Pattern string `yaml:"pattern,omitempty"`
+	// Min and Max bound an int (inclusive); either may be left out.
+	Min *int64 `yaml:"min,omitempty"`
+	Max *int64 `yaml:"max,omitempty"`
 }
 
 // System reports whether the variable is managed by the system.

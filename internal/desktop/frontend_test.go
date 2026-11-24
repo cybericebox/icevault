@@ -123,13 +123,13 @@ func TestEveryTypeRuleHasAMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	src, _ := fs.ReadFile(frontend(t), "index.html")
-	for _, rule := range []string{project.RuleBool, project.RuleInt, project.RuleEmail, project.RuleURL, project.RuleDomain, project.RuleEnum, project.RulePattern} {
+	for _, rule := range []string{project.RuleBool, project.RuleInt, project.RuleEmail, project.RuleURL, project.RuleDomain, project.RuleEnum, project.RulePattern, project.RuleRange, project.RuleLength} {
 		for _, lang := range []string{"en", "uk", "ru"} {
 			if strings.TrimSpace(tables[lang]["m.type."+rule]) == "" {
 				t.Errorf("no m.type.%s in %s", rule, lang)
 			}
 		}
-		if rule != project.RulePattern && !strings.Contains(string(src), "case \""+rule+"\":") {
+		if rule != project.RulePattern && rule != project.RuleRange && rule != project.RuleLength && !strings.Contains(string(src), "case \""+rule+"\":") {
 			t.Errorf("the page does not check %s", rule)
 		}
 	}

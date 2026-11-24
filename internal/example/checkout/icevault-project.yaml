@@ -195,7 +195,7 @@ products:
     variables:
       - {name: ENGINE_PROFILE_DIR, label: {en: Profile folder}, managed: system}
       - {name: ENGINE_TAG, label: {en: Image tag}}
-      - {name: ENGINE_THREADS, label: {en: Threads}, type: int}
+      - {name: ENGINE_THREADS, label: {en: Threads}, type: int, min: 1, max: 64}
       - {name: BOOTSTRAP_INVITE, label: {en: First invite}, secret: true, temporary: true}
   - name: indexer
     title: {en: Indexer, uk: Індексатор}

@@ -235,6 +235,10 @@ func (t TypeProblem) Words() string {
 		return "must be a domain name"
 	case project.RuleEnum:
 		return "must be one of its choices"
+	case project.RuleRange:
+		return "is outside the allowed range"
+	case project.RuleLength:
+		return "is too long"
 	}
 	return "does not match its pattern"
 }
@@ -245,9 +249,17 @@ func (t TypeProblem) String() string { return t.File + "/" + t.Name + " " + t.Wo
 // not set and fits; a reference was resolved by View, so the text it came to is checked.
 func (p *Project) TypeProblems(v *View) []TypeProblem {
 	var out []TypeProblem
+	var settings map[string]string // the general file: what the conditions of the variables read
+	if g := v.Env[p.Conf()]; g != nil {
+		settings = g.Variables.M
+	}
+	get := func(k string) string { return settings[k] }
 	for _, rel := range v.Rels() {
 		ef := v.Env[rel]
 		for _, name := range ef.Variables.Order {
+			if !p.D.Active(name, get) {
+				continue // its when condition is false: it is not used, so nothing is checked
+			}
 			if rule := p.D.ValueProblem(name, ef.Variables.M[name]); rule != "" {
 				out = append(out, TypeProblem{rel, name, rule})
 			}
@@ -624,6 +636,9 @@ func (p *Project) AppFileText(snap *model.Snapshot, env string, a *project.App, 
 		return "", nil, err
 	}
 	if err := RequireResolved(v); err != nil {
+		return "", nil, err
+	}
+	if err := RequireTyped(p.TypeProblems(v)); err != nil {
 		return "", nil, err
 	}
 	values, _, err := p.Effective(snap, env, a.From, site)

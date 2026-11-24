@@ -197,7 +197,7 @@ func TestTypedVariables(t *testing.T) {
 	c, _ := newCore(t)
 	scope := "env/prod/product/portal"
 	for _, tc := range []struct{ key, value, rule string }{
-		{"SIGNUP_MODE", "closed", "enum"}, {"CONTACT_ADDRESS", "not an address", "email"}, {"ENGINE_THREADS", "x", "int"},
+		{"SIGNUP_MODE", "closed", "enum"}, {"CONTACT_ADDRESS", "not an address", "email"}, {"ENGINE_THREADS", "x", "int"}, {"ENGINE_THREADS", "100", "range"}, {"ENGINE_THREADS", "0", "range"},
 	} {
 		_, err := c.Write("m-var", map[string]any{"scope": scope, "key": tc.key, "value": tc.value})
 		var de *desktop.Error
