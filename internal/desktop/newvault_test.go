@@ -688,6 +688,14 @@ func TestUseWithoutAProject(t *testing.T) {
 	if r := a.Unlock("password", "pw"); r.Status != 200 {
 		t.Fatalf("%+v", r)
 	}
+	// it acts only on the question about a checkout: in any other state nothing is marked
+	for name, e := range map[string]error{"another problem": &Error{Status: 409, Code: "setup_no_model"}, "no problem": nil} {
+		other := &fakeVaults{needRoot: map[string]bool{}, prepareErr: e}
+		o := New(Options{Vaults: other, Vault: "/v/other.kdbx"})
+		if r := o.UseWithoutProject(); r.Status != 409 || codeOf(r) != "no_project_refused" || len(other.noProject) != 0 {
+			t.Fatalf("%s: %+v marked %v", name, r, other.noProject)
+		}
+	}
 	// refusals: no list, no vault chosen, a failing mark
 	if r := New(Options{}).UseWithoutProject(); codeOf(r) != "vaults_off" {
 		t.Fatalf("%+v", r)

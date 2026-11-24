@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cybericebox/icevault/internal/example"
 )
 
 func TestInitVaultNoProjectMakesAVaultAnywhere(t *testing.T) {
@@ -82,6 +84,26 @@ func TestCommandsThatNeedEnvironmentsSayTheVaultHasNoProject(t *testing.T) {
 	rc := h2.run("status", "--env", "prod")
 	if rc != 1 || strings.Contains(h2.errb.String(), "this vault has no project") {
 		t.Fatalf("rc=%d %q", rc, h2.errb.String())
+	}
+}
+
+// The mark is honoured only when no project is found: with a description the commands work on the vault as before.
+func TestTheMarkIsIgnoredWhenAProjectIsFound(t *testing.T) {
+	h := newHarness(t)
+	h.root = ""
+	h.pw = []string{"k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ"}
+	if rc := h.run("init-vault", "--no-project", "--decryption-time", "100"); rc != 0 {
+		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+	h.root = filepath.Join(h.dir, "project") // a checkout with its description
+	if err := example.Write(h.root); err != nil {
+		t.Fatal(err)
+	}
+	h.pw = []string{"k7Qm2xVb9RtZ"}
+	h.asked = 0
+	h.run("status", "--env", "prod")
+	if strings.Contains(h.errb.String(), "this vault has no project") || h.asked == 0 {
+		t.Fatalf("a marked vault was refused although a project is found: asked=%d %q", h.asked, h.errb.String())
 	}
 }
 

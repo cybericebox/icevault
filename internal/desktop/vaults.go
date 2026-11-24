@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"errors"
 	"path/filepath"
 
 	"github.com/cybericebox/icevault/internal/password"
@@ -135,10 +136,15 @@ func (a *App) UseWithoutProject() Response {
 		return fail(409, "vaults_off")
 	}
 	a.mu.Lock()
-	path := a.vault
+	path, problem := a.vault, a.problem
 	a.mu.Unlock()
 	if path == "" {
 		return fail(409, "no_vault_chosen")
+	}
+	// only the question about a checkout is answered this way: a vault that has its project, or one that fails for another reason, is left as it is
+	var pe *Error
+	if !errors.As(problem, &pe) || pe.Code != "vault_needs_root" {
+		return fail(409, "no_project_refused")
 	}
 	if err := a.o.Vaults.SetNoProject(path); err != nil {
 		return answer(err)
