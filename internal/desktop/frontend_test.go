@@ -200,6 +200,36 @@ func TestModelScreenLayoutWiring(t *testing.T) {
 	}
 }
 
+// One table for every data table of the model screen (variables, connection fields, other secrets): built only by mtable, so the column plan, the
+// frame, the row cells and the right-aligned actions column are the same everywhere, and an empty table keeps its head with the empty state in the body.
+func TestModelTablesShareOneLayout(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	if n := strings.Count(page, `el("table", "rows mtable")`); n != 1 {
+		t.Errorf("the model tables are built in %d places, want one (mtable)", n)
+	}
+	for _, fn := range []string{"mvars", "mfields", "mOther"} {
+		body := regexp.MustCompile(`(?s)function ` + fn + `\(.*?\n\}\n`).FindString(page)
+		if body == "" || !strings.Contains(body, "mtable(") || !strings.Contains(body, "mnamecell(") || !strings.Contains(body, "mactcell()") {
+			t.Errorf("%s does not build its table with mtable, mnamecell and mactcell", fn)
+		}
+		if strings.Contains(body, `el("td", "kcell")`) || strings.Contains(body, `el("td", "acts")`) {
+			t.Errorf("%s builds a cell of its own", fn)
+		}
+	}
+	for _, want := range []string{
+		`["name", "32%"], ["value", "38%"], ["labels", "auto"]`, "n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD", `el("td", "emptycell")`,
+		".mtable .abox { display:flex; justify-content:flex-end;", ".mtable td.emptycell {", ".mblock-h { display:flex; align-items:center; gap:8px; min-height:32px; }",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+}
+
 // The model screen's dialogs: a secret value is typed masked (and follows the visibility chosen in the dialog), a key file is a masked multi-line
 // field that can be read from a file, a bad variable name is an error beside its field, an environment can be created from the view mode, and a
 // recovery kit that was not saved is asked about before the step is left.
