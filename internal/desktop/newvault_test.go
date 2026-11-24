@@ -345,6 +345,13 @@ func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	if r.Status != 200 || d["ok"] != true || d["touchid"] != "on" || d["kit"] != true || d["file"] != "v.kdbx" {
 		t.Fatalf("%+v", r)
 	}
+	if held := dataOf(h.app.KitHeld())["held"]; held != true {
+		t.Fatalf("the kit is not held after the vault was made: %v", held)
+	}
+	h.app.DiscardRecoveryKit()
+	if held := dataOf(h.app.KitHeld())["held"]; held != false {
+		t.Fatalf("the kit is still held after it was discarded: %v", held)
+	}
 	if h.maker.made[p] != strongPW || h.maker.bound[p] != strongPW {
 		t.Fatal("the vault or the binding was not made with the typed password")
 	}
@@ -353,6 +360,9 @@ func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	}
 	if len(h.vault.opened) != 0 {
 		t.Fatalf("a vault never unlocked was recorded as opened: %v", h.vault.opened)
+	}
+	if len(h.vault.added) != 1 || h.vault.added[0] != p {
+		t.Fatalf("the new vault is not in the recent list at once: %v", h.vault.added)
 	}
 	cur, _ := dataOf(h.app.ListVaults())["current"].(VaultInfo)
 	if cur.Path != p {
@@ -394,7 +404,7 @@ func TestCreateVaultFailureLeaksNothing(t *testing.T) {
 	if r.Status != 500 || codeOf(r) != "new_failed" || strings.Contains(toJSON(r), "SECRET") {
 		t.Fatalf("%+v", r)
 	}
-	if len(h.vault.opened) != 0 {
+	if len(h.vault.opened) != 0 || len(h.vault.added) != 0 {
 		t.Fatal("a vault that was not made was listed")
 	}
 	if r := h.app.SaveRecoveryKit("t", "{password}"); codeOf(r) != "kit_none" {

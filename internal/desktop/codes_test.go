@@ -351,7 +351,7 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 	for _, name := range []string{"UpdateStatus", "UpdateCheck", "UpdateFetch", "UpdateApply", "UpdateAuto", "UpdateRelease"} {
 		covered[name] = true
 	}
-	for _, name := range []string{"Status", "Ping", "Close", "Lock"} { // these answer no refusals: success shapes only
+	for _, name := range []string{"Status", "Ping", "Close", "Lock", "KitHeld"} { // these answer no refusals: success shapes only
 		covered[name] = true
 	}
 

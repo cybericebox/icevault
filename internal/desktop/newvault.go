@@ -266,7 +266,10 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 	}
 	// the new vault is the chosen one on the lock screen (a file it cannot prepare yet, for want of a checkout, shows what to do there)
 	a.selectVault(path)
-	// not recorded as opened: the vault joins the recent list at its first unlock (it is shown as the chosen one until then)
+	// the new vault is in the recent list at once, marked as not opened yet; its first unlock sets the time
+	if err := a.o.Vaults.Added(path); err != nil {
+		a.say("the list of vaults was not saved")
+	}
 	k := &recoveryKit{path: path, label: filepath.Base(path), created: a.o.Clock(), password: append([]byte(nil), pwb...)}
 	k.stop = a.o.AfterFunc(kitKeep, func() { a.dropKitIf(k) })
 	a.mu.Lock()
@@ -387,6 +390,14 @@ func writeKitWith(p string, b []byte, beforeWrite func(f *os.File)) (err error) 
 	}
 	_, err = f.Write(b)
 	return err
+}
+
+// KitHeld says whether a recovery kit is still held for the person to save: false once it was discarded or dropped after kitKeep. The page asks before
+// it warns about leaving a step with no kit saved.
+func (a *App) KitHeld() Response {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return ok(map[string]any{"held": a.kit != nil})
 }
 
 // DiscardRecoveryKit drops the pending kit: the person does not want one.

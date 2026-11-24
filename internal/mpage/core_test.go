@@ -132,6 +132,95 @@ func TestProductHelpFollowsThePlacement(t *testing.T) {
 	}
 }
 
+func TestEnumAndBoolSaveAsAReferenceAndAsAValue(t *testing.T) {
+	c, _ := newCore(t)
+	scope := "env/prod/product/portal"
+	valueOf := func() string {
+		for _, x := range c.Model().Env("prod").Product("portal").Vars {
+			if x.Key == "SIGNUP_MODE" {
+				return x.Value
+			}
+		}
+		return "(none)"
+	}
+	for _, v := range []string{"${{ self.PUBLIC_HOST }}", "open", "${{ shared.CONTACT_ADDRESS }}", "invite"} {
+		if _, err := c.Write("m-var", map[string]any{"scope": scope, "key": "SIGNUP_MODE", "value": v, "visibility": "plain"}); err != nil {
+			t.Fatalf("%s: %v", v, err)
+		}
+		if valueOf() != v {
+			t.Fatalf("saved %q, model holds %q", v, valueOf())
+		}
+		if p := c.d.ValueProblem("SIGNUP_MODE", v); p != "" {
+			t.Fatalf("%q is a choice or a reference: %s", v, p)
+		}
+	}
+	if c.d.ValueProblem("SIGNUP_MODE", "nonsense") == "" {
+		t.Fatal("a value that is not a choice passes")
+	}
+	// a bool is the same: true, false and a reference pass, anything else is a problem
+	b := project.Variable{Name: "FLAG", Type: project.RuleBool}
+	for _, v := range []string{"true", "false", "${{ self.PUBLIC_HOST }}", "a-${{ shared.X }}"} {
+		if p := b.ValueProblem(v); p != "" {
+			t.Errorf("bool %q: %s", v, p)
+		}
+	}
+	if b.ValueProblem("yes") == "" || b.ValueProblem("$${{ x }}") == "" {
+		t.Error("a bool takes only true, false or a reference (an escaped one is text)")
+	}
+}
+
+func TestAKeyFileIsOneLine(t *testing.T) {
+	c, _ := newCore(t)
+	gcp := c.Model().Connections[0]
+	for _, v := range []string{"{\n \"a\": 1\n}", "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----", "a\rb"} {
+		if _, err := c.Write("m-field", map[string]any{"uuid": gcp.UUID, "field": "credentials", "value": v}); code(err) != "line_break" {
+			t.Fatalf("a multi-line value was not refused: %v", err)
+		}
+	}
+	if _, err := c.Write("m-field", map[string]any{"uuid": gcp.UUID, "field": "credentials", "value": `{"a":1}`}); err != nil {
+		t.Fatal(err)
+	}
+	if f := c.Model().Connections[0].Field("credentials"); f == nil || f.Value != `{"a":1}` || !f.Secret {
+		t.Fatalf("a compact JSON key is kept, as a secret: %+v", f)
+	}
+}
+
+func TestMissingCountsAThingOnceForTheEnvironment(t *testing.T) {
+	c, _ := newCore(t)
+	prod := c.Model().Env("prod")
+	prod.General = nil // PUBLIC_HOST is required and now empty
+	site := prod.Sites[0]
+	prod.Products = append(prod.Products, &vmodel.Product{Name: "engine", Enabled: true, Site: site, Sub: map[string][]*vmodel.Var{}})
+	site.Connection = nil // the connection every product of the site lacks
+	var env map[string]any
+	for _, e := range c.Nav()["envs"].([]map[string]any) {
+		if e["name"] == "prod" {
+			env = e
+		}
+	}
+	perProduct, general, siteConn := 0, 0, 0
+	for _, p := range env["products"].([]map[string]any) {
+		for _, r := range p["missing"].([]map[string]any) {
+			perProduct++
+			if r["where"] == "general" {
+				general++
+			}
+			if r["where"] == "site_connection" {
+				siteConn++
+				if r["site"] != "main" {
+					t.Fatalf("the row does not name its site: %v", r)
+				}
+			}
+		}
+	}
+	if general < 2 || siteConn < 2 {
+		t.Fatalf("each product lists the shared things (general %d, site connection %d)", general, siteConn)
+	}
+	if got := env["missing"].(int); got >= perProduct || got != perProduct-(general-1)-(siteConn-1) {
+		t.Fatalf("the environment counts %d, the products list %d (general %d, site connection %d)", got, perProduct, general, siteConn)
+	}
+}
+
 func TestBrokenReferenceIsNeededForDeploy(t *testing.T) {
 	c, _ := newCore(t)
 	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/product/portal", "key": "LINK", "value": "${{ self.NOPE }}", "visibility": "plain"}); err != nil {

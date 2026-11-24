@@ -45,6 +45,7 @@
       case "vault-change": return app.ChangePassword(typeof b.current === "string" ? b.current : "", typeof b.password === "string" ? b.password : "", typeof b.confirm === "string" ? b.confirm : "", !!b.touchid, !!b.refresh);
       case "kit-save": return app.SaveRecoveryKit(String(b.title || ""), String(b.template || ""));
       case "kit-discard": return app.DiscardRecoveryKit();
+      case "kit-held": return app.KitHeld();
       case "project-choose": return app.ChooseProject(String(b.title || ""));
       case "update": return app.UpdateStatus();
       case "update-check": return app.UpdateCheck();

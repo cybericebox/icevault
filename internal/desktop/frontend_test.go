@@ -23,7 +23,7 @@ func TestPageEndpointsAreBound(t *testing.T) {
 	}
 	lifecycle := map[string]bool{"status": true, "ping": true, "close": true, "lock": true, "mode": true, "unlock": true, "reveal": true, "cli": true, "cli-install": true, "refresh": true,
 		"vaults": true, "vault-select": true, "vault-open": true, "vault-root": true, "vault-forget": true, "project-choose": true,
-		"vault-new-project": true, "vault-new-noproject": true, "vault-no-project": true, "vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "vault-change-info": true, "vault-change": true, "kit-save": true, "kit-discard": true,
+		"vault-new-project": true, "vault-new-noproject": true, "vault-no-project": true, "vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "vault-change-info": true, "vault-change": true, "kit-save": true, "kit-discard": true, "kit-held": true,
 		"update": true, "update-check": true, "update-fetch": true, "update-apply": true, "update-auto": true, "update-release": true}
 	reads := map[string]bool{"nav": true, "item": true, "compare": true, "references": true, "pull-candidates": true, "shared": true, "visibility": true, "preview-value": true, "migrate-plan": true}
 	found := map[string]bool{}
@@ -197,5 +197,64 @@ func TestModelScreenLayoutWiring(t *testing.T) {
 	}
 	if mv := regexp.MustCompile(`(?s)function mvars\(.*?\n\}\n`).FindString(page); mv == "" || strings.Contains(mv, `el("td", "kcell")`) {
 		t.Error("a name cell of the model tables is a flex box again: its row grows unevenly")
+	}
+}
+
+// The model screen's dialogs: a secret value is typed masked (and follows the visibility chosen in the dialog), a key file is a masked multi-line
+// field that can be read from a file, a bad variable name is an error beside its field, an environment can be created from the view mode, and a
+// recovery kit that was not saved is asked about before the step is left.
+func TestModelDialogsHideSecretsAndGuardTheKit(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"maskIf: fresh ?", `classList.add("masked")`, "fromFile: !!r && secret", "textarea.masked {", `bad_key: "key"`, `check: (v) => (v.trim() && !/^[A-Za-z_]`,
+		"function leaveKit(", `kit.dataset.saved = "1"`, "leaveKit(() => kitEl, finish)", `if (!editing() && !(await setMode("edit"))) return; menvDialog(null);`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if ms := regexp.MustCompile(`(?s)function renderMSide\(\) \{(.*?)\n\}\n`).FindStringSubmatch(page); ms == nil || strings.Contains(ms[1], `if (editing()) { const a = el("button", "side-add")`) {
+		t.Error("the new environment button is back to edit mode only")
+	}
+}
+
+// An enum or a bool can take a reference instead of a choice: a stored reference is not a false "not in choices" warning and not an option, the field has a
+// "use a reference" link, and a new variable is checked as typed against the type the description gives its name.
+func TestTypedFieldsTakeReferences(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"function withRefAlt(", "f.refAlt = { scope, start: true, value: stored }", "const isRef = (v) => /(^|[^$])\\$\\{\\{/.test(v || \"\")", "const described = (inp) =>", "fields[0].recheck = [\"value\"]",
+		"function mrowsOf(scope)", ".sel[hidden]",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+}
+
+// A key file read from a page: at most 64 KiB, checked before it is read, a JSON key compacted to one line, text with line breaks refused with a
+// sentence; a secret that is switched to secret is masked again; the kit warning asks the program whether a kit is still held; a product keeps the
+// connection it already has in its list.
+func TestKeyFilesAndKitGuardsOfTheDialogs(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"file.size > 65536", "JSON.stringify(JSON.parse(text))", `t("val.file_lines")`, `t("val.file_big")`, `setAttribute("autocapitalize", "off")`, `setAttribute("autocorrect", "off")`,
+		`i.dataset.shown = ""`, `api("/api/kit-held")`, `"kit-held"`, "wanted(c) || chosen.has(c.uuid)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
 	}
 }

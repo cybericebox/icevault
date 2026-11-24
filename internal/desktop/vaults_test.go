@@ -14,7 +14,7 @@ type fakeVaults struct {
 	unlockers                      map[string]Unlocker
 	roots                          map[string]string
 	needRoot                       map[string]bool
-	opened, forgotten              []string
+	opened, added, forgotten       []string
 	prepareErr, rootErr, forgetErr error
 	defaultErr                     error
 	noProject                      map[string]bool
@@ -81,6 +81,12 @@ func (f *fakeVaults) SetRoot(p, root string) error {
 		f.roots = map[string]string{}
 	}
 	f.roots[p] = root
+	return nil
+}
+func (f *fakeVaults) Added(p string) error {
+	f.mu.Lock()
+	f.added = append(f.added, p)
+	f.mu.Unlock()
 	return nil
 }
 func (f *fakeVaults) Opened(p string) error {
