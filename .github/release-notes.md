@@ -3,7 +3,7 @@ IceVault {{VERSION}}
 ## Changes since v0.7.0
 
 - **Insert reference** never offers the variable being edited, nor a value whose references lead back to it (a cycle) or go deeper than the reference limit. Filters: All, This environment (`self`), Shared, Connections, and one chip per connection, with counts; arrows, Home and End move between them. Each target shows its kind, its visibility and its description, never its value.
-- **Shared values** show who uses them, in the row: an import, a `${{ shared.KEY }}` reference under any name (`prod (GOOGLE_CLIENT_ID)`), another shared value or a connection field. Deleting a used shared value names them and asks first (the window used to skip that question).
+- **Shared values** show who uses them, in the row: an import, a `${{ shared.KEY }}` reference under any name (`prod (CLIENT_ID)`), another shared value or a connection field. Deleting a used shared value names them and asks first (the window used to skip that question).
 - **One table layout** for every table of the window: environment sections, connection fields, other secrets and shared values have the same columns, frame, row height and action columns (show, edit, delete line up in every row); a section whose variables are all hidden says so.
 - A revealed secret hides itself after **20 seconds** (was 30).
 - Wording: "resolved value" is now **"Підсумкове значення"** / "Итоговое значение"; a broken reference says what is wrong in plain words.
