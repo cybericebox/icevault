@@ -118,7 +118,7 @@ func (a *App) ChangePassword(current, pw, confirm string, touchID, refresh bool)
 	a.mu.Lock()
 	a.kit = k
 	a.mu.Unlock()
-	return ok(map[string]any{"ok": true, "file": k.label, "touchid": bound, "was_touchid": out.TouchIDWasOn, "kit": true,
+	return ok(map[string]any{"ok": true, "file": k.label, keyTouchID: bound, "was_touchid": out.TouchIDWasOn, "kit": true,
 		"refreshed": nonNil(out.Refreshed), "stale": nonNil(out.Stale)})
 }
 

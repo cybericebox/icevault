@@ -116,6 +116,7 @@ type App struct {
 // New builds an App. It starts locked.
 // JSON keys and unlock methods the answers repeat.
 const (
+	keyTouchID  = "touchid"
 	keyCode     = "code"
 	keyPassword = "password"
 	keyParams   = "params"
@@ -373,7 +374,7 @@ func (a *App) status() map[string]any {
 	if left < 0 {
 		left = 0
 	}
-	return map[string]any{"locked": a.core == nil, "mode": a.mode, "touchid": a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
+	return map[string]any{"locked": a.core == nil, "mode": a.mode, keyTouchID: a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
 		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword()}
 }
 

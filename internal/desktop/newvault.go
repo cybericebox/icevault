@@ -139,7 +139,7 @@ func (a *App) NewVaultPlace(title string) Response {
 	a.newPath = p
 	a.mu.Unlock()
 	d := a.o.Vaults.Describe(p)
-	return ok(map[string]any{"file": filepath.Base(p), "folder": d.Folder, "touchid": a.o.Maker.TouchIDReady()})
+	return ok(map[string]any{"file": filepath.Base(p), "folder": d.Folder, keyTouchID: a.o.Maker.TouchIDReady()})
 }
 
 // nearestDir is dir, or the nearest folder above it that exists: the save dialog opens there (the folder of the description may not be made yet).
@@ -188,7 +188,7 @@ func (a *App) NewVaultProject(title string) Response {
 	}
 	a.mu.Unlock()
 	d := a.o.Vaults.Describe(def)
-	return ok(map[string]any{"checkout": d.Root, "file": filepath.Base(def), "folder": d.Folder, "exists": exists, "touchid": a.o.Maker.TouchIDReady()})
+	return ok(map[string]any{"checkout": d.Root, "file": filepath.Base(def), "folder": d.Folder, "exists": exists, keyTouchID: a.o.Maker.TouchIDReady()})
 }
 
 // CreateVault makes the vault at the chosen place. The password must be typed again (confirm) and pass the policy; nothing is written otherwise.
