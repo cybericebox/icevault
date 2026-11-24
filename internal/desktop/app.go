@@ -609,7 +609,7 @@ func (a *App) reveal(c Core, args map[string]any) (string, *Response) {
 	return value, nil
 }
 
-// Reveal answers {value}: one value, after the extra check. The page shows it for 30 seconds and drops it.
+// Reveal answers {value}: one value, after the extra check. The page shows it for 20 seconds and drops it.
 func (a *App) Reveal(args map[string]any) Response {
 	c, e := a.store()
 	if e != nil {

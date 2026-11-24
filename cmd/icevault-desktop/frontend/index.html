@@ -2333,7 +2333,7 @@ async function toggleReveal(r, ctx) {
   revealed.set(k, { value: v, until: Date.now() + REVEAL_MS, timer: setTimeout(() => { hideReveal(k); renderMain(); }, REVEAL_MS) }); renderMain();
 }
 // a shown secret hides itself after REVEAL_MS; the seconds left stand beside it (one ticker for all, only while something is shown)
-const REVEAL_MS = 30000;
+const REVEAL_MS = 20000;
 const secsLeft = (k) => { const v = revealed.get(k); return v ? Math.max(0, Math.ceil((v.until - Date.now()) / 1000)) : 0; };
 setInterval(() => { if (revealed.size) document.querySelectorAll(".revcd").forEach((n) => { n.textContent = t("reveal.left", { n: secsLeft(n.dataset.k) }); }); }, 1000);
 async function fetchSecret(r, ctx, k) {
