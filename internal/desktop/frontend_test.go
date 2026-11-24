@@ -291,6 +291,7 @@ func TestKeyTextAsTypedAndListInsideDialog(t *testing.T) {
 	page := string(src)
 	for _, want := range []string{
 		"try { JSON.parse(text); if (/[\\r\\n]/.test(text)) text = JSON.stringify(JSON.parse(text)); }", `trig.closest(".dlgbox")`, "hb.bottom - r.bottom - 8", "#lockedbody .err { min-height:20px;",
+		"new ResizeObserver(fit).observe(s)", ".mpath .mh { flex:none;", `host.querySelector(".actions")`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("index.html lacks %s", want)

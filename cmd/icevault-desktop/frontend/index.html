@@ -298,8 +298,8 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .vl2 { font-size:13px; color:var(--ib-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vl3 { display:flex; flex-direction:column; gap:2px; min-width:0; font-size:13px; color:var(--ib-dim); }
 .vl3 > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mpath { display:flex; min-width:0; max-width:100%; white-space:nowrap; } .mpath.small { font-size:13px; color:var(--ib-dim); }
-.mpath .mh { flex:0 1 auto; min-width:1em; overflow:hidden; text-overflow:ellipsis; } .mpath .mt { flex:0 0 auto; max-width:100%; overflow:hidden; text-overflow:ellipsis; } .mpath .mpre { flex:none; white-space:pre; } .mpath .mh:empty { display:none; }
+.mpath { display:flex; min-width:0; max-width:100%; overflow:hidden; white-space:nowrap; } .mpath.small { font-size:13px; color:var(--ib-dim); }
+.mpath .mh { flex:none; }   /* the page cuts the head by characters (midPath) so the "…" sits against what is kept */ .mpath .mt { flex:0 0 auto; max-width:100%; overflow:hidden; text-overflow:ellipsis; } .mpath .mpre { flex:none; white-space:pre; } .mpath .mh:empty { display:none; }
 .vrow.missing .vl1 b, .vrow.missing .vl2 { color:var(--ib-faint); }
 .vrm { position:absolute; top:8px; right:8px; opacity:0; transition:opacity var(--ib-dur-fast) var(--ib-ease); }
 .vrow:hover .vrm, .vrow:focus-within .vrm { opacity:1; }
@@ -805,9 +805,10 @@ function selectBox(o) {
     document.body.append(list); const r = trig.getBoundingClientRect();
     list.style.minWidth = Math.max(r.width, 160) + "px"; list.style.left = Math.min(r.left, innerWidth - list.offsetWidth - 8) + "px";
     // inside a dialog the list stays inside the dialog (it never covers its buttons or sticks out): the side with more room, scrolling when short
-    const host = trig.closest(".dlgbox"), hb = host ? host.getBoundingClientRect() : { top: 0, bottom: innerHeight, left: 0, right: innerWidth };
+    const host = trig.closest(".dlgbox"), hb = host ? (({ top, bottom, left, right }) => ({ top, bottom, left, right }))(host.getBoundingClientRect()) : { top: 0, bottom: innerHeight, left: 0, right: innerWidth };
+    const acts = host && host.querySelector(".actions"); if (acts) { const ab = acts.getBoundingClientRect().top - 4; if (ab > r.bottom) hb.bottom = Math.min(hb.bottom, ab); }   // never over the buttons of the dialog
     const below = hb.bottom - r.bottom - 8, above = r.top - hb.top - 8, up = list.offsetHeight > below && above > below;
-    list.style.maxHeight = Math.max(96, Math.min(264, up ? above : below)) + "px";
+    list.style.maxHeight = Math.max(64, Math.min(264, up ? above : below)) + "px";
     list.style.left = Math.max(hb.left + 8, Math.min(r.left, hb.right - list.offsetWidth - 8)) + "px";
     list.style.top = (up ? r.top - list.offsetHeight - 4 : r.bottom + 4) + "px";
     openList = { list, trig }; trig.setAttribute("aria-expanded", "true"); mark(Math.max(0, o.options.findIndex((x) => x[0] === value)));
@@ -1246,7 +1247,13 @@ function lockedUI(withPassword, why) {
 function midPath(p, prefix) {
   const s = el("span", "mpath"), i = p.lastIndexOf("/"), head = i > 0 ? p.slice(0, i + 1) : "", tail = i > 0 ? p.slice(i + 1) : p;
   if (prefix) s.append(el("span", "mpre", prefix));
-  s.append(el("span", "mh", head), el("span", "mt", tail)); setTip(s, (prefix || "") + p); return s;
+  const mh = el("span", "mh", head); mh.dataset.full = head; s.append(mh, el("span", "mt", tail)); setTip(s, (prefix || "") + p);
+  // a long path loses the middle of its head: cut by characters so that the "…" sits right against what is kept (a CSS ellipsis leaves a part of a glyph of empty room)
+  const fit = () => { const h = s.querySelector(".mh"); if (!h || !s.clientWidth) return; const full = h.dataset.full; h.textContent = full; if (s.scrollWidth <= s.clientWidth) return;
+    let lo = 0, hi = full.length; while (lo < hi) { const mid = (lo + hi + 1) >> 1; h.textContent = full.slice(0, mid) + "…"; if (s.scrollWidth <= s.clientWidth) lo = mid; else hi = mid - 1; }
+    h.textContent = full.slice(0, lo) + "…"; };
+  requestAnimationFrame(fit); if (window.ResizeObserver) new ResizeObserver(fit).observe(s);
+  return s;
 }
 // "Checkout: {path}" with the path as its own node: the words around the place holder of the translation stay as they are
 const checkoutLine = (path) => { const parts = t("vaults.checkout", { path: "\u0000" }).split("\u0000"); const s = midPath(path, parts[0]); if (parts[1]) s.append(el("span", "mpre", parts[1])); return s; };
