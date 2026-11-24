@@ -395,3 +395,94 @@ func TestRecoveryKitPasswordDoesNotOutliveItsUse(t *testing.T) {
 		t.Fatal("the password stayed after a lock")
 	}
 }
+
+func TestWriteKitIsPrivateBeforeTheFirstByte(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "kit.txt")
+	if err := os.WriteFile(p, []byte("old, world readable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	err := writeKitWith(p, []byte("the secret"), func(f *os.File) {
+		seen = true
+		st, serr := f.Stat()
+		if serr != nil || st.Mode().Perm() != 0o600 || st.Size() != 0 {
+			t.Errorf("before the first write: mode %v size %d (the old content or the old mode is still there)", st.Mode().Perm(), st.Size())
+		}
+	})
+	if err != nil || !seen {
+		t.Fatalf("%v %v", err, seen)
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", st.Mode())
+	}
+	if b, _ := os.ReadFile(p); string(b) != "the secret" {
+		t.Fatalf("%d bytes", len(b))
+	}
+}
+
+func TestWriteKitRefusesASymlinkAndLeavesItsTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("untouched"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "kit.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("no symbolic links here")
+	}
+	if err := writeKit(link, []byte("secret")); err == nil {
+		t.Fatal("a symbolic link was written through")
+	}
+	if b, _ := os.ReadFile(target); string(b) != "untouched" {
+		t.Fatal("the target of the link changed")
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatal("the link itself was removed")
+	}
+}
+
+func TestWriteKitFailureLeavesNoPartialFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "kit.txt")
+	err := writeKitWith(p, []byte("secret"), func(f *os.File) { _ = f.Close() }) // the write after it fails
+	if err == nil {
+		t.Fatal("no error")
+	}
+	if _, serr := os.Lstat(p); serr == nil {
+		t.Fatal("a partial kit file stays")
+	}
+}
+
+func TestWriteKitWipesItsInput(t *testing.T) {
+	b := []byte("secret")
+	if err := writeKit(filepath.Join(t.TempDir(), "k"), b); err != nil {
+		t.Fatal(err)
+	}
+	if string(b) == "secret" {
+		t.Fatal("the body stayed in memory")
+	}
+}
+
+func TestExpandKitIsOnePass(t *testing.T) {
+	got := expandKit("a {name} b {password} c {unknown} {", map[string][]byte{"name": []byte("{password}"), "password": []byte("PW")})
+	if string(got) != "a {password} b PW c {unknown} {" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestPasswordTooLongAndAMeterThatDoesNotQueue(t *testing.T) {
+	a := New(Options{})
+	huge := strings.Repeat("aB3$xQ9!", 1250)
+	start := time.Now()
+	r := a.PasswordStrength(huge)
+	if time.Since(start) > time.Second || codeOf(r) != password.CodeTooLong || dataOf(r)["max"] != password.MaxLength {
+		t.Fatalf("%+v after %v", r, time.Since(start))
+	}
+	h := newVaultApp(t)
+	h.place("v")
+	if r := h.app.CreateVault(huge, huge, false); r.Status != 400 || codeOf(r) != password.CodeTooLong || h.maker.createCalls != 0 {
+		t.Fatalf("%+v", r)
+	}
+}

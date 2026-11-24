@@ -52,13 +52,14 @@ func TestInitVaultRefusesWeakPasswordsBeforeAnythingIsWritten(t *testing.T) {
 		{"long keyboard walk", "Qwerty123456!asdf", "too easy to guess"},
 		{"long dictionary phrase", "iloveyouiloveyoutoo", "too easy to guess"},
 		{"repeat", "abcabcabcabcabcabc", "repeats"},
+		{"too long", strings.Repeat("k7Qm2xVb9RtZ", 25), "at most 256"},
 	}
 	for _, c := range cases {
 		h := newHarness(t)
 		h.pw = []string{c.pw, c.pw}
 		rc := h.run("init-vault", "--decryption-time", "100")
 		got := h.errb.String()
-		if rc != 1 || !strings.Contains(got, c.msg) || !strings.Contains(got, "--generate") || !strings.Contains(got, "nothing was made") {
+		if rc != 1 || !strings.Contains(got, c.msg) || (c.name != "too long" && !strings.Contains(got, "--generate")) || !strings.Contains(got, "nothing was made") {
 			t.Errorf("%s: rc=%d %q", c.name, rc, got)
 		}
 		if strings.Contains(got+h.out.String(), c.pw) {

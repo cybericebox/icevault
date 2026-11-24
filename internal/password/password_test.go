@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The policy's table. The passwords here are made-up examples, none of them protects anything.
@@ -188,6 +189,53 @@ func TestEveryGeneratedPassphrasePassesThePolicy(t *testing.T) {
 		}
 		if err := Check([]byte(p)); err != nil {
 			t.Fatalf("a generated passphrase was refused: %v", err)
+		}
+	}
+}
+
+func TestVeryLongInputIsRefusedFastAndTheEstimateLooksAtTheFirstCharactersOnly(t *testing.T) {
+	huge := []byte(strings.Repeat("aB3$xQ9!", 1250)) // 10000 characters
+	start := time.Now()
+	err := Check(huge)
+	took := time.Since(start)
+	var r *Refusal
+	if !errors.As(err, &r) || r.Code != CodeTooLong || r.Max != MaxLength {
+		t.Fatalf("want too_long, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "at most 256") {
+		t.Fatalf("message %q", err)
+	}
+	if took > time.Second {
+		t.Fatalf("a 10000 character input took %v", took)
+	}
+	if s := Estimate(huge); s.OK || s.Code != CodeTooLong {
+		t.Fatalf("%+v", s)
+	}
+	// the edge: 256 characters of the policy's liking pass, 257 do not, and the time stays small
+	ok := []byte(strings.Repeat("k7Qm2xVb9RtZ", 22)[:MaxLength])
+	start = time.Now()
+	e1, e2 := Check(ok), Check(append(ok, 'x'))
+	if e2 == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("257: %v, took %v", e2, time.Since(start))
+	}
+	_ = e1 // a repeat of 12 characters is weak: only the boundary of the length code is under test here
+	var r2 *Refusal
+	if !errors.As(e2, &r2) || r2.Code != CodeTooLong {
+		t.Fatalf("%v", e2)
+	}
+	if errors.As(e1, &r2) && r2.Code == CodeTooLong {
+		t.Fatal("256 characters are not too long")
+	}
+}
+
+func TestFirstRunes(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		n    int
+		want string
+	}{{"", 3, ""}, {"abc", 3, "abc"}, {"abcd", 3, "abc"}, {"щукаΩ", 3, "щук"}, {"ab", 0, ""}} {
+		if got := firstRunes([]byte(c.in), c.n); got != c.want {
+			t.Errorf("%q %d: %q", c.in, c.n, got)
 		}
 	}
 }

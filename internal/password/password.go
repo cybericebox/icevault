@@ -28,6 +28,11 @@ const (
 	// the vault key derivation (Argon2d, 64 MiB, about a second) makes every guess of an offline attacker expensive, so 1e10 guesses is out of reach, and
 	// a higher line would refuse good 12-character random passwords. A phrase of a few common words passes by design: it is long and random enough.
 	MinGuessesLog10 = 10
+	// MaxLength is the most characters of a new master password. zxcvbn takes time about cubic in the length, so a longer one is refused at once
+	// (nothing is estimated), and only the first EstimateLength characters are estimated, as the original zxcvbn does.
+	MaxLength = 256
+	// EstimateLength is how many characters the estimate looks at.
+	EstimateLength = 100
 	// Words is the length of a generated passphrase.
 	Words = 6
 	// MaxLevel is the top of the meter: the level of a password the policy accepts.
@@ -38,6 +43,7 @@ const (
 const (
 	CodeTooShort = "password_too_short"
 	CodeWeak     = "password_weak"
+	CodeTooLong  = "password_too_long"
 )
 
 // Reasons of a weak password: what the estimate found in it.
@@ -70,12 +76,16 @@ type Refusal struct {
 	Code   string // CodeTooShort or CodeWeak
 	Reason string // for CodeWeak: a Reason* constant
 	Min    int    // MinLength
+	Max    int    // MaxLength
 }
 
 func (r *Refusal) Error() string {
 	const hint = " Use a generated passphrase instead (init-vault --generate, or Generate in the window)."
-	if r.Code == CodeTooShort {
+	switch r.Code {
+	case CodeTooShort:
 		return fmt.Sprintf("the password is too short: use at least %d characters.%s", r.Min, hint)
+	case CodeTooLong:
+		return fmt.Sprintf("the password is too long: use at most %d characters.", r.Max)
 	}
 	return "the password is too easy to guess (" + reasonText[r.Reason] + ")." + hint
 }
@@ -99,14 +109,19 @@ type Strength struct {
 	Reason string  // for CodeWeak
 }
 
-// Estimate judges a password. It does not keep it.
+// Estimate judges a password. It keeps nothing, but the estimate library takes a Go string, which is a copy of the characters that cannot be wiped:
+// the copy is as short as it can be (the first EstimateLength characters) and lives for the call only.
 func Estimate(pw []byte) Strength {
 	s := Strength{Length: utf8.RuneCount(pw)}
 	if s.Length == 0 {
 		s.Code = CodeTooShort
 		return s
 	}
-	res := zxcvbn.PasswordStrength(string(pw), nil)
+	if s.Length > MaxLength {
+		s.Code, s.Level = CodeTooLong, 1
+		return s
+	}
+	res := zxcvbn.PasswordStrength(firstRunes(pw, EstimateLength), nil)
 	s.Log10 = math.Log10(math.Max(res.Guesses, 1))
 	switch {
 	case s.Log10 >= MinGuessesLog10:
@@ -130,6 +145,17 @@ func Estimate(pw []byte) Strength {
 		s.OK = true
 	}
 	return s
+}
+
+// firstRunes is the first n characters of b as a string.
+func firstRunes(b []byte, n int) string {
+	for i := range string(b) { // a range over a string does not copy it
+		if n == 0 {
+			return string(b[:i])
+		}
+		n--
+	}
+	return string(b)
 }
 
 // reasonOf names the pattern that covers most of the password.
@@ -168,7 +194,7 @@ func Check(pw []byte) error {
 	if s.OK {
 		return nil
 	}
-	return &Refusal{Code: s.Code, Reason: s.Reason, Min: MinLength}
+	return &Refusal{Code: s.Code, Reason: s.Reason, Min: MinLength, Max: MaxLength}
 }
 
 // Generate makes a passphrase of n random words of the EFF large list joined with "-". Every word is drawn from r (crypto/rand in Passphrase) by

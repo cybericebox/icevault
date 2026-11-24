@@ -1195,14 +1195,20 @@ function openNewVault() {
   const paint = (d) => {
     bar.dataset.l = String(d ? d.level : 0); mtxt.textContent = ""; mtxt.classList.toggle("ok", !!(d && d.ok));
     if (!d) { mtxt.textContent = t("nv.help_pw", { min }); return; }
-    const hint = d.ok ? "" : d.code === "password_too_short" ? t("nv.short", { n: d.length, min: d.min }) : t("nv.reason." + d.reason);
+    const hint = d.ok ? "" : d.code === "password_too_short" ? t("nv.short", { n: d.length, min: d.min }) : d.code === "password_too_long" ? t("nv.long", { n: d.length, max: d.max }) : t("nv.reason." + d.reason);
     mtxt.append(el("b", "", t("nv.meter." + d.level)), document.createTextNode(hint ? " " + hint : ""));
   };
   paint(null);
-  const judge = () => {
-    clearTimeout(timer); const my = ++seq; const v = pw.value; if (!v) { paint(null); return; }
-    timer = setTimeout(async () => { const r = await api("/api/vault-new-strength", { password: v }); if (my === seq && r.status === 200) paint(r.data); }, 120);
+  // the meter: one call in flight, and only the latest typed value waits behind it (a fast typist never queues calls)
+  let inflight = false, waiting = false;
+  const run = async () => {
+    if (inflight) { waiting = true; return; }
+    inflight = true; waiting = false; const my = ++seq; const v = pw.value; if (!v) { inflight = false; paint(null); return; }
+    const r = await api("/api/vault-new-strength", { password: v }); inflight = false;
+    if (my === seq && r.status === 200 && pw.value === v) paint(r.data);
+    if (waiting) run();
   };
+  const judge = () => { clearTimeout(timer); if (!pw.value) { seq++; paint(null); return; } timer = setTimeout(run, 120); };
   pw.addEventListener("input", () => { clearErr("pw"); judge(); });
   // 3. typed again
   const lc = el("label", "", t("nv.confirm_label")); lc.htmlFor = "nv-cf"; box.append(lc);
@@ -1221,7 +1227,7 @@ function openNewVault() {
   actions.append(cancel, ok); box.append(err, actions);
   const failAt = (d) => {
     const c = d && d.code;
-    if (c === "password_too_short" || c === "password_weak") return fieldErr("pw", srv({ code: c, params: { min: d.params.min, why: t("nv.reason." + d.params.reason) } }));
+    if (c === "password_too_short" || c === "password_weak" || c === "password_too_long") return fieldErr("pw", srv({ code: c, params: { min: d.params.min, max: d.params.max, why: d.params.reason ? t("nv.reason." + d.params.reason) : "" } }));
     if (c === "new_password_mismatch") return fieldErr("cf", srv(d));
     if (c === "new_no_place" || c === "vault_exists") return fieldErr("place", srv(d));
     err.textContent = ""; err.append(icon("alert"), document.createTextNode(srv(d)));
@@ -1235,7 +1241,7 @@ function openNewVault() {
     const idle = busy(ok, t("busy.creating")); cancel.disabled = true;
     const r = await api("/api/vault-new-create", { password: pw.value, confirm: cf.value, touchid: touchAvail && tcb.checked });
     if (r.status !== 200) { idle(); cancel.disabled = false; failAt(r.data); return; }
-    pw.value = ""; cf.value = ""; clearTimeout(timer); seq++;                       // out of the page before the next step
+    pw.value = ""; cf.value = ""; clearTimeout(timer); seq++; waiting = false;                       // out of the page before the next step
     newVaultDone(r.data);
   });
   [pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));

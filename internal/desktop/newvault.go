@@ -38,6 +38,9 @@ const (
 	maxKitText       = 8 << 10
 )
 
+// The password of the new vault reaches CreateVault as a Go string (the bridge's type), which cannot be wiped; the byte copies made here are wiped,
+// and the kit keeps the password as bytes.
+
 // recoveryKit is what the kit file is made from.
 type recoveryKit struct {
 	path     string // the vault file
@@ -71,7 +74,7 @@ func (a *App) dropKit() {
 }
 
 func strengthAnswer(s password.Strength) map[string]any {
-	m := map[string]any{"level": s.Level, "ok": s.OK, "length": s.Length, "min": password.MinLength, "max_level": password.MaxLevel}
+	m := map[string]any{"level": s.Level, "ok": s.OK, "length": s.Length, "min": password.MinLength, "max": password.MaxLength, "max_level": password.MaxLevel}
 	if !s.OK {
 		m[keyCode] = s.Code
 		m["reason"] = s.Reason
@@ -81,7 +84,11 @@ func strengthAnswer(s password.Strength) map[string]any {
 
 // PasswordStrength judges a password typed for a new vault, for the meter of the page: level 0 to max_level, ok when the policy accepts it, and the
 // reason when it does not. It keeps nothing.
+// One estimate runs at a time (the page also keeps one call in flight, latest wins). The password arrives as a Go string, which cannot be wiped; the
+// byte copy made here is.
 func (a *App) PasswordStrength(pw string) Response {
+	a.strength.Lock()
+	defer a.strength.Unlock()
 	b := []byte(pw)
 	defer wipe(b)
 	return ok(strengthAnswer(password.Estimate(b)))
@@ -145,7 +152,7 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 		return fail(400, "new_password_mismatch")
 	}
 	if s := password.Estimate(pwb); !s.OK {
-		return answer(&Error{Status: 400, Code: s.Code, Params: map[string]any{"min": password.MinLength, "reason": s.Reason}})
+		return answer(&Error{Status: 400, Code: s.Code, Params: map[string]any{"min": password.MinLength, "max": password.MaxLength, "reason": s.Reason}})
 	}
 	if _, err := os.Lstat(path); err == nil {
 		return fail(409, "vault_exists")
@@ -224,8 +231,8 @@ func (a *App) SaveRecoveryKit(title, template string) Response {
 	if p == k.path {
 		return fail(409, "kit_same_file")
 	}
-	body := strings.NewReplacer("{name}", k.label, "{path}", k.path, "{created}", k.created.Format("2006-01-02 15:04"), "{password}", string(k.password)).Replace(template)
-	werr := writeKit(p, []byte(body))
+	body := expandKit(template, map[string][]byte{"name": []byte(k.label), "path": []byte(k.path), "created": []byte(k.created.Format("2006-01-02 15:04")), "password": k.password})
+	werr := writeKit(p, body) // wipes body
 	if werr != nil {
 		a.say("the recovery kit could not be saved")
 		return fail(500, "kit_not_saved")
@@ -236,20 +243,52 @@ func (a *App) SaveRecoveryKit(title, template string) Response {
 	return ok(map[string]any{"ok": true, "same_folder": same})
 }
 
-// writeKit writes the file with mode 0600 from the first byte (an existing file the person chose to replace gets the mode too).
-func writeKit(p string, b []byte) error {
-	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- the place is the one the person chose in the save dialog
+// expandKit fills the {name}, {path}, {created} and {password} of the template in one pass over it, as bytes, so that a value that looks like a
+// placeholder is never expanded again and the password is in no string made here. The caller wipes the result.
+func expandKit(template string, vals map[string][]byte) []byte {
+	out := make([]byte, 0, len(template)+256)
+	for i := 0; i < len(template); {
+		if template[i] == '{' {
+			if j := strings.IndexByte(template[i:], '}'); j > 0 {
+				if v, found := vals[template[i+1:i+j]]; found {
+					out = append(out, v...)
+					i += j + 1
+					continue
+				}
+			}
+		}
+		out = append(out, template[i])
+		i++
+	}
+	return out
+}
+
+// writeKit writes the file with mode 0600 before the first byte goes in: an existing file the person chose to replace (a world readable one, say) is
+// emptied and made 0600 first, and a symbolic link is refused (O_NOFOLLOW). A failed write leaves no partial file. It wipes b.
+func writeKit(p string, b []byte) error { return writeKitWith(p, b, nil) }
+
+// writeKitWith is writeKit with a hook that runs after the mode is set and before the first write (tests look at the file there).
+func writeKitWith(p string, b []byte, beforeWrite func(f *os.File)) (err error) {
+	defer wipe(b)
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|noFollow, 0o600) // #nosec G304 -- the place is the one the person chose in the save dialog
 	if err != nil {
 		return err
 	}
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			_ = os.Remove(p)
+		}
+	}()
+	if err = f.Chmod(0o600); err != nil {
+		return err
+	}
+	if beforeWrite != nil {
+		beforeWrite(f)
+	}
 	_, err = f.Write(b)
-	wipe(b)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(p, 0o600)
-	}
 	return err
 }
 
