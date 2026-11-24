@@ -123,6 +123,28 @@ func TestNewVaultSavedElsewhereKeepsItsProject(t *testing.T) {
 	}
 }
 
+func TestNewVaultRefusesAPathThatLeavesTheProject(t *testing.T) {
+	env, _ := testEnv(t, nil)
+	f := newFileVaults(env)
+	root := checkout(t)
+	plain := filepath.Join(root, "plain")
+	if err := os.RemoveAll(plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), plain); err != nil {
+		t.Skip("no symbolic links here")
+	}
+	a := desktop.New(desktop.Options{Vaults: f, Maker: makerFor(f), Pick: func(string, string) (string, error) { return root, nil },
+		PickSave: func(string, string, string) (string, error) { return filepath.Join(t.TempDir(), "x.kdbx"), nil }})
+	r := a.NewVaultProject("t")
+	if d, _ := r.Data.(map[string]any); r.Status != 409 || d["code"] != "vault_outside_root" {
+		t.Fatalf("%+v", r)
+	}
+	if r := a.NewVaultPlace("t"); r.Status != 409 { // no project was taken
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestNewVaultNeedsAProjectDescription(t *testing.T) {
 	env, _ := testEnv(t, nil)
 	f := newFileVaults(env)

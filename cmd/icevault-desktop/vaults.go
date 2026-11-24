@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,6 +148,9 @@ func (f *fileVaults) DefaultVault(root string) (string, error) {
 		return "", &desktop.Error{Status: 409, Code: "vault_bad_root"}
 	}
 	p, err := cli.DefaultVaultPath(root)
+	if errors.Is(err, cli.ErrOutsideRoot) {
+		return "", &desktop.Error{Status: 409, Code: "vault_outside_root"}
+	}
 	if err != nil {
 		return "", &desktop.Error{Status: 409, Code: "setup_no_model"}
 	}

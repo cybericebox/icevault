@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,8 +177,40 @@ func DefaultVaultPath(root string) (string, error) {
 	if err != nil {
 		return "", fail("%v", err)
 	}
-	if d.Checkout.Vault == "" {
-		return filepath.Join(checkoutDir(d), "IceVault.kdbx"), nil
+	p := filepath.Join(checkoutDir(d), "IceVault.kdbx")
+	if d.Checkout.Vault != "" {
+		p = filepath.Join(checkoutDir(d), filepath.FromSlash(d.Checkout.Vault))
 	}
-	return filepath.Join(checkoutDir(d), filepath.FromSlash(d.Checkout.Vault)), nil
+	// the file stays inside the project folder once symbolic links are resolved: a link in the folder of the description (plain -> /elsewhere) must not
+	// send a new vault out of the checkout
+	if !insideAfterLinks(root, p) {
+		return "", ErrOutsideRoot
+	}
+	return p, nil
+}
+
+// ErrOutsideRoot is the refusal of a vault path that leaves the project folder through a symbolic link.
+var ErrOutsideRoot = errors.New("the vault file the project description names is outside the project folder (a symbolic link)")
+
+// insideAfterLinks says whether p, with the symbolic links of its nearest existing parent resolved, is inside root (also resolved).
+func insideAfterLinks(root, p string) bool {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	dir, rest := filepath.Dir(p), filepath.Base(p)
+	for {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return isUnder(filepath.Join(real, rest), realRoot)
+		}
+		if _, err := os.Lstat(dir); err == nil {
+			return false // there, but it cannot be resolved: a link that leads nowhere (yet); a folder made through it would land outside
+		}
+		if parent := filepath.Dir(dir); parent != dir {
+			rest = filepath.Join(filepath.Base(dir), rest)
+			dir = parent
+			continue
+		}
+		return false
+	}
 }
