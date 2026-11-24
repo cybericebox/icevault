@@ -36,7 +36,7 @@ type vaultUnlocker struct {
 	path    string
 	keyFile string
 	plat    *render.Project
-	root    string // the project checkout of the vault
+	root    string // the project checkout of the vault ("" for a vault without a project)
 }
 
 func (u *vaultUnlocker) Open(password []byte) (desktop.Core, error) {
@@ -61,7 +61,7 @@ func (u *vaultUnlocker) Open(password []byte) (desktop.Core, error) {
 			return nil, err
 		}
 	}
-	core, err := newModelCore(v, u.plat, u.env, u.root)
+	core, err := newModelCore(v, u.plat, u.env, u.root, u.plat == nil)
 	if err != nil {
 		v.Close()
 		return nil, err

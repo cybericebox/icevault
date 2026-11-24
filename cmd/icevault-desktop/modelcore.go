@@ -44,17 +44,24 @@ func description(env *cli.Env, root string) (*project.Description, string, strin
 	return d, p, ""
 }
 
+// loose says the vault has no project.
+func (m *modelCore) loose() bool { return m.plat == nil && m.root == "" }
+
 // newModelCore opens the model of an unlocked vault.
-func newModelCore(v *vault.Vault, plat *render.Project, env *cli.Env, root string) (*modelCore, error) {
-	mp, err := buildModel(v, env, root)
+// loose says the vault has no project (no checkout, no description): plat is nil then.
+func newModelCore(v *vault.Vault, plat *render.Project, env *cli.Env, root string, loose bool) (*modelCore, error) {
+	mp, err := buildModel(v, env, root, loose)
 	if err != nil {
 		return nil, err
 	}
 	return &modelCore{v: v, mp: mp, plat: plat, env: env, root: root}, nil
 }
 
-func buildModel(v *vault.Vault, env *cli.Env, root string) (*mpage.Core, error) {
+func buildModel(v *vault.Vault, env *cli.Env, root string, loose bool) (*mpage.Core, error) {
 	d, p, why := description(env, root)
+	if loose { // a vault without a project: no description, not even a remembered one of another project
+		d, p, why = nil, "", ""
+	}
 	mp, err := mpage.New(v, d)
 	if err != nil {
 		return nil, err
@@ -88,7 +95,7 @@ func (m *modelCore) Sync(full bool) (bool, error) {
 	key.Wipe()
 	if err == nil {
 		next := &modelCore{plat: m.plat, env: m.env, v: nv, root: m.root}
-		next.mp, err = buildModel(nv, m.env, m.root)
+		next.mp, err = buildModel(nv, m.env, m.root, m.loose())
 		if err == nil {
 			return m.swap(old, next), nil
 		}
@@ -155,7 +162,7 @@ func (m *modelCore) rememberProject(args map[string]any) (any, error) {
 	if m.env == nil || cli.RememberProject(m.env.Getenv, p) != nil {
 		return nil, &desktop.Error{Status: 409, Code: "project_not_saved", Params: map[string]any{}}
 	}
-	mp, err := buildModel(m.v, m.env, m.root)
+	mp, err := buildModel(m.v, m.env, m.root, m.loose())
 	if err != nil {
 		return nil, err
 	}

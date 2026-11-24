@@ -22,6 +22,8 @@ Or download a release: `IceVault-vX.Y.Z-macos.dmg` (the window with the command 
 icevault init-vault [--generate]        a new vault at the path the description names; --generate makes a six-word passphrase
 icevault change-password [--generate] [--refresh-copies]
                                        change the master password of the vault (same policy as init-vault)
+icevault init-vault --no-project --vault PATH
+                                       a vault without a project, anywhere (no environments)
 icevault project check                 validate the project description
 icevault project used --env E          which files an environment reads (JSON)
 icevault trust [--forget]              trust the description and its required-check script
@@ -62,6 +64,14 @@ In the window, **New vault** (on the lock screen, beside Open vault) asks for th
 - **after `--refresh-copies`, `<destination>/<file>.prev` stays**: the refresh keeps the copy it replaces under that name, and it opens with the **old** password. It is listed in the output. Delete it yourself when the old password must stop working everywhere (`rm <destination>/<file>.prev`); nothing deletes a file in a destination for you;
 - a Touch ID binding that cannot be removed is reported with its file names (it holds the old password): delete the files or run `icevault touchid disable`;
 - the window can save a new recovery kit from the new password.
+
+## A vault without a project
+
+A vault normally belongs to a project (the folder with `icevault-project.yaml`: environments, products, the files the deploy scripts read). A vault can also be used **without a project**: it then has no environments, only the shared secrets, the connections and the other secrets, which the window opens and edits. Nothing is written for the project: no `icevault-project.yaml` is made. The vault is marked in its info file next to it (`<vault>.info.json`).
+
+- `icevault init-vault --no-project --vault PATH` makes such a vault anywhere (`--vault PATH` or `ICEVAULT_VAULT` names the file).
+- In the window, **New vault** offers **Without a project** beside the project folder; a vault that lies in no project (the lock screen asks for a checkout folder) can be opened with **Open without a project**.
+- A command that needs environments (`status`, `view`, `import`, `export`, `export-app`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
 
 ## Development
 

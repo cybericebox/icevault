@@ -103,6 +103,7 @@ type App struct {
 	strength    sync.Mutex // one password estimate at a time (newvault.go)
 	newRoot     string     // the project folder chosen for a new vault, and the file its description names
 	newDefault  string
+	newNoProj   bool         // a vault without a project was chosen for the new vault
 	newPath     string       // the place the person chose for a new vault (newvault.go)
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 	changeWrong int          // wrong current passwords in a row in the change-password dialog (changepw.go)

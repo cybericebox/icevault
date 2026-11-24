@@ -63,6 +63,10 @@ func (e *Env) description() (*project.Description, error) {
 		if e.Root != "" {
 			where = filepath.Join(e.Root, project.FileName)
 		}
+		if v := e.Getenv("ICEVAULT_VAULT"); v != "" && IsNoProject(v) {
+			e.descErr = fail("this vault has no project (it was made without one): it has no environments, so there is nothing for this command to work on; the window opens it for its shared secrets, connections and other secrets")
+			return nil, e.descErr
+		}
 		e.descErr = fail("no project description: none at %s, ICEVAULT_PROJECT is not set and none is remembered", where)
 		return nil, e.descErr
 	}
