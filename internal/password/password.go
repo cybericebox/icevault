@@ -1,7 +1,7 @@
 // Package password is the one policy for a new vault master password, shared by the command line (init-vault) and the window (New vault), and the
 // generator of passphrases. It has no say over how an existing vault opens: nothing here runs on unlock.
 //
-// The policy: at least 12 characters AND a strength estimate (zxcvbn, see NOTICE) of at least 1e10 guesses (the top zxcvbn score). The estimate refuses dictionary words
+// The policy: at least 12 characters AND a strength estimate (zxcvbn, see NOTICE) of at least 1e12 guesses. The estimate refuses dictionary words
 // (also with digits, case changes and l33t), keyboard walks, repeats, sequences, dates and the common patterns built from them, however long the
 // password is. An empty password stays possible only where a key file stands behind it; that rule is the caller's, not decided here.
 package password
@@ -23,11 +23,12 @@ import (
 const (
 	// MinLength is the least number of characters (runes) of a new master password.
 	MinLength = 12
-	// MinGuessesLog10 is the least estimate, as a power of ten: 1e10 guesses is the top score (4) of zxcvbn. Characters no pattern explains count 10 each
-	// in that estimate, so 12 random characters reach 1e12 and a pattern with a few changes stays far below the line. The line is not higher on purpose:
-	// the vault key derivation (Argon2d, 64 MiB, about a second) makes every guess of an offline attacker expensive, so 1e10 guesses is out of reach, and
-	// a higher line would refuse good 12-character random passwords. A phrase of a few common words passes by design: it is long and random enough.
-	MinGuessesLog10 = 10
+	// MinGuessesLog10 is the least estimate, as a power of ten: 1e12 guesses. Characters no pattern explains count 10 each in the zxcvbn estimate, so
+	// 12 random characters reach exactly 1e12 (the shortest password that can pass), and a pattern with a few changes stays far below the line. The line
+	// is set by the vault key derivation: Argon2d with 64 MiB makes one guess cost about a millisecond of a GPU, so one GPU makes about 1e3 guesses a
+	// second and 1e12 guesses take about 30 years on it. A lower line (1e10, about four months) was found too weak; a higher one would refuse
+	// good 12-character random passwords. A phrase of a few common words separated by spaces can still reach the line: the separators count too.
+	MinGuessesLog10 = 12
 	// MaxLength is the most characters of a new master password. zxcvbn takes time about cubic in the length, so a longer one is refused at once
 	// (nothing is estimated), and only the first EstimateLength characters are estimated, as the original zxcvbn does.
 	MaxLength = 256
@@ -124,9 +125,9 @@ func Estimate(pw []byte) Strength {
 	res := zxcvbn.PasswordStrength(firstRunes(pw, EstimateLength), nil)
 	s.Log10 = math.Log10(math.Max(res.Guesses, 1))
 	switch {
-	case s.Log10 >= MinGuessesLog10:
+	case res.Guesses >= math.Pow(10, MinGuessesLog10): // not through Log10: a round 1e12 must not fall to 11.999...
 		s.Level = MaxLevel
-	case s.Log10 >= 8:
+	case s.Log10 >= 10:
 		s.Level = 3
 	case s.Log10 >= 6:
 		s.Level = 2

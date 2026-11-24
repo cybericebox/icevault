@@ -27,7 +27,9 @@ func TestCheckTable(t *testing.T) {
 		{"long dictionary phrase", "iloveyouiloveyoutoo", CodeWeak},
 		{"dictionary word, digits and symbol, long", "Dragon2024!Dragon2024!", CodeWeak},
 		{"twelve random characters", "k7Qm2xVb9RtZ", ""},
-		{"twelve random lower case", "qzkxvbnmwjfd", ""},
+		{"twelve random lower case", "bkqzmfwhgtxj", ""},
+		{"twelve lower case with a keyboard run", "qzkxvbnmwjfd", CodeWeak}, // 1e11.9: just under the line
+		{"three common words", "baby love dragon", CodeWeak},
 		{"six words", "wolf-prism-ladder-oven-brisk-quartz", ""},
 		{"long random", "T9#vLq2!xRb7@mZp4", ""},
 		{"non ASCII random", "щука-Ωmega-7Kq!zXp", ""},
@@ -48,6 +50,17 @@ func TestCheckTable(t *testing.T) {
 		if r.Code != c.reason {
 			t.Errorf("%s: code %q, want %q", c.name, r.Code, c.reason)
 		}
+	}
+}
+
+// The line is 1e12 guesses: twelve characters that no pattern explains reach it exactly, a keyboard run in them puts them just under.
+func TestTheLineIsOneE12(t *testing.T) {
+	if MinGuessesLog10 != 12 {
+		t.Fatalf("the line moved to 1e%d: the README, the release notes and the specs name 1e12", MinGuessesLog10)
+	}
+	on, under := Estimate([]byte("bkqzmfwhgtxj")), Estimate([]byte("qzkxvbnmwjfd"))
+	if !on.OK || on.Log10 < 12 || under.OK || under.Log10 >= 12 || under.Log10 < 11 || under.Level != 3 || under.Code != CodeWeak {
+		t.Fatalf("on %+v under %+v", on, under)
 	}
 }
 
