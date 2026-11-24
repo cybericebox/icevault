@@ -31,6 +31,8 @@ func (c Credentials) build() (*gokeepasslib.DBCredentials, error) {
 	}
 	cred := &gokeepasslib.DBCredentials{}
 	if len(c.Password) > 0 {
+		// Not password storage: KDBX builds its composite key from SHA-256(password) (the format requires it, KeePassXC does the same),
+		// and the slow key derivation (Argon2d, 64 MiB, see Create) runs on that composite key.
 		h := sha256.Sum256(c.Password)
 		cred.Passphrase = h[:]
 	}
