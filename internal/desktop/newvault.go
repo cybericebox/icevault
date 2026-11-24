@@ -10,7 +10,8 @@ import (
 	"github.com/cybericebox/icevault/internal/password"
 )
 
-// A new vault, made from the lock screen. The page asks, step by step: a place (the system save dialog), a password (typed, with the live meter of
+// A new vault, made from the lock screen. The page asks, step by step: the project folder (the folder with icevault-project.yaml, the system folder dialog),
+// the place (the file the project description names, offered at once; the system save dialog to choose another), a password (typed, with the live meter of
 // PasswordStrength, or made by GeneratePassword) typed again to confirm, and the choices (Touch ID). CreateVault then makes the file under the policy of
 // internal/password, the same one init-vault applies. The page never names a path: the place is the one the save dialog returned and stays here.
 //
@@ -29,13 +30,13 @@ type VaultMaker interface {
 	TouchIDBind(path string, password []byte) error
 }
 
-// SavePicker shows the system save dialog with the title the page translated and a suggested file name; "" when the person cancelled.
-type SavePicker func(title, name string) (string, error)
+// SavePicker shows the system save dialog with the title the page translated, the folder it opens in ("" for the system's choice) and a suggested file
+// name; "" when the person cancelled.
+type SavePicker func(title, dir, name string) (string, error)
 
 const (
-	defaultVaultFile = "IceVault.kdbx"
-	kitKeep          = 15 * time.Minute // how long the password waits for the recovery kit
-	maxKitText       = 8 << 10
+	kitKeep    = 15 * time.Minute // how long the password waits for the recovery kit
+	maxKitText = 8 << 10
 )
 
 // The password of the new vault reaches CreateVault as a Go string (the bridge's type), which cannot be wiped; the byte copies made here are wiped,
@@ -108,7 +109,16 @@ func (a *App) NewVaultPlace(title string) Response {
 	if !a.canCreate() {
 		return fail(409, "new_unavailable")
 	}
-	p, err := a.o.PickSave(title, defaultVaultFile)
+	a.mu.Lock()
+	root, cur, def := a.newRoot, a.newPath, a.newDefault
+	a.mu.Unlock()
+	if root == "" {
+		return fail(409, "new_no_project")
+	}
+	if cur == "" {
+		cur = def
+	}
+	p, err := a.o.PickSave(title, nearestDir(filepath.Dir(cur)), filepath.Base(cur))
 	if err != nil {
 		return fail(500, "pick_failed")
 	}
@@ -132,6 +142,55 @@ func (a *App) NewVaultPlace(title string) Response {
 	return ok(map[string]any{"file": filepath.Base(p), "folder": d.Folder, "touchid": a.o.Maker.TouchIDReady()})
 }
 
+// nearestDir is dir, or the nearest folder above it that exists: the save dialog opens there (the folder of the description may not be made yet).
+func nearestDir(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if st, err := os.Stat(d); err == nil && st.IsDir() {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
+}
+
+// NewVaultProject is the first step: the system folder dialog for the project folder (the one with icevault-project.yaml). The vault file the
+// description names becomes the place at once (the page shows it; NewVaultPlace chooses another). {cancelled: true} when no folder was chosen. The answer:
+// {checkout, file, folder, exists, touchid}; exists says that the file of the description is there already (no place is set then).
+func (a *App) NewVaultProject(title string) Response {
+	if !a.canCreate() {
+		return fail(409, "new_unavailable")
+	}
+	if a.o.Pick == nil {
+		return fail(409, "pick_unavailable")
+	}
+	dir, err := a.o.Pick("folder", title)
+	if err != nil {
+		return fail(500, "pick_failed")
+	}
+	if dir == "" {
+		return ok(cancelledAnswer())
+	}
+	if !filepath.IsAbs(dir) {
+		return fail(400, "bad_request")
+	}
+	dir = filepath.Clean(dir)
+	def, err := a.o.Vaults.DefaultVault(dir)
+	if err != nil {
+		return answer(err)
+	}
+	_, statErr := os.Lstat(def)
+	exists := statErr == nil
+	a.mu.Lock()
+	a.newRoot, a.newDefault, a.newPath = dir, def, ""
+	if !exists {
+		a.newPath = def
+	}
+	a.mu.Unlock()
+	d := a.o.Vaults.Describe(def)
+	return ok(map[string]any{"checkout": d.Root, "file": filepath.Base(def), "folder": d.Folder, "exists": exists, "touchid": a.o.Maker.TouchIDReady()})
+}
+
 // CreateVault makes the vault at the chosen place. The password must be typed again (confirm) and pass the policy; nothing is written otherwise.
 // touchID asks for the binding too. Then the new vault is chosen on the lock screen and listed first. Answer: {ok, file, touchid: on|off|unavailable|failed,
 // kit: true}.
@@ -143,8 +202,11 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 		return fail(409, "new_unavailable")
 	}
 	a.mu.Lock()
-	path := a.newPath
+	path, root := a.newPath, a.newRoot
 	a.mu.Unlock()
+	if root == "" {
+		return fail(409, "new_no_project")
+	}
 	if path == "" {
 		return fail(409, "new_no_place")
 	}
@@ -176,8 +238,12 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 	}
 	a.dropKit()
 	a.mu.Lock()
-	a.newPath = ""
+	a.newPath, a.newRoot, a.newDefault = "", "", ""
 	a.mu.Unlock()
+	// the vault opens with the project folder that was chosen, wherever the file was saved: no question about a checkout on the lock screen
+	if err := a.o.Vaults.SetRoot(path, root); err != nil {
+		a.say("the project folder of the new vault was not recorded")
+	}
 	// the new vault is the chosen one on the lock screen (a file it cannot prepare yet, for want of a checkout, shows what to do there)
 	a.selectVault(path)
 	// not recorded as opened: the vault joins the recent list at its first unlock (it is shown as the chosen one until then)
@@ -217,7 +283,7 @@ func (a *App) SaveRecoveryKit(title, template string) Response {
 	if len(template) > maxKitText || !strings.Contains(template, "{password}") {
 		return fail(400, "bad_request")
 	}
-	p, err := a.o.PickSave(title, strings.TrimSuffix(k.label, filepath.Ext(k.label))+"-recovery.txt")
+	p, err := a.o.PickSave(title, "", strings.TrimSuffix(k.label, filepath.Ext(k.label))+"-recovery.txt")
 	if err != nil {
 		return fail(500, "pick_failed")
 	}

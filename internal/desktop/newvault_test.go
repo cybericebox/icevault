@@ -32,6 +32,9 @@ func (m *fakeMaker) Create(path string, pw []byte) error {
 		m.made = map[string]string{}
 	}
 	m.made[path] = string(pw)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
 	return os.WriteFile(path, []byte("vault"), 0o600)
 }
 func (m *fakeMaker) TouchIDReady() bool { return m.touchReady }
@@ -50,20 +53,25 @@ func (m *fakeMaker) TouchIDBind(path string, pw []byte) error {
 const strongPW = "k7Qm2xVb9RtZ"
 
 type newHarnessT struct {
-	t     *testing.T
-	dir   string
-	app   *App
-	maker *fakeMaker
-	vault *fakeVaults
-	picks []string // what the save dialog answers, in order
-	asked []string // the suggested names it was given
-	timer func()   // the kit's timer, to fire it by hand
+	t         *testing.T
+	dir       string
+	app       *App
+	maker     *fakeMaker
+	vault     *fakeVaults
+	picks     []string // what the save dialog answers, in order
+	asked     []string // the suggested names it was given
+	timer     func()   // the kit's timer, to fire it by hand
+	root      string   // the project folder the folder dialog answers
+	dirs      []string // the folders the save dialog was asked to open in
+	projected bool
 }
 
 func newVaultApp(t *testing.T) *newHarnessT {
-	h := &newHarnessT{t: t, dir: t.TempDir(), maker: &fakeMaker{touchReady: true}, vault: &fakeVaults{}}
+	h := &newHarnessT{t: t, dir: t.TempDir(), root: t.TempDir(), maker: &fakeMaker{touchReady: true}, vault: &fakeVaults{}}
 	h.app = New(Options{Vaults: h.vault, Maker: h.maker,
-		PickSave: func(_, name string) (string, error) {
+		Pick: func(kind, _ string) (string, error) { return h.root, nil },
+		PickSave: func(_, dir, name string) (string, error) {
+			h.dirs = append(h.dirs, dir)
 			h.asked = append(h.asked, name)
 			if len(h.picks) == 0 {
 				return "", nil
@@ -77,8 +85,23 @@ func newVaultApp(t *testing.T) *newHarnessT {
 	return h
 }
 
+// project chooses the project folder (the first step); the file the description names becomes the place.
+func (h *newHarnessT) project() Response {
+	h.t.Helper()
+	r := h.app.NewVaultProject("t")
+	if r.Status != 200 {
+		h.t.Fatalf("project: %+v", r)
+	}
+	h.projected = true
+	return r
+}
+
+// place chooses another place with the save dialog (after the project folder).
 func (h *newHarnessT) place(name string) string {
 	h.t.Helper()
+	if !h.projected {
+		h.project()
+	}
 	p := filepath.Join(h.dir, name)
 	h.picks = append(h.picks, p)
 	if r := h.app.NewVaultPlace("t"); r.Status != 200 {
@@ -134,8 +157,17 @@ func TestGeneratePasswordPassesThePolicy(t *testing.T) {
 
 func TestNewVaultPlace(t *testing.T) {
 	h := newVaultApp(t)
+	// the project folder comes first
+	if r := h.app.NewVaultPlace("t"); r.Status != 409 || codeOf(r) != "new_no_project" {
+		t.Fatalf("a place before the project: %+v", r)
+	}
+	h.project()
 	if r := h.app.NewVaultPlace("t"); r.Status != 200 || dataOf(r)["cancelled"] != true {
 		t.Fatalf("cancel: %+v", r)
+	}
+	// the dialog opens at the folder of the description (the nearest one that exists) with the file name it names
+	if want := filepath.Join(h.root, "plain", "vault", "v.kdbx"); h.asked[0] != filepath.Base(want) || h.dirs[0] != h.root {
+		t.Fatalf("dialog: dir %q name %q (the folder of the description is not made yet: its nearest existing parent)", h.dirs[0], h.asked[0])
 	}
 	p := h.place("mine") // the extension is added
 	h.app.mu.Lock()
@@ -143,9 +175,6 @@ func TestNewVaultPlace(t *testing.T) {
 	h.app.mu.Unlock()
 	if got != p+".kdbx" {
 		t.Fatalf("path %q", got)
-	}
-	if len(h.asked) == 0 || h.asked[0] != "IceVault.kdbx" {
-		t.Fatalf("suggested name %v", h.asked)
 	}
 	// an existing file is never the place
 	ex := filepath.Join(h.dir, "taken.kdbx")
@@ -161,8 +190,11 @@ func TestNewVaultPlace(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	// off without a maker, a save dialog or a list
-	for _, o := range []Options{{}, {Maker: h.maker}, {Maker: h.maker, Vaults: h.vault}, {PickSave: func(string, string) (string, error) { return "/x", nil }, Maker: h.maker}} {
+	for _, o := range []Options{{}, {Maker: h.maker}, {Maker: h.maker, Vaults: h.vault}, {PickSave: func(string, string, string) (string, error) { return "/x", nil }, Maker: h.maker}} {
 		if r := New(o).NewVaultPlace("t"); r.Status != 409 || codeOf(r) != "new_unavailable" {
+			t.Fatalf("%+v", r)
+		}
+		if r := New(o).NewVaultProject("t"); r.Status != 409 || codeOf(r) != "new_unavailable" {
 			t.Fatalf("%+v", r)
 		}
 	}
@@ -172,16 +204,100 @@ func TestNewVaultPlace(t *testing.T) {
 	if d := dataOf(h.app.ListVaults()); d["can_create"] != true {
 		t.Fatalf("%+v", d)
 	}
-	h.picks = []string{"/x"}
-	if r := New(Options{Maker: h.maker, Vaults: h.vault, PickSave: func(string, string) (string, error) { return "", errors.New("/secret/path") }}).NewVaultPlace("t"); r.Status != 500 || strings.Contains(toJSON(r), "secret") {
+	if r := New(Options{Maker: h.maker, Vaults: h.vault, PickSave: func(string, string, string) (string, error) { return "", errors.New("/secret/path") }, Pick: h.app.o.Pick}).NewVaultPlace("t"); r.Status != 409 {
+		t.Fatalf("no project yet: %+v", r)
+	}
+}
+
+// The project folder first: the vault file of its description is the place at once, and the vault is recorded with that folder, saved there or elsewhere.
+func TestNewVaultProjectFirst(t *testing.T) {
+	h := newVaultApp(t)
+	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_project" {
+		t.Fatalf("create with no project: %+v", r)
+	}
+	r := h.project()
+	d := dataOf(r)
+	if d["file"] != "v.kdbx" || d["exists"] != false || d["folder"] == "" {
+		t.Fatalf("%+v", d)
+	}
+	def := filepath.Join(h.root, "plain", "vault", "v.kdbx") // the folder of the description does not exist yet
+	// created at the default place with no save dialog at all: the parent folders are made by the maker
+	if r := h.app.CreateVault(strongPW, strongPW, false); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(def); err != nil {
+		t.Fatal("the vault is not at the place the description names")
+	}
+	if len(h.asked) != 0 {
+		t.Fatalf("the save dialog was shown: %v", h.asked)
+	}
+	if h.vault.roots[def] != h.root {
+		t.Fatalf("the checkout of the new vault is %q, want %q", h.vault.roots[def], h.root)
+	}
+	// saved elsewhere: still recorded with the chosen project folder
+	h2 := newVaultApp(t)
+	elsewhere := h2.place("elsewhere") + ".kdbx"
+	if r := h2.app.CreateVault(strongPW, strongPW, false); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if h2.vault.roots[elsewhere] != h2.root {
+		t.Fatalf("saved elsewhere: the checkout is %q, want %q", h2.vault.roots[elsewhere], h2.root)
+	}
+	// the file of the description is there already: no place is set, the person chooses another
+	h3 := newVaultApp(t)
+	def3 := filepath.Join(h3.root, "plain", "vault", "v.kdbx")
+	if err := os.MkdirAll(filepath.Dir(def3), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(def3, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d := dataOf(h3.project()); d["exists"] != true {
+		t.Fatalf("%+v", d)
+	}
+	if r := h3.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_place" {
+		t.Fatalf("%+v", r)
+	}
+	if h3.dirs != nil {
+		t.Fatal("a dialog was shown")
+	}
+	h3.place("other")
+	if h3.dirs[0] != filepath.Dir(def3) {
+		t.Fatalf("the dialog opens at %q", h3.dirs[0])
+	}
+	if r := h3.app.CreateVault(strongPW, strongPW, false); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestNewVaultProjectRefusals(t *testing.T) {
+	h := newVaultApp(t)
+	h.vault.defaultErr = &Error{Status: 409, Code: "vault_bad_root"}
+	if r := h.app.NewVaultProject("t"); r.Status != 409 || codeOf(r) != "vault_bad_root" {
+		t.Fatalf("%+v", r)
+	}
+	if r := h.app.NewVaultPlace("t"); codeOf(r) != "new_no_project" {
+		t.Fatalf("a refused folder left a project: %+v", r)
+	}
+	// a cancelled folder dialog, a failing one, a relative answer
+	for _, c := range []struct {
+		pick func(string, string) (string, error)
+		want int
+	}{{func(string, string) (string, error) { return "", nil }, 200}, {func(string, string) (string, error) { return "", errors.New("/secret") }, 500}, {func(string, string) (string, error) { return "rel", nil }, 400}} {
+		a := New(Options{Vaults: &fakeVaults{}, Maker: h.maker, Pick: c.pick, PickSave: func(string, string, string) (string, error) { return "", nil }})
+		if r := a.NewVaultProject("t"); r.Status != c.want || strings.Contains(toJSON(r), "secret") {
+			t.Fatalf("%+v want %d", r, c.want)
+		}
+	}
+	if r := New(Options{Vaults: &fakeVaults{}, Maker: h.maker, PickSave: func(string, string, string) (string, error) { return "", nil }}).NewVaultProject("t"); codeOf(r) != "pick_unavailable" {
 		t.Fatalf("%+v", r)
 	}
 }
 
 func TestCreateVaultRefusesBeforeAnythingIsWritten(t *testing.T) {
 	h := newVaultApp(t)
-	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_place" {
-		t.Fatalf("no place: %+v", r)
+	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_project" {
+		t.Fatalf("no project: %+v", r)
 	}
 	p := h.place("v") + ".kdbx"
 	cases := []struct {
@@ -237,8 +353,8 @@ func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	if cur.Path != p {
 		t.Fatalf("the new vault is not the chosen one: %+v", cur)
 	}
-	// the place is used once
-	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_place" {
+	// the project and the place are used once
+	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_project" {
 		t.Fatalf("%+v", r)
 	}
 }

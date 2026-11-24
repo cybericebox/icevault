@@ -1169,17 +1169,31 @@ function openNewVault() {
   };
   const secret = (id, label) => { const i = el("input", "input lg"); i.type = "password"; i.id = id; i.autocomplete = "off"; i.spellcheck = false; i.setAttribute("aria-label", label);
     ["data-lpignore", "data-1p-ignore", "data-bwignore", "data-form-type"].forEach((a) => i.setAttribute(a, a === "data-form-type" ? "other" : "true")); return i; };
-  // 1. the place
+  // 1. the project folder (the one with icevault-project.yaml): first, because the vault goes where its description says and opens with it
+  const showPlace = (d) => { where.textContent = ""; where.append(el("b", "", d.file), (() => { const f = midPath(d.folder); f.classList.add("small"); return f; })()); };
+  const lj = el("label", "", t("nv.project_label")); box.append(lj);
+  const jrow = el("div", "valbox nvplace"), jwhere = el("div", "vcur"); jwhere.append(el("span", "quiet", t("nv.no_project")));
+  const jbtn = btn(t("nv.choose_project"), "folder", null, ""); jrow.append(jwhere, jbtn); box.append(jrow);
+  const jhelp = el("div", "help", t("nv.project_help")); jhelp.id = "nv-project-h"; box.append(jhelp); addErr("project", jbtn, jhelp);
+  // 2. the place: the file the description names, at once; the save dialog for another
   const lp = el("label", "", t("nv.place_label")); box.append(lp);
   const prow = el("div", "valbox nvplace"), where = el("div", "vcur"); where.append(el("span", "quiet", t("nv.no_place")));
-  const pbtn = btn(t("nv.choose_place"), "folder", null, ""); prow.append(where, pbtn); box.append(prow);
+  const pbtn = btn(t("nv.choose_place"), "folder", null, ""); pbtn.disabled = true; prow.append(where, pbtn); box.append(prow);
   const phelp = el("div", "help", t("nv.place_help")); phelp.id = "nv-place-h"; box.append(phelp); addErr("place", pbtn, phelp);
+  jbtn.addEventListener("click", async () => {
+    clearErr("project"); clearErr("place"); const idle = busy(jbtn, t("busy.opening")); const r = await api("/api/vault-new-project", { title: t("nv.dialog_project") }); idle();
+    if (r.status !== 200) return fieldErr("project", srv(r.data));
+    if (r.data.cancelled) return;
+    jwhere.textContent = ""; jwhere.append(midPath(r.data.checkout || "")); jbtn.lastChild.textContent = t("nv.change_project");
+    pbtn.disabled = false; touchAvail = !!r.data.touchid; trow.hidden = !touchAvail; showPlace(r.data); pbtn.lastChild.textContent = t("nv.change_place");
+    placed = !r.data.exists;
+    if (r.data.exists) { where.textContent = ""; where.append(el("span", "quiet", t("nv.no_place"))); fieldErr("place", srv({ code: "vault_exists" })); }
+  });
   pbtn.addEventListener("click", async () => {
     clearErr("place"); const idle = busy(pbtn, t("busy.opening")); const r = await api("/api/vault-new-place", { title: t("nv.dialog_place") }); idle();
     if (r.status !== 200) return fieldErr("place", srv(r.data));
     if (r.data.cancelled) return;
-    placed = true; where.textContent = ""; where.append(el("b", "", r.data.file), (() => { const f = midPath(r.data.folder); f.classList.add("small"); return f; })());
-    pbtn.lastChild.textContent = t("nv.change_place");
+    placed = true; showPlace(r.data);
     touchAvail = !!r.data.touchid; trow.hidden = !touchAvail;
   });
   // 2. the password: typed, or generated
@@ -1230,10 +1244,12 @@ function openNewVault() {
     if (c === "password_too_short" || c === "password_weak" || c === "password_too_long") return fieldErr("pw", srv({ code: c, params: { min: d.params.min, max: d.params.max, why: d.params.reason ? t("nv.reason." + d.params.reason) : "" } }));
     if (c === "new_password_mismatch") return fieldErr("cf", srv(d));
     if (c === "new_no_place" || c === "vault_exists") return fieldErr("place", srv(d));
+    if (c === "new_no_project") return fieldErr("project", srv(d));
     err.textContent = ""; err.append(icon("alert"), document.createTextNode(srv(d)));
   };
   ok.addEventListener("click", async () => {
     ["place", "pw", "cf"].forEach(clearErr); err.textContent = "";
+    if (pbtn.disabled) return fieldErr("project", t("srv.new_no_project"));
     if (!placed) return fieldErr("place", t("srv.new_no_place"));
     if (!pw.value) return fieldErr("pw", t("err.required"));
     if (!cf.value) return fieldErr("cf", t("err.required"));
@@ -1245,7 +1261,7 @@ function openNewVault() {
     newVaultDone(r.data);
   });
   [pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));
-  pbtn.focus();
+  jbtn.focus();
 }
 // the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
 function newVaultDone(d) {

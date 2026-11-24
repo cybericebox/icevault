@@ -95,12 +95,14 @@ type App struct {
 	unlockState string
 	clipHash    [32]byte
 	clipStop    func()
-	rev         int          // how many times the vault was read again after another writer saved it (the page compares it)
-	cur         Target       // how the chosen vault is unlocked
-	vault       string       // the chosen vault file ("" without a list of vaults or before one is chosen)
-	problem     error        // why the chosen vault cannot be unlocked (a coded *Error), nil when it can
-	lastSync    time.Time    // the last background check of the vault file
-	strength    sync.Mutex   // one password estimate at a time (newvault.go)
+	rev         int        // how many times the vault was read again after another writer saved it (the page compares it)
+	cur         Target     // how the chosen vault is unlocked
+	vault       string     // the chosen vault file ("" without a list of vaults or before one is chosen)
+	problem     error      // why the chosen vault cannot be unlocked (a coded *Error), nil when it can
+	lastSync    time.Time  // the last background check of the vault file
+	strength    sync.Mutex // one password estimate at a time (newvault.go)
+	newRoot     string     // the project folder chosen for a new vault, and the file its description names
+	newDefault  string
 	newPath     string       // the place the person chose for a new vault (newvault.go)
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 

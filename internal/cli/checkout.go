@@ -165,3 +165,19 @@ func isUnder(p, dir string) bool {
 	rel, err := filepath.Rel(dir, p)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
+
+// DefaultVaultPath is the vault file the project description of the checkout root names (`checkout: vault`, relative to the checkout): the place
+// init-vault makes it at. A description that names none gives IceVault.kdbx in the checkout. The window offers it for a new vault.
+func DefaultVaultPath(root string) (string, error) {
+	if !ValidRoot(root) {
+		return "", fail("no project description at %q", filepath.Join(root, project.FileName))
+	}
+	d, err := project.Load(filepath.Join(root, project.FileName))
+	if err != nil {
+		return "", fail("%v", err)
+	}
+	if d.Checkout.Vault == "" {
+		return filepath.Join(checkoutDir(d), "IceVault.kdbx"), nil
+	}
+	return filepath.Join(checkoutDir(d), filepath.FromSlash(d.Checkout.Vault)), nil
+}

@@ -140,11 +140,11 @@ func main() {
 			return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{Title: title, Filters: []runtime.FileFilter{{DisplayName: "KeePass (*.kdbx)", Pattern: "*.kdbx"}}})
 		}
 		// the place of a new vault and of its recovery kit; the dialog itself asks before replacing a file, and nothing is written before the person chose
-		pickSave = func(title, name string) (string, error) {
+		pickSave = func(title, dir, name string) (string, error) {
 			if ctx == nil {
 				return "", errors.New("the window has not started")
 			}
-			return runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{Title: title, DefaultFilename: name, CanCreateDirectories: true})
+			return runtime.SaveFileDialog(ctx, runtime.SaveDialogOptions{Title: title, DefaultDirectory: dir, DefaultFilename: name, CanCreateDirectories: true})
 		}
 	}
 	// the project description (read once, never written): also in the demo

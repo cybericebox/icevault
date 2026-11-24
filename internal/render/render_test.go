@@ -104,11 +104,11 @@ var testTemplates = map[string]string{
 		"# NEEDED FOR: off-site backups. Get it: the storage provider, API tokens.\nBACKUP_ACCESS_KEY=\n# NEEDED FOR: off-site backups. The secret of that token.\nBACKUP_SECRET_KEY=\n" +
 		"WIDGET_SITE_KEY=\nWIDGET_SECRET=x # secret\nWIDGET_ALT_SITE_KEY=\nFOURTH=4\n",
 	"apps/api.env":        "API_NAME=demo\n",
-	"net/dns.env":        "DNS_API_TOKEN=\nDNS_ACCOUNT_ID=\n",
-	"cloud/aws-login.env":      "LOGIN_ACCESS_KEY_ID=\nLOGIN_SECRET_ACCESS_KEY=\nLOGIN_ZONE=\n",
-	"cloud/aws-site.env":    "POOL_NAME=\nZONE=\n",
-	"cloud/gcp-site.env": "POOL_NAME=\nZONE=\n",
-	"apps/worker.env":   "WORKER_TOKEN=\n",
+	"net/dns.env":         "DNS_API_TOKEN=\nDNS_ACCOUNT_ID=\n",
+	"cloud/aws-login.env": "LOGIN_ACCESS_KEY_ID=\nLOGIN_SECRET_ACCESS_KEY=\nLOGIN_ZONE=\n",
+	"cloud/aws-site.env":  "POOL_NAME=\nZONE=\n",
+	"cloud/gcp-site.env":  "POOL_NAME=\nZONE=\n",
+	"apps/worker.env":     "WORKER_TOKEN=\n",
 }
 
 var projCache *Project
@@ -261,7 +261,7 @@ func TestUses(t *testing.T) {
 		{map[string]string{"HOSTING": "local"}, "apps/api.env", UnusedPartly},
 		{map[string]string{"HOSTING": "local", "WEB": "external:staging"}, webRel, Unused}, // the word before ':'
 		{map[string]string{"HOSTING": "aws", "WEB": "compose"}, webRel, ""},                // the api on a cloud cluster reads it
-		{map[string]string{"HOSTING": "aws"}, "apps/worker.env", Unused},                 // WORKER defaults to none
+		{map[string]string{"HOSTING": "aws"}, "apps/worker.env", Unused},                   // WORKER defaults to none
 		{map[string]string{"HOSTING": "aws", "WORKER": "host"}, "apps/worker.env", ""},
 		{map[string]string{"HOSTING": "aws", "WORKER": "cluster"}, "apps/worker.env", ""},
 		{map[string]string{}, "cloud/aws-login.env", ""}, // nothing known: nothing is unused
@@ -748,7 +748,7 @@ func TestAppFiles(t *testing.T) {
 func TestVisibilityAudit(t *testing.T) {
 	snap := snapOf(t,
 		row{"environments/e", ".item", "", "state=active"},
-		row{"environments/e/g", "BASE_HOST", "d", "managed-by=owner\nvisibility=secret"},           // legacy secret? BASE_HOST is known: legacy plain -> kept-differs
+		row{"environments/e/g", "BASE_HOST", "d", "managed-by=owner\nvisibility=secret"},       // legacy secret? BASE_HOST is known: legacy plain -> kept-differs
 		row{"environments/e/g", "WIDGET_SITE_KEY", "k", "managed-by=owner\nvisibility=secret"}, // legacy: unknown-to-name rule... change
 		row{"environments/e/g", "WIDGET_ALT_SITE_KEY", "k", "managed-by=owner\nvisibility=secret\nvis-by=owner"},
 		row{"environments/e/g", "FOURTH", "1", "managed-by=owner\nvisibility=sealed"},

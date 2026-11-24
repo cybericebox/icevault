@@ -16,6 +16,8 @@ type fakeVaults struct {
 	needRoot                       map[string]bool
 	opened, forgotten              []string
 	prepareErr, rootErr, forgetErr error
+	defaultErr                     error
+	defaults                       map[string]string
 }
 
 func (f *fakeVaults) List() []VaultInfo {
@@ -39,6 +41,19 @@ func (f *fakeVaults) Prepare(p string) (Target, error) {
 		return Target{Unlocker: u}, nil
 	}
 	return Target{Unlocker: &MemoryUnlocker{Password: "pw"}}, nil
+}
+
+// DefaultVault: <root>/plain/vault/v.kdbx unless a default is named for the root; defaultErr refuses.
+func (f *fakeVaults) DefaultVault(root string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.defaultErr != nil {
+		return "", f.defaultErr
+	}
+	if p := f.defaults[root]; p != "" {
+		return p, nil
+	}
+	return filepath.Join(root, "plain", "vault", "v.kdbx"), nil
 }
 func (f *fakeVaults) SetRoot(p, root string) error {
 	f.mu.Lock()
