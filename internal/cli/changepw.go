@@ -154,8 +154,6 @@ func (e *Env) ChangePassword(v *vault.Vault, next []byte, keyFile string, refres
 	}
 	m["password_changed"] = nowStamp()
 	_ = writeInfo(path, m) // the date is a note: the change itself is done
-	// the previous copy of the vault file is the tool's own and still opens with the old password
-	_ = os.Remove(realPath(path) + ".prev")
 	if refresh {
 		rep.Refreshed = makeCopies(path, out)
 	}

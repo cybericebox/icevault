@@ -37,6 +37,27 @@ func TestSetPasswordReplacesThePassword(t *testing.T) {
 	}
 }
 
+// The previous copy (<vault>.prev) holds the old password: it is gone after a change, and a failed change leaves it alone.
+func TestSetPasswordRemovesThePreviousCopy(t *testing.T) {
+	v, p := newVault(t, creds())
+	must(t, v.Put(Entry{Group: "G", Title: "T", Password: []byte("x")}))
+	must(t, v.Save())
+	if _, err := os.Stat(p + ".prev"); err != nil {
+		t.Fatalf("no previous copy to start with: %v", err)
+	}
+	real := writeFile
+	writeFile = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
+	_ = v.SetPassword([]byte(newPw))
+	writeFile = real
+	if _, err := os.Stat(p + ".prev"); err != nil {
+		t.Fatal("a failed change removed the previous copy")
+	}
+	must(t, v.SetPassword([]byte(newPw)))
+	if _, err := os.Stat(p + ".prev"); err == nil {
+		t.Fatal("the previous copy still opens with the old password")
+	}
+}
+
 // A key file stays the same: the composite key keeps it, and the old password with it still fails.
 func TestSetPasswordKeepsTheKeyFile(t *testing.T) {
 	kf := filepath.Join(t.TempDir(), "k.key")

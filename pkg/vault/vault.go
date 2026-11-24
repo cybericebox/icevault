@@ -220,8 +220,8 @@ func decode(data []byte, cred *gokeepasslib.DBCredentials) (*gokeepasslib.Databa
 // SetPassword replaces the master password and saves the file at once (the same atomic save as every other: a lock, a temp file, fsync, a read-back that
 // must open with the NEW key, one previous copy, a rename). The key derivation settings are kept (Save only gives the file fresh seeds), and the key file,
 // if the vault has one, stays the same: the composite key keeps its key part. An empty password is accepted only when a key file holds the key. When the
-// save fails the old file is as it was and the open vault keeps the old password, so it can be saved again. The caller wipes pw. The file saved just before
-// stays as <vault>.prev and still opens with the OLD password until the next save overwrites it.
+// save fails the old file is as it was and the open vault keeps the old password, so it can be saved again. The caller wipes pw. The previous copy
+// (<vault>.prev) holds the old password and is removed once the new file is in place.
 func (v *Vault) SetPassword(pw []byte) error {
 	if v.db == nil {
 		return errors.New("the vault is closed")
@@ -235,11 +235,7 @@ func (v *Vault) SetPassword(pw []byte) error {
 		next.Key, next.Windows = c.Key, c.Windows
 	}
 	if len(pw) > 0 {
-		hashed, err := Credentials{Password: pw}.build() // the one place that turns a password into the KDBX key part
-		if err != nil {
-			return err
-		}
-		next.Passphrase = hashed.Passphrase
+		next.Passphrase = passwordKey(pw)
 	}
 	v.db.Credentials = next
 	if err := v.Save(); err != nil {
@@ -248,6 +244,13 @@ func (v *Vault) SetPassword(pw []byte) error {
 		return err
 	}
 	wipeCreds(old)
+	// the file saved just before is <vault>.prev, still encrypted under the OLD password: after a change made because the old one is compromised it
+	// would defeat the change, so it is removed (the new file was verified before the rename)
+	real := v.path
+	if r, err := filepath.EvalSymlinks(v.path); err == nil {
+		real = r
+	}
+	_ = os.Remove(real + ".prev")
 	return nil
 }
 
