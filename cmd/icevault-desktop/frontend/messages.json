@@ -990,6 +990,7 @@
   "srv.no_unseal": "A sealed value stays sealed: type a new value to change it",
   "srv.wrong_connection_kind": "A connection of kind {kind} is needed here",
   "srv.bad_kind": "Not a kind IceVault knows",
+  "srv.unknown_kind": "This connection is of kind {kind}, which only the project description that declares it can edit; it is kept as it is",
   "srv.model_invalid": "The change would break the model: {why}",
   "srv.newer_format": "This vault is in a newer format: update IceVault to change it",
   "srv.sealed": "A sealed value is never shown",
@@ -1077,7 +1078,15 @@
   "m.env.fill": "Create missing entries",
   "m.env.fill_tip": "Make every variable the project description says this environment needs as an empty entry; nothing that exists changes",
   "m.env.filled": "Missing entries created: {n}",
-  "m.env.filled_none": "Nothing is missing"
+  "m.env.filled_none": "Nothing is missing",
+  "m.adopt.banner": "{n} value(s) can move into connection {kind}",
+  "m.adopt.line": "{product}: {list} to {connection}",
+  "m.adopt.move": "Move into the connection",
+  "m.adopt.title": "Move {n} values into connections?",
+  "m.adopt.note": "The values move as they are (a reference stays a reference), the product selects the connection, and the own values are removed from this environment. A value the connection already holds differently stays where it is.",
+  "m.adopt.done": "Moved into connections: {n}",
+  "m.conn.unknown_kind": "A kind this project description does not declare: shown as it is, not editable",
+  "m.adopt.sealed": "Stay as they are, sealed (a sealed value never moves): {list}"
  },
  "uk": {
   "app.title": "Налаштування",
@@ -2070,6 +2079,7 @@
   "srv.no_unseal": "Запечатане значення лишається запечатаним: щоб змінити, введіть нове",
   "srv.wrong_connection_kind": "Тут потрібне підключення виду {kind}",
   "srv.bad_kind": "IceVault не знає такого виду",
+  "srv.unknown_kind": "Це підключення виду {kind}: змінювати його можна лише з описом проєкту, що оголошує цей вид; воно лишається як є",
   "srv.model_invalid": "Зміна зламала б модель: {why}",
   "srv.newer_format": "Сховище в новішому форматі: оновіть IceVault, щоб змінювати",
   "srv.sealed": "Запечатане значення ніколи не показується",
@@ -2157,7 +2167,15 @@
   "m.env.fill": "Створити відсутні записи",
   "m.env.fill_tip": "Створити порожнім записом кожну змінну, потрібну цьому середовищу за описом проєкту; наявні записи не змінюються",
   "m.env.filled": "Створено відсутніх записів: {n}",
-  "m.env.filled_none": "Нічого не бракує"
+  "m.env.filled_none": "Нічого не бракує",
+  "m.adopt.banner": "Значень, що можуть перейти в підключення виду {kind}: {n}",
+  "m.adopt.line": "{product}: {list} у {connection}",
+  "m.adopt.move": "Перенести в підключення",
+  "m.adopt.title": "Перенести значень у підключення: {n}?",
+  "m.adopt.note": "Значення переносяться як є (посилання лишається посиланням), продукт вибирає підключення, а власні значення прибираються з цього середовища. Значення, яке в підключенні вже інше, лишається на місці.",
+  "m.adopt.done": "Перенесено в підключення: {n}",
+  "m.conn.unknown_kind": "Вид, якого немає в цьому описі проєкту: показано як є, змінювати не можна",
+  "m.adopt.sealed": "Лишаються як є, запечатані (запечатане значення не переноситься): {list}"
  },
  "ru": {
   "app.title": "Настройки",
@@ -3150,6 +3168,7 @@
   "srv.no_unseal": "Запечатанное значение остаётся запечатанным: чтобы изменить, введите новое",
   "srv.wrong_connection_kind": "Здесь нужно подключение вида {kind}",
   "srv.bad_kind": "IceVault не знает такого вида",
+  "srv.unknown_kind": "Это подключение вида {kind}: менять его можно только с описанием проекта, которое объявляет этот вид; оно остаётся как есть",
   "srv.model_invalid": "Изменение сломало бы модель: {why}",
   "srv.newer_format": "Хранилище в более новом формате: обновите IceVault, чтобы изменять",
   "srv.sealed": "Запечатанное значение никогда не показывается",
@@ -3237,6 +3256,14 @@
   "m.env.fill": "Создать недостающие записи",
   "m.env.fill_tip": "Создать пустой записью каждую переменную, нужную этому окружению по описанию проекта; существующие записи не меняются",
   "m.env.filled": "Создано недостающих записей: {n}",
-  "m.env.filled_none": "Ничего не недостаёт"
+  "m.env.filled_none": "Ничего не недостаёт",
+  "m.adopt.banner": "Значений, которые могут перейти в подключение вида {kind}: {n}",
+  "m.adopt.line": "{product}: {list} в {connection}",
+  "m.adopt.move": "Перенести в подключение",
+  "m.adopt.title": "Перенести значений в подключения: {n}?",
+  "m.adopt.note": "Значения переносятся как есть (ссылка остаётся ссылкой), продукт выбирает подключение, а собственные значения убираются из этого окружения. Значение, которое в подключении уже другое, остаётся на месте.",
+  "m.adopt.done": "Перенесено в подключения: {n}",
+  "m.conn.unknown_kind": "Вид, которого нет в этом описании проекта: показан как есть, менять нельзя",
+  "m.adopt.sealed": "Остаются как есть, запечатаны (запечатанное значение не переносится): {list}"
  }
 }

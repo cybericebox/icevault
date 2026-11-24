@@ -2726,9 +2726,10 @@ let msel = null, munused = false, mshowauto = storeGet("icevault.showauto") === 
 const isModel = () => !!(nav && nav.model);
 const mtext = (o) => (o && (o[lang] || o.en)) || "";                       // a text of the project description in the language of the page
 const mlabel = (r) => mtext(r.label) || r.key;
-const ckTitle = (id) => (has("m.ck." + id) ? t("m.ck." + id) : id);
+const ckDecl = (id) => ((nav && nav.connection_kinds) || []).find((k) => k.id === id && k.declared);
+const ckTitle = (id) => { const k = ckDecl(id); return k ? mtext(k.titles) || k.title || id : has("m.ck." + id) ? t("m.ck." + id) : id; };   // a kind of the project description has its own titles per language
 const skTitle = (id) => (has("m.sk." + id) ? t("m.sk." + id) : id);
-const fieldTitle = (name) => (has("m.cf." + name) ? t("m.cf." + name) : name);
+const fieldTitle = (name, f) => (f && f.label && mtext(f.label) ? mtext(f.label) : has("m.cf." + name) ? t("m.cf." + name) : name);
 const connOf = (u) => (nav.connections || []).find((c) => c.uuid === u);
 const envOf = (n) => (nav.envs || []).find((e) => e.name === n);
 const prodTitle = (p) => mtext(p.title) || p.name;
@@ -2978,12 +2979,13 @@ function mConnections(main) {
   if (!list.length) { main.append(mempty(t("m.empty.connections"))); return; }
   list.forEach((c) => {
     const b = [];
-    if (editing()) { b.push(btn(t("m.conn.add_field"), "plus", () => mfieldDialog(c, null), "ghost"), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)), ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
+    if (editing() && !c.unknown_kind) { b.push(btn(t("m.conn.add_field"), "plus", () => mfieldDialog(c, null), "ghost"), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)), ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
     const sec = mblock(main, c.name, "plug", b);
-    const meta = el("div", "mmeta"); meta.append(el("span", "tag", ckTitle(c.kind)));
+    const meta = el("div", "mmeta"); meta.append(el("span", "tag", c.unknown_kind ? c.kind : ckTitle(c.kind))); if (c.unknown_kind) meta.append(el("span", "dim", t("m.conn.unknown_kind")));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);
-    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present, expires: f.expires, expiry: f.expiry, expires_flag: f.expires_flag,
-      help: f.variables && f.variables.length ? { [lang]: t("m.conn.exported_as", { list: f.variables.join(", ") }) } : null }));
+    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name, f) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present, expires: f.expires, expiry: f.expiry, expires_flag: f.expires_flag,
+      help: (f.variables && f.variables.length) || mtext(f.project_help) || mtext(f.help) ? { [lang]: [mtext(f.project_help) || mtext(f.help), f.variables && f.variables.length ? t("m.conn.exported_as", { list: f.variables.join(", ") }) : ""].filter(Boolean).join(" ") } : null, what: mtext(f.project_help) || mtext(f.help),
+      multiline: f.multiline, choices: f.choices, ftype: f.type, required: f.required }));
     mfields(sec, rows, c);
   });
 }
@@ -3000,7 +3002,7 @@ function mfields(parent, rows, c) {
     { const xt = mexptag(r); if (xt) kc.append(" ", xt); }
     const [ac, ab] = mactcell();
     if (mcanreveal(r)) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k, r.resolved ? "resolved" : "")));
-    if (editing()) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
+    if (editing() && !c.unknown_kind) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
     tr.append(nc, vc, kc, ac); trs.push(tr);
   });
   mtable(parent, trs, t("m.empty.vars"));
@@ -3019,7 +3021,7 @@ function mconnDialog(c) {
 function mfieldDialog(c, r) {
   const fields = []; if (!r) fields.push({ name: "field", label: t("m.f.field"), required: true, help: t("m.field.help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
   const secret = r ? r.visibility !== "plain" : false;
-  fields.push({ name: "value", label: t("m.var.value"), type: secret ? "password" : "text", fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
+  fields.push({ name: "value", label: t("m.var.value"), type: r && r.choices && r.choices.length ? "select" : r && r.multiline ? "textarea" : secret ? "password" : "text", options: r && r.choices && r.choices.length ? r.choices.map((x) => [x, x]) : undefined, fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: [r && r.what ? r.what : "", r && secret && r.state !== "empty" ? t("m.var.keep_help") : ""].filter(Boolean).join(" ") });
   if (!r) fields.push({ name: "secret", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   fields.push(mexpfield(r));
   dialog(r ? t("m.var.edit", { name: mlabel(r) }) : t("m.field.new_title", { name: c.name }), fields, t("btn.save"), (v) => {
@@ -3075,6 +3077,7 @@ function mEnv(main) {
   { const all = [].concat(e.general, ...e.sites.map((s) => s.vars), ...e.products.map((p) => [].concat(p.vars, p.sub ? p.sub.vars : []))); const n = all.filter((r) => r.system).length;
     if (n) { const ab = btn(t(mshowauto ? "m.auto.hide" : "m.auto.show", { n }), mshowauto ? "eye-off" : "eye", () => { mshowauto = !mshowauto; storeSet("icevault.showauto", mshowauto ? "1" : "0"); renderMMain(); }, "ghost"); ab.setAttribute("aria-pressed", String(mshowauto)); setTip(ab, t("m.auto.tip")); acts.push(ab); } }
   mhead(main, "layers", e.title || e.name, e.title ? e.name : "", acts);
+  if (editing() && e.adopt && e.adopt.length) madoptBanner(main, e);
   { const hd = main.querySelector(".head"); hd.classList.add("sticky"); main.style.setProperty("--headh", hd.offsetHeight + "px"); }   // the header stays at the top while the sections scroll; table headings stick below it
   // General: the settings of the whole environment, with the imported shared variables
   const g = mblock(main, t("m.env.general"), "layers", [editing() ? btn(t("m.env.import"), "link", () => mimportDialog(e)) : null, editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/general", null)) : null], t("m.env.general_note"));
@@ -3087,6 +3090,20 @@ function mEnv(main) {
   const p = mblock(main, t("m.env.products"), "package", [editing() ? btn(t("m.product.new"), "plus", () => mproductDialog(e, null)) : null], t("m.env.products_note"));
   if (!e.products.length) p.append(mempty(t("m.empty.products")));
   e.products.forEach((x) => mproduct(p, e, x));
+}
+
+// own values of the environment that a connection of the project description now takes over: offered to move (names only; the move keeps raw values)
+function madoptBanner(main, e) {
+  const n = e.adopt.reduce((s, a) => s + a.variables.length, 0);
+  const kinds = e.adopt.map((a) => ckTitle(a.kind)).filter((x, i, l) => l.indexOf(x) === i).join(", ");
+  const sealed = e.adopt.reduce((l, a) => l.concat(a.sealed || []), []);
+  const b = el("div", "banner"); b.append(icon("info")); const d = el("div");
+  if (n) d.append(el("div", "", t("m.adopt.banner", { n, kind: kinds })), el("div", "dim", e.adopt.filter((a) => a.variables.length).map((a) => t("m.adopt.line", { product: a.product, list: a.variables.join(", "), connection: a.connection })).join(" · ")));
+  if (sealed.length) d.append(el("div", n ? "dim" : "", t("m.adopt.sealed", { list: sealed.join(", ") })));
+  b.append(d);
+  if (!n) { main.append(b); return; }
+  const go = btn(t("m.adopt.move"), "refresh", () => confirmBox(t("m.adopt.title", { n }), t("m.adopt.note"), t("m.adopt.move"), { onOk: async () => { const r = await api("/api/m-env-adopt", { env: e.name }); if (r.status !== 200) return srv(r.data); await mreload(); say(t("m.adopt.done", { n }), "ok"); return true; } }), "primary");
+  b.append(go); main.append(b);
 }
 
 function mimportDialog(e) {

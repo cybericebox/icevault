@@ -260,7 +260,8 @@ var (
 	// ThingNameRE is the form of a site or product name.
 	ThingNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	// KeyRE is the form of a variable key.
-	KeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,99}$`)
+	kindIDRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	KeyRE    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,99}$`)
 )
 
 // ValidConnectionName: 1 to 64 characters, no slash, not starting with a dot, no line break.
@@ -286,9 +287,9 @@ func (v *Vault) Check() []string {
 			add("connection %s: twice", c.Name)
 		}
 		names[c.Name] = true
-		k, ok := kinds.ConnectionKind(c.Kind)
-		if !ok {
-			add("connection %s: unknown kind %q", c.Name, c.Kind)
+		// a kind this tool does not know may be declared by a project description that is not loaded now: the connection is kept as it is
+		if !kindIDRE.MatchString(c.Kind) {
+			add("connection %s: %q is not a kind id", c.Name, c.Kind)
 		}
 		seen := map[string]bool{}
 		for _, f := range c.Fields {
@@ -302,7 +303,6 @@ func (v *Vault) Check() []string {
 			if _, err := ParseDay(f.Expires); err != nil {
 				add("connection %s: the expiry of field %s: %v", c.Name, f.Name, err)
 			}
-			_ = k
 		}
 	}
 	checkVars := func(where string, vs []*Var) {

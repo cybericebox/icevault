@@ -30,6 +30,7 @@ const (
 	jTitle    = "title"
 	jWhere    = "where"
 	jSite     = "site"
+	jConn     = "connection"
 	jProduct  = "product"
 	actCreate = "create"
 	actUpdate = "update"
@@ -192,11 +193,29 @@ func (c *Core) vars(have []*vmodel.Var, described []project.Variable, values fun
 	return out
 }
 
+// kinds is the one lookup of connection kinds: the built-in ones and the ones the project description declares.
+func (c *Core) kinds() kinds.Set { return c.d.Kinds() }
+
+// declaredField is what the page needs of a field a description declares: its texts per language and how a value is entered and checked.
+func declaredField(f kinds.Field) map[string]any {
+	out := map[string]any{"label": map[string]string(f.Label), "help": map[string]string(f.Help), "required": f.Required, "multiline": f.Multiline}
+	if f.Type != "" {
+		out["type"] = f.Type
+	}
+	if len(f.Choices) > 0 {
+		out["choices"] = f.Choices
+	}
+	if f.Pattern != "" {
+		out["pattern"] = f.Pattern
+	}
+	return out
+}
+
 func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string]any {
-	k, _ := kinds.ConnectionKind(x.Kind)
+	k, known := c.kinds().Kind(x.Kind)
 	fields := []map[string]any{}
 	names := map[string]bool{}
-	add := func(name, title string, secret bool) {
+	add := func(name, title string, secret bool, kf *kinds.Field) {
 		f := x.Field(name)
 		state := "empty"
 		if f != nil && f.Value != "" {
@@ -206,6 +225,11 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			secret = secret || f.Secret
 		}
 		row := map[string]any{jName: name, jTitle: title, "secret": secret, jState: state, "present": f != nil}
+		if kf != nil {
+			for key, val := range declaredField(*kf) {
+				row[key] = val
+			}
+		}
 		if f != nil && !secret {
 			row["value"] = f.Value
 		}
@@ -217,6 +241,9 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			c.d.Walk(func(h project.Home) {
 				if h.Conn != nil && h.Conn.Kind == x.Kind && h.Var.Field == name && !contains(used, h.Var.Name) {
 					used = append(used, h.Var.Name)
+					if row["project_help"] == nil && len(h.Var.Help) > 0 {
+						row["project_help"] = text(h.Var.Help) // the project's own help of the variable that carries the field: more exact than the general one
+					}
 				}
 			})
 		}
@@ -236,15 +263,19 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 		fields = append(fields, row)
 		names[name] = true
 	}
-	for _, f := range k.Fields {
-		add(f.Name, f.Title, f.Secret)
+	for i := range k.Fields {
+		add(k.Fields[i].Name, k.Fields[i].Title, k.Fields[i].Secret, &k.Fields[i])
 	}
 	for _, f := range x.Fields {
 		if !names[f.Name] {
-			add(f.Name, "", f.Secret)
+			add(f.Name, "", f.Secret, nil)
 		}
 	}
-	return map[string]any{"uuid": x.UUID, jName: x.Name, jKind: x.Kind, "kind_title": k.Title, "description": x.Description, "fields": fields, "users": c.usersOf(x), "changed": x.Changed}
+	kindTitle, kindTitles := k.Title, map[string]string(k.TitleText)
+	if !known {
+		kindTitle = x.Kind // a kind this window does not know (declared by a description that is not loaded): shown read-only, kept as it is
+	}
+	return map[string]any{"uuid": x.UUID, jName: x.Name, jKind: x.Kind, "kind_title": kindTitle, "kind_titles": kindTitles, "unknown_kind": !known, "description": x.Description, "fields": fields, "users": c.usersOf(x), "changed": x.Changed}
 }
 
 // usersOf lists what uses a connection: "env/site name", "env/site name (state)", "env/product name".
@@ -351,7 +382,7 @@ func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[strin
 		}
 		sk, _ := kinds.SiteKind(s.Kind)
 		sites = append(sites, map[string]any{"uuid": s.UUID, jName: s.Name, jKind: s.Kind, "kind_title": sk.Title, "needs_connection": sk.Connection, "state_kind": sk.State,
-			"connection": connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals, rs), "files": len(s.Files), "users": users})
+			jConn: connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals, rs), "files": len(s.Files), "users": users})
 	}
 	products := []map[string]any{}
 	for _, p := range e.Products {
@@ -374,7 +405,32 @@ func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[strin
 		}
 	}
 	return map[string]any{jName: e.Name, jTitle: e.Title, "general": general, "imports": keysOf(e.Imports), "shared_available": avail, "sites": sites, "products": products,
-		"files": len(e.Files), "missing": missing}
+		"files": len(e.Files), "missing": missing, "adopt": c.adoptView(e.Name)}
+}
+
+// adoptView lists what the environment holds as its own values that a connection of the description now takes over (names only): the banner
+// of the environment screen offers to move them. It is worked out on a copy read from the vault, so nothing changes.
+func (c *Core) adoptView(env string) []map[string]any {
+	out := []map[string]any{}
+	if c.d == nil || c.m.ReadOnly {
+		return out
+	}
+	m, err := vmodel.Load(c.v)
+	if err != nil {
+		return out
+	}
+	plan, err := vmodel.AdoptConnections(m, c.d, env)
+	if err != nil {
+		return out
+	}
+	for _, a := range plan {
+		if a.Count() == 0 && len(a.Sealed) == 0 {
+			continue
+		}
+		k, _ := c.kinds().Kind(a.Kind)
+		out = append(out, map[string]any{jProduct: a.Product, jKind: a.Kind, "kind_title": k.Title, "kind_titles": map[string]string(k.TitleText), jConn: a.Connection, "new": a.New, "variables": a.Variables, "conflicts": a.Conflicts, "sealed": a.Sealed})
+	}
+	return out
 }
 
 // missingID names what a row of "missing" is about, so that the rows of several products that say the same thing are one.
@@ -494,15 +550,28 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 					have = x
 				}
 			}
+			needed := func(v project.Variable) bool { // required, or required-when holds in this environment
+				if v.Required {
+					return true
+				}
+				cond, err := project.ParseWhen(v.RequiredWhen)
+				return err == nil && cond != nil && cond.Holds(vals)
+			}
 			if have == nil {
-				if !u.Optional {
-					out = append(out, map[string]any{jWhere: "connection", jKey: u.Kind})
+				required := !u.Optional
+				for _, v := range u.Variables { // an optional connection is needed while a required-when of its variables holds
+					if cond, err := project.ParseWhen(v.RequiredWhen); err == nil && cond != nil && cond.Holds(vals) {
+						required = true
+					}
+				}
+				if required {
+					out = append(out, map[string]any{jWhere: jConn, jKey: u.Kind})
 				}
 				continue
 			}
 			for _, v := range u.Variables {
-				if f := have.Field(v.Field); v.Required && (f == nil || f.Value == "") {
-					out = append(out, map[string]any{jWhere: "connection_field", jKey: v.Name, "label": text(v.Label), "connection": have.Name})
+				if f := have.Field(v.Field); needed(v) && (f == nil || f.Value == "") {
+					out = append(out, map[string]any{jWhere: "connection_field", jKey: v.Name, "label": text(v.Label), jConn: have.Name})
 				}
 			}
 		}
@@ -513,12 +582,16 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 // Nav is the whole model as the page draws it (a vault is small).
 func (c *Core) Nav() map[string]any {
 	ck := []map[string]any{}
-	for _, k := range kinds.ConnectionKinds() {
+	for _, k := range c.kinds().Kinds() {
 		fs := []map[string]any{}
 		for _, f := range k.Fields {
-			fs = append(fs, map[string]any{jName: f.Name, jTitle: f.Title, "secret": f.Secret})
+			row := map[string]any{jName: f.Name, jTitle: f.Title, "secret": f.Secret}
+			for key, val := range declaredField(f) {
+				row[key] = val
+			}
+			fs = append(fs, row)
 		}
-		ck = append(ck, map[string]any{"id": k.ID, jTitle: k.Title, "fields": fs, "free": k.Free})
+		ck = append(ck, map[string]any{"id": k.ID, jTitle: k.Title, "titles": map[string]string(k.TitleText), "help": map[string]string(k.Help), "declared": k.Declared, "fields": fs, "free": k.Free})
 	}
 	sk := []map[string]any{}
 	for _, s := range kinds.SiteKinds() {
@@ -526,7 +599,7 @@ func (c *Core) Nav() map[string]any {
 		if c.d != nil {
 			_, supported = c.d.SiteKinds[s.ID]
 		}
-		sk = append(sk, map[string]any{"id": s.ID, jTitle: s.Title, "connection": s.Connection, jState: s.State, "supported": supported})
+		sk = append(sk, map[string]any{"id": s.ID, jTitle: s.Title, jConn: s.Connection, jState: s.State, "supported": supported})
 	}
 	var shared []project.Variable
 	all := c.m.ResolveAll(c.d) // one resolution for the whole page, not one per row

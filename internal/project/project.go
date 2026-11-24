@@ -17,8 +17,12 @@ import (
 	"github.com/cybericebox/icevault/internal/kinds"
 )
 
-// Format is the version of the description format this tool reads.
-const Format = 2
+// Format is the newest version of the description format this tool reads; MinFormat is the oldest. Format 3 adds connection-kinds (a
+// description that declares kinds says format: 3, so an older tool refuses it by the format number).
+const (
+	Format    = 3
+	MinFormat = 2
+)
 
 // FileName is the name of the description in the root of a project checkout.
 const FileName = "icevault-project.yaml"
@@ -301,6 +305,8 @@ type Description struct {
 	General       Group               `yaml:"general"`
 	SiteKinds     map[string]SiteKind `yaml:"site-kinds"`
 	Products      []Product           `yaml:"products"`
+	// ConnectionKinds are the kinds of connections (an access to one outside service) the project declares besides the built-in ones.
+	ConnectionKinds []ConnectionKind `yaml:"connection-kinds,omitempty"`
 	// VaultConnections are connections the project uses outside any environment (CI tokens, say).
 	VaultConnections []ConnectionUse `yaml:"vault-connections,omitempty"`
 	Derived          []Derived       `yaml:"derived,omitempty"`
@@ -342,6 +348,7 @@ func Parse(data []byte) (*Description, error) {
 	for _, f := range d.FileSpecs {
 		d.Files = append(d.Files, f.Path)
 	}
+	d.inheritFieldTypes()
 	if errs := d.Validate(); len(errs) > 0 {
 		return nil, &Errors{errs}
 	}
@@ -375,9 +382,13 @@ func validFile(f string) bool {
 func (d *Description) Validate() []string {
 	var errs []string
 	add := func(f string, a ...any) { errs = append(errs, fmt.Sprintf(f, a...)) }
-	if d.Format != Format {
-		add("format is %d, this tool reads format %d", d.Format, Format)
+	if d.Format < MinFormat || d.Format > Format {
+		add("format is %d, this tool reads formats %d to %d (a newer description needs a newer IceVault)", d.Format, MinFormat, Format)
 	}
+	if len(d.ConnectionKinds) > 0 && d.Format < 3 {
+		add("connection-kinds needs format 3 (IceVault 0.8 or newer)")
+	}
+	kindSet := d.validateKinds(add)
 	if strings.TrimSpace(d.Name) == "" {
 		add("name is empty")
 	}
@@ -482,9 +493,9 @@ func (d *Description) Validate() []string {
 		}
 	}
 	checkConn := func(where string, c *ConnectionUse, wantKind string, needFile bool) {
-		k, ok := kinds.ConnectionKind(c.Kind)
+		k, ok := kindSet.Kind(c.Kind)
 		if !ok {
-			add("%s: connection kind %q is not one the tool knows (%s)", where, c.Kind, strings.Join(kinds.KindIDs(), ", "))
+			add("%s: connection kind %q is neither built in nor declared in connection-kinds (%s)", where, c.Kind, strings.Join(kindSet.SortedIDs(), ", "))
 			return
 		}
 		if wantKind != "" && c.Kind != wantKind {
@@ -496,6 +507,13 @@ func (d *Description) Validate() []string {
 				add("%s: field %s twice", where, v.Field)
 			}
 			fields[v.Field] = true
+		}
+		if k.Declared {
+			for _, v := range c.Variables {
+				if v.Field != "" && k.Field(v.Field) == nil {
+					add("%s: field %s is not a field of the declared kind %s", where, v.Field, k.ID)
+				}
+			}
 		}
 		checkVars(where+" connection "+c.Kind, c.File, c.Variables, &k, needFile)
 	}

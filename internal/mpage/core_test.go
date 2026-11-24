@@ -18,7 +18,12 @@ import (
 
 func newCore(t *testing.T) (*Core, *vault.Vault) {
 	t.Helper()
-	d, err := project.Parse(example.Description())
+	return newCoreWith(t, example.Description())
+}
+
+func newCoreWith(t *testing.T, desc []byte) (*Core, *vault.Vault) {
+	t.Helper()
+	d, err := project.Parse(desc)
 	if err != nil {
 		t.Fatal(err)
 	}
