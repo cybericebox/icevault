@@ -355,7 +355,7 @@ func TestModelTablesShowResolvedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(src)
-	for _, want := range []string{"function mvaluecell(", `"← " + rv.refs.join(", ")`, `t("state.broken")`, `t("m.var.varies")`, `"resolved" : ""`, "mvaluecell(vc, w, r, k)"} {
+	for _, want := range []string{"function mvaluecell(", `"← " + rv.refs.join(", ")`, `t("state.broken")`, `t("m.var.varies")`, `"resolved" : ""`, "mvaluecell(vc, w, r, k)", `t("vis.word." + mvis(r))`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the page lacks %s", want)
 		}

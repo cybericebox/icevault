@@ -2818,6 +2818,8 @@ function mvaluecell(vc, w, r, k) {
   return true;
 }
 // can the eye show this row: a secret (own or by what it refers to), and not a broken or a site-dependent result
+// the visibility a row has in the end: the strictest of its own and of what it refers to (a broken or site-dependent result keeps its own)
+const mvis = (r) => (r.resolved && !r.resolved.broken && !r.resolved.varies ? r.resolved.vis : r.visibility);
 const mcanreveal = (r) => r.state !== "empty" && (r.resolved ? r.resolved.vis === "secret" && !r.resolved.broken && !r.resolved.varies : r.visibility === "secret");
 function mnamecell(label, key, mono, help, sub) {
   const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw);
@@ -2857,7 +2859,7 @@ function mvars(parent, rows, scope, opts) {
     const kc = el("td"); const tags = el("div", "mtags");
     if (r.imported) tags.append(el("span", "tag", r.overridden ? t("m.env.overridden") : t("m.env.imported")));
     if (r.system) tags.append(el("span", "tag", t("m.var.system")));
-    else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + r.visibility)));
+    else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + mvis(r))));
     if (r.active === false) { const x = el("span", "tag warn", t("m.var.inactive")); setTip(x, r.when || ""); tags.append(x); }
     kc.append(tags);
     const [ac, ab] = mactcell();
@@ -2966,7 +2968,7 @@ function mfields(parent, rows, c) {
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, r.help ? mtext(r.help) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") { w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
-    const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + r.visibility)));
+    const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + mvis(r))));
     const [ac, ab] = mactcell();
     if (mcanreveal(r)) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k, r.resolved ? "resolved" : "")));
     if (editing()) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
