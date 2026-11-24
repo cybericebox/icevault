@@ -3,6 +3,7 @@ package project
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/cybericebox/icevault/internal/kinds"
 )
@@ -147,4 +148,40 @@ func (d *Description) validateKinds(add func(string, ...any)) kinds.Set {
 		}
 	}
 	return d.Kinds()
+}
+
+// Warnings lists what is allowed but should be fixed: a variable an owner fills in, or a field of a declared kind, with no help text (what it is,
+// what it is used for, where to get it). The description is valid with them; `project check` prints them.
+func (d *Description) Warnings() []string {
+	var out []string
+	hasHelp := func(t Text) bool {
+		for _, s := range t {
+			if strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	d.Walk(func(h Home) {
+		v := h.Var
+		if v.System() || hasHelp(v.Help) {
+			return
+		}
+		if id := h.Scope() + " " + v.Name; !seen[id] {
+			seen[id] = true
+			out = append(out, fmt.Sprintf("%s %s: no help text", h.Scope(), v.Name))
+		}
+	})
+	for _, k := range d.ConnectionKinds {
+		for _, f := range k.Fields {
+			if !hasHelp(f.Help) {
+				out = append(out, fmt.Sprintf("connection kind %s field %s: no help text", k.ID, f.Name))
+			}
+		}
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out
 }

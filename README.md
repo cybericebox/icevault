@@ -36,6 +36,7 @@ products:
 
 - A variable of a connection of a declared kind takes the type, choices and pattern of its field when it names none.
 - `required-when` on a variable of an optional connection makes the connection needed while the condition holds.
+- Every field should explain itself (what it is, what it is used for, where to get it, which permissions a token needs). Built-in kinds carry a general help in en, uk and ru without any project name; a help on a variable of a connection (`connections: variables: help`) is more exact and is shown in preference on the connection page and in the field editor. `icevault project check` lists variables and fields without help as `warnings`.
 - A vault opened without the project only has the built-in kinds: connections of any other kind are shown as they are, cannot be edited and are never dropped.
 - When a description starts to take a variable from a connection while an environment still holds it as its own value, `icevault env adopt-connections --env E` (and the banner on the environment screen of the window) moves it: the raw value goes into a connection of that kind (made if need be; a reference stays a reference), the product selects it and the own value is removed. A value the connection already holds differently stays where it is. `--dry-run` prints names only.
 

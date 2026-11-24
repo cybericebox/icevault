@@ -2984,7 +2984,7 @@ function mConnections(main) {
     const meta = el("div", "mmeta"); meta.append(el("span", "tag", c.unknown_kind ? c.kind : ckTitle(c.kind))); if (c.unknown_kind) meta.append(el("span", "dim", t("m.conn.unknown_kind")));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);
     const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name, f) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present, expires: f.expires, expiry: f.expiry, expires_flag: f.expires_flag,
-      help: f.variables && f.variables.length || (f.help && mtext(f.help)) ? { [lang]: [f.help ? mtext(f.help) : "", f.variables && f.variables.length ? t("m.conn.exported_as", { list: f.variables.join(", ") }) : ""].filter(Boolean).join(" ") } : null,
+      help: (f.variables && f.variables.length) || mtext(f.project_help) || mtext(f.help) ? { [lang]: [mtext(f.project_help) || mtext(f.help), f.variables && f.variables.length ? t("m.conn.exported_as", { list: f.variables.join(", ") }) : ""].filter(Boolean).join(" ") } : null, what: mtext(f.project_help) || mtext(f.help),
       multiline: f.multiline, choices: f.choices, ftype: f.type, required: f.required }));
     mfields(sec, rows, c);
   });
@@ -3021,7 +3021,7 @@ function mconnDialog(c) {
 function mfieldDialog(c, r) {
   const fields = []; if (!r) fields.push({ name: "field", label: t("m.f.field"), required: true, help: t("m.field.help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
   const secret = r ? r.visibility !== "plain" : false;
-  fields.push({ name: "value", label: t("m.var.value"), type: r && r.choices && r.choices.length ? "select" : r && r.multiline ? "textarea" : secret ? "password" : "text", options: r && r.choices && r.choices.length ? r.choices.map((x) => [x, x]) : undefined, fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
+  fields.push({ name: "value", label: t("m.var.value"), type: r && r.choices && r.choices.length ? "select" : r && r.multiline ? "textarea" : secret ? "password" : "text", options: r && r.choices && r.choices.length ? r.choices.map((x) => [x, x]) : undefined, fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: [r && r.what ? r.what : "", r && secret && r.state !== "empty" ? t("m.var.keep_help") : ""].filter(Boolean).join(" ") });
   if (!r) fields.push({ name: "secret", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   fields.push(mexpfield(r));
   dialog(r ? t("m.var.edit", { name: mlabel(r) }) : t("m.field.new_title", { name: c.name }), fields, t("btn.save"), (v) => {

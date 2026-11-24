@@ -37,7 +37,7 @@ func cmdProject(args []string, e *Env) error {
 		return nil
 	}
 	if sub == "check" {
-		return printJSON(e.Out, map[string]any{"description": d.Path, "name": d.Name, "format": d.Format, keyFiles: d.Files, "problems": []string{}})
+		return printJSON(e.Out, map[string]any{"description": d.Path, "name": d.Name, "format": d.Format, keyFiles: d.Files, "problems": []string{}, "warnings": d.Warnings()})
 	}
 	if env == "" {
 		return &parseErr{msg: "project used needs --env E"}

@@ -87,6 +87,17 @@ func TestDeclaredKindsAreChecked(t *testing.T) {
 	}
 }
 
+func TestWarningsNameWhatHasNoHelp(t *testing.T) {
+	d, err := withKinds(t, mailerKind, mailerUse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(d.Warnings(), "\n")
+	if !strings.Contains(all, "MAIL_HOST: no help text") || !strings.Contains(all, "connection kind mailer field host: no help text") {
+		t.Fatal(all)
+	}
+}
+
 func TestDeclaredKindsNeedFormat3(t *testing.T) {
 	s := strings.Replace(string(example.Description()), "products:\n", mailerKind+"\nproducts:\n", 1)
 	_, err := Parse([]byte(s)) // format: 2

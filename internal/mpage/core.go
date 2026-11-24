@@ -225,7 +225,7 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			secret = secret || f.Secret
 		}
 		row := map[string]any{jName: name, jTitle: title, "secret": secret, jState: state, "present": f != nil}
-		if kf != nil && k.Declared {
+		if kf != nil {
 			for key, val := range declaredField(*kf) {
 				row[key] = val
 			}
@@ -241,6 +241,9 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			c.d.Walk(func(h project.Home) {
 				if h.Conn != nil && h.Conn.Kind == x.Kind && h.Var.Field == name && !contains(used, h.Var.Name) {
 					used = append(used, h.Var.Name)
+					if row["project_help"] == nil && len(h.Var.Help) > 0 {
+						row["project_help"] = text(h.Var.Help) // the project's own help of the variable that carries the field: more exact than the general one
+					}
 				}
 			})
 		}
@@ -583,10 +586,8 @@ func (c *Core) Nav() map[string]any {
 		fs := []map[string]any{}
 		for _, f := range k.Fields {
 			row := map[string]any{jName: f.Name, jTitle: f.Title, "secret": f.Secret}
-			if k.Declared {
-				for key, val := range declaredField(f) {
-					row[key] = val
-				}
+			for key, val := range declaredField(f) {
+				row[key] = val
 			}
 			fs = append(fs, row)
 		}
