@@ -221,3 +221,21 @@ func TestModelDialogsHideSecretsAndGuardTheKit(t *testing.T) {
 		t.Error("the new environment button is back to edit mode only")
 	}
 }
+
+// An enum or a bool can take a reference instead of a choice: a stored reference is not a false "not in choices" warning and not an option, the field has a
+// "use a reference" link, and a new variable is checked as typed against the type the description gives its name.
+func TestTypedFieldsTakeReferences(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"function withRefAlt(", "f.refAlt = { scope, start: true, value: stored }", "const isRef = (v) => /(^|[^$])\\$\\{\\{/.test(v || \"\")", "const described = (inp) =>", "fields[0].recheck = [\"value\"]",
+		"function mrowsOf(scope)", ".sel[hidden]",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+}

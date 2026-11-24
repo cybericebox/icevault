@@ -392,7 +392,7 @@ tr.grp.unused th { opacity:.75; }
 .switch .knob { position:relative; flex:none; width:32px; height:18px; border-radius:9px; border:1.5px solid var(--ib-control); box-sizing:border-box; transition:background 80ms var(--ib-ease); }
 .switch .knob::after { content:""; position:absolute; top:1.5px; left:2px; width:12px; height:12px; border-radius:50%; background:var(--ib-control); transition:transform 80ms var(--ib-ease); }
 .switch[aria-checked="true"] .knob { background:var(--ib-action); border-color:var(--ib-action); } .switch[aria-checked="true"] .knob::after { background:var(--ib-on-action); transform:translateX(14px); }
-.switchrow { display:flex; align-items:center; gap:14px; } .switchrow .linkbtn { border:0; background:none; padding:0; color:var(--ib-action); font:500 13px/1.35 var(--ib-font); cursor:pointer; text-decoration:underline; }
+.switchrow { display:flex; align-items:center; gap:14px; } .switchrow .linkbtn, .linkbtn { border:0; background:none; padding:0; color:var(--ib-action); font:500 13px/1.35 var(--ib-font); cursor:pointer; text-decoration:underline; } .valbox + .fld + .linkbtn, .sel + .valbox + .fld + .linkbtn, .switchrow + .valbox + .fld + .linkbtn { margin-top:4px; }
 .ferr.warn { color:var(--ib-warn, var(--ib-danger)); }
 .switch:focus-visible { outline:2px solid var(--ib-action); outline-offset:2px; } .switch[aria-invalid="true"] .knob { border-color:var(--ib-danger); }
 .chk { display:flex; align-items:center; gap:10px; min-height:32px; font-size:14px; cursor:pointer; } .chk input { width:16px; height:16px; accent-color:var(--ib-action); }
@@ -439,7 +439,7 @@ body.resizing, body.resizing * { cursor:col-resize !important; user-select:none;
 @media (max-width:820px) { .vsplit { grid-template-columns:1fr; } .tside { position:static; } .gtree { max-height:200px; } .tresize { display:none; } }
 
 .pblock .chip { cursor:pointer; } .hiddennote { padding:6px 10px; font-size:12px; } .planline { padding:4px 0; font-size:14px; } .pick.card.off { opacity:.6; cursor:default; }
-.fld[hidden] { display:none; } .refbox:empty { display:none; }
+.fld[hidden], .sel[hidden], .valbox[hidden], .switchrow[hidden] { display:none; } .refbox:empty { display:none; }
 
 .emptycell { display:table-cell; text-align:center; padding:28px 12px; color:var(--ib-dim); } .emptycell .i { display:block; margin:0 auto 6px; } .ttools { display:flex; flex-wrap:wrap; gap:6px; padding:0 0 8px 4px; }
 .tnode.dim { opacity:.7; } .tunused { flex:none; display:inline-flex; color:var(--ib-faint); } .tunused .i { width:14px; height:14px; } .legacy { margin-top:16px; }
@@ -491,6 +491,7 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .mblock .btn, .mcard .btn, .mcard .input, .mcard .sel-trig, .mcard .chip { height:32px; }
 .mblock .ibtn, .mcard .ibtn { width:32px; height:32px; }
 .mblock-h, .mcard-h, .msub-h { min-height:32px; }
+input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-color:var(--ib-action); vertical-align:middle; }
 .mswitch { min-height:32px; font-size:14px; } .mswitch input { width:16px; height:16px; margin:0; flex:none; }
 .mctl { align-items:center; } .mctl .mchips { min-height:32px; }
 .ibtn.fold { width:28px; height:28px; margin-left:-6px; } .ibtn.fold .i { width:16px; height:16px; }
@@ -974,6 +975,20 @@ function typeProblem(type, choices, v, min, max) {
   }
   return "";
 }
+// a select or a switch that can instead take a reference: a link swaps it for the reference input (Insert reference, the ${{ trigger, the live preview); the
+// field's value is whichever is shown
+function withRefAlt(f, inp, shown, box, inputs, id) {
+  const a = f.refAlt; let useRef = !!a.start;
+  const alt = el("input", "input lg"); alt.type = "text"; alt.id = id + "-ref"; alt.value = a.value || ""; alt.autocomplete = "off"; alt.spellcheck = false; alt.setAttribute("aria-label", f.label);
+  const wrap = el("div", "valbox"); wrap.append(alt); refControls(alt, wrap, a.scope);
+  const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true;
+  liveRefs(alt, () => a.vis(inputs), out, () => ({ scope: a.scope, key: a.key(inputs) }));
+  const tg = el("button", "linkbtn"); tg.type = "button";
+  const draw = () => { shown.hidden = useRef; wrap.hidden = !useRef; if (!useRef) fw.hidden = true; else alt.dispatchEvent(new Event("input")); tg.textContent = t(useRef ? "m.var.use_value" : "m.var.use_ref"); };
+  tg.addEventListener("click", () => { useRef = !useRef; draw(); (useRef ? alt : (inp.trig || shown)).focus(); });
+  shown.after(wrap); wrap.after(fw); fw.after(tg); draw();
+  return { get value() { return useRef ? alt.value : inp.value; }, trig: inp.trig, shownEl: shown };
+}
 // a switch with a third state, not set: "" (the variable is empty), "true" or "false". A stored value that is none of them is kept as it is until the switch is touched.
 function switchBox(id, value, onChange) {
   const wrap = el("div", "switchrow"); const b = el("button", "switch"); b.type = "button"; b.id = id; b.setAttribute("role", "switch"); let st = value;
@@ -1009,9 +1024,9 @@ function dialog(title, fields, submitText, onSubmit, note) {
       if (f.ref) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => (inputs.visibility && inputs.visibility.value) || inputs.__autoVis || "secret", out); }
     } else if (f.type === "select") {
       inp = selectBox({ id, value: f.value !== undefined ? f.value : f.options[0][0], options: f.options, label: f.label, placeholder: f.placeholder, onChange: (v) => { changed = true; clearErr(f.name); if (f.onChange) f.onChange(v, inputs); syncMask(); } });
-      box.append(inp.el); inputs[f.name] = inp; focusNode = inp.trig;
+      box.append(inp.el); inputs[f.name] = inp; focusNode = inp.trig; if (f.refAlt) inputs[f.name] = withRefAlt(f, inp, inp.el, box, inputs, id);
     } else if (f.type === "switch") {
-      inp = switchBox(id, f.value || "", () => { changed = true; clearErr(f.name); }); box.append(inp); inputs[f.name] = inp; focusNode = inp.trig;
+      inp = switchBox(id, f.value || "", () => { changed = true; clearErr(f.name); }); box.append(inp); inputs[f.name] = inp; focusNode = inp.trig; if (f.refAlt) inputs[f.name] = withRefAlt(f, inp, inp, box, inputs, id);
     } else if (f.type === "chips") {
       inp = chipsInput(f.value || [], false, () => { changed = true; clearErr(f.name); }, f.label, f.suggest, f.copy); box.append(inp.el); inputs[f.name] = inp; focusNode = inp.el.querySelector("input");
     } else {
@@ -1036,7 +1051,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
         box.append(wrap);
         if (hasRef) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) })); }
       } else box.append(inp);
-      inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value); if (m) fieldErr(f.name, m); } if (f.onInput) f.onInput(inp.value, inputs); });
+      inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value, inputs); if (m) fieldErr(f.name, m); } if (f.recheck) f.recheck.forEach((n) => { const o = fields.find((x) => x.name === n), i = inputs[n]; if (o && o.check && i && i.value !== undefined) { clearErr(n); const m = o.check(i.value, inputs); if (m) fieldErr(n, m); } }); if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
     }
     const hp = f.help ? el("div", "help", f.help) : null; if (hp) { hp.id = id + "-h"; box.append(hp); }
@@ -2764,6 +2779,15 @@ async function mreveal(scope, key, k) {
   mrevealed.set(k, x.data.value); renderMMain(); setTimeout(() => { if (mrevealed.delete(k)) renderMMain(); }, REVEAL_MS);
 }
 
+// the rows (with the description's type, choices and limits) of the variables of a scope, as the last nav answered
+function mrowsOf(scope) {
+  if (scope === "shared") return nav.shared || [];
+  const p = scope.split("/"); const e = envOf(p[1]); if (!e) return [];
+  if (p[2] === "general") return e.general || [];
+  if (p[2] === "site") { const s = e.sites.find((x) => x.name === p[3]); return s ? s.vars : []; }
+  const pr = e.products.find((x) => x.name === p[3]); if (!pr) return [];
+  return p[4] ? (pr.sub ? pr.sub.vars : []) : pr.vars;
+}
 function mvarDialog(scope, r) {
   const fresh = !r; const fields = [];
   if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
@@ -2771,16 +2795,25 @@ function mvarDialog(scope, r) {
   const refCtx = { scope, key: (inp) => (fresh ? String((inp.key && inp.key.value) || "").trim() : r.key), vis: (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility) };
   const f = { name: "value", ref: refCtx, maskIf: fresh ? (inp) => !(inp.visibility && inp.visibility.value === "plain") : null, label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
   const ty = r && r.type;
-  const word = (rule) => t("m.type." + rule, { min: r && r.min != null ? r.min : "-∞", max: r && r.max != null ? r.max : "∞" });
+  const isRef = (v) => /(^|[^$])\$\{\{/.test(v || "");
   const stored = r && r.visibility === "plain" ? (r.value || "") : "";
+  const rows = mrowsOf(scope);
+  const described = (inp) => (r ? r : rows.find((x) => x.type && x.key === String((inp && inp.key && inp.key.value) || "").trim()));   // a new variable takes the type the description gives its name
+  const word = (d, rule) => t("m.type." + rule, { min: d && d.min != null ? d.min : "-∞", max: d && d.max != null ? d.max : "∞" });
+  f.check = (v, inp) => { const d = described(inp); if (!d || !d.type) return ""; const rule = typeProblem(d.type, d.choices, v, d.min, d.max); return rule ? word(d, rule) : ""; };
+  if (!fresh) f.recheck = null; else fields[0].recheck = ["value"];
   if (ty === "enum" && r.choices && r.choices.length) {
-    f.type = "select"; f.options = [["", t("m.var.not_set")]].concat(r.choices.map((c) => [c, c]));
-    if (stored && !r.choices.includes(stored)) { f.options.push([stored, stored]); f.warn = t("m.type.not_in_choices"); }   // shown as it is, with a warning
-  } else if (ty === "bool") { f.type = "switch"; if (stored && stored !== "true" && stored !== "false") f.warn = word("bool"); }
-  else if (ty) {
-    f.check = (v) => { const rule = typeProblem(ty, r.choices, v, r.min, r.max); return rule ? word(rule) : ""; };
-    if (stored && f.check(stored)) f.warn = f.check(stored);
+    f.check = null; f.type = "select"; f.options = [["", t("m.var.not_set")]].concat(r.choices.map((c) => [c, c]));
+    if (isRef(stored)) { f.value = ""; f.refAlt = { scope, start: true, value: stored }; }   // a reference is shown as a reference, not as a choice
+    else { f.refAlt = { scope, value: "" }; if (stored && !r.choices.includes(stored)) { f.options.push([stored, stored]); f.warn = t("m.type.not_in_choices"); } }   // shown as it is, with a warning
+  } else if (ty === "bool") {
+    f.check = null; f.type = "switch";
+    if (isRef(stored)) { f.value = ""; f.refAlt = { scope, start: true, value: stored }; }
+    else { f.refAlt = { scope, value: "" }; if (stored && stored !== "true" && stored !== "false") f.warn = word(r, "bool"); }
+  } else if (ty) {
+    if (stored && f.check(stored, null)) f.warn = f.check(stored, null);
   }
+  if (f.refAlt) { f.refAlt.vis = (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility); f.refAlt.key = refCtx.key; }
   fields.push(f);
   if (fresh) fields.push({ name: "visibility", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   dialog(fresh ? t("m.var.new_title") : t("m.var.edit", { name: mlabel(r) }), fields, t("btn.save"), (v) => {
@@ -2817,7 +2850,7 @@ function mConnections(main) {
   if (!list.length) { main.append(mempty(t("m.empty.connections"))); return; }
   list.forEach((c) => {
     const b = [];
-    if (editing()) { b.push(ibtn("plus", t("m.conn.add_field"), () => mfieldDialog(c, null)), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)), ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
+    if (editing()) { b.push(btn(t("m.conn.add_field"), "plus", () => mfieldDialog(c, null), "ghost"), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)), ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
     const sec = mblock(main, c.name, "plug", b);
     const meta = el("div", "mmeta"); meta.append(el("span", "tag", ckTitle(c.kind)));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);
@@ -2910,7 +2943,7 @@ function menvDialog(e, copyFrom) {
 
 function mEnv(main) {
   const e = envOf(msel.id); const acts = [];
-  if (editing()) { const fb = btn(t("m.env.fill"), "plus", async () => { const done = busy(fb, t("busy.creating")); let r; try { r = await api("/api/m-env-fill", { env: e.name }); } finally { done(); } if (r.status === 200) { await mreload(); const n = (r.data && r.data.added) || 0; say(n ? t("m.env.filled", { n }) : t("m.env.filled_none"), "ok"); } else say(srv(r.data), "err"); }, "ghost"); setTip(fb, t("m.env.fill_tip")); acts.push(fb); }
+  if (editing()) { const fb = btn(t("m.env.fill"), "refresh", async () => { const done = busy(fb, t("busy.creating")); let r; try { r = await api("/api/m-env-fill", { env: e.name }); } finally { done(); } if (r.status === 200) { await mreload(); const n = (r.data && r.data.added) || 0; say(n ? t("m.env.filled", { n }) : t("m.env.filled_none"), "ok"); } else say(srv(r.data), "err"); }, "ghost"); setTip(fb, t("m.env.fill_tip")); acts.push(fb); }
   if (editing()) acts.push(btn(t("m.env.copy"), "copy", () => { menvDialog(null, e.name); }, "ghost"), btn(t("m.env.rename_btn"), "edit", () => menvDialog(e), "ghost"), btn(t("m.btn.delete"), "archive", () => mdelete(t("m.env.delete_title", { name: e.name }), t("m.env.delete_note"), "m-env", { action: "delete", name: e.name }), "ghost danger"));
   { const all = [].concat(e.general, ...e.sites.map((s) => s.vars), ...e.products.map((p) => [].concat(p.vars, p.sub ? p.sub.vars : []))); const n = all.filter((r) => r.system).length;
     if (n) { const ab = btn(t(mshowauto ? "m.auto.hide" : "m.auto.show", { n }), mshowauto ? "eye-off" : "eye", () => { mshowauto = !mshowauto; storeSet("icevault.showauto", mshowauto ? "1" : "0"); renderMMain(); }, "ghost"); ab.setAttribute("aria-pressed", String(mshowauto)); setTip(ab, t("m.auto.tip")); acts.push(ab); } }
@@ -2992,9 +3025,10 @@ function mproduct(parent, e, p) {
   else mselectRow(ctl, t("m.product.site"), el("b", "", site ? site.name : t("m.product.no_site")));
   const chosen = new Set(p.connections); const chips = el("span", "mchips");
   p.connections.forEach((u) => { const c = connOf(u); if (c) { const b = el("button", "chip nm2"); b.type = "button"; b.textContent = connLabel(c); b.addEventListener("click", () => mselect("connections", "")); chips.append(b); } });
-  if (!p.connections.length) chips.append(el("span", "dim", t("m.product.no_connections")));
+  if (!p.connections.length && !editing()) chips.append(el("span", "dim", t("m.product.no_connections")));
   if (editing()) {
-    const toggles = (nav.connections || []).map((c) => ({ label: connLabel(c), checked: chosen.has(c.uuid), onChange: (on) => { if (on) chosen.add(c.uuid); else chosen.delete(c.uuid); mwrite("m-product", { env: e.name, action: "update", name: p.name, connections: [...chosen] }); } }));
+    const wanted = (c) => !p.needs.length || p.needs.some((n) => n.kind === c.kind);   // only the kinds the product can use
+    const toggles = (nav.connections || []).filter(wanted).map((c) => ({ label: connLabel(c), checked: chosen.has(c.uuid), onChange: (on) => { if (on) chosen.add(c.uuid); else chosen.delete(c.uuid); mwrite("m-product", { env: e.name, action: "update", name: p.name, connections: [...chosen] }); } }));
     if (toggles.length) chips.append(selectBox({ value: "", options: [], toggles, label: t("m.product.connections"), placeholder: t("m.product.choose") }).el);
   }
   mselectRow(ctl, t("m.product.connections"), chips);
