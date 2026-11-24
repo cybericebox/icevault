@@ -15,6 +15,7 @@ import (
 // fakeMaker makes an empty file where a vault would be and remembers what it was given (never printed in a failure message).
 type fakeMaker struct {
 	made        map[string]string // path -> password
+	noProject   map[string]bool   // path -> made without a project
 	createErr   error
 	touchReady  bool
 	bindErr     error
@@ -23,8 +24,12 @@ type fakeMaker struct {
 	createCalls int
 }
 
-func (m *fakeMaker) Create(path string, pw []byte) error {
+func (m *fakeMaker) Create(path string, pw []byte, noProject bool) error {
 	m.createCalls++
+	if m.noProject == nil {
+		m.noProject = map[string]bool{}
+	}
+	m.noProject[path] = noProject
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -612,6 +617,94 @@ func TestPasswordTooLongAndAMeterThatDoesNotQueue(t *testing.T) {
 	h := newVaultApp(t)
 	h.place("v")
 	if r := h.app.CreateVault(huge, huge, false); r.Status != 400 || codeOf(r) != password.CodeTooLong || h.maker.createCalls != 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// Without a project: no folder, no description; the place is chosen with the save dialog, the vault is made as one without a project and no checkout is
+// recorded for it.
+func TestNewVaultWithoutAProject(t *testing.T) {
+	h := newVaultApp(t)
+	if r := h.app.NewVaultPlace("t"); codeOf(r) != "new_no_project" {
+		t.Fatalf("a place before any choice: %+v", r)
+	}
+	if r := h.app.NewVaultNoProject(); r.Status != 200 || dataOf(r)["touchid"] != true {
+		t.Fatalf("%+v", r)
+	}
+	h.projected = true // no project step for the helper
+	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_place" {
+		t.Fatalf("no place yet: %+v", r)
+	}
+	p := h.place("loose") + ".kdbx"
+	if h.asked[len(h.asked)-1] != "IceVault.kdbx" || h.dirs[len(h.dirs)-1] != "" {
+		t.Fatalf("the dialog: dir %q name %q", h.dirs, h.asked)
+	}
+	if r := h.app.CreateVault(strongPW, strongPW, false); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if !h.maker.noProject[p] {
+		t.Fatal("the vault was not made as one without a project")
+	}
+	if len(h.vault.roots) != 0 {
+		t.Fatalf("a checkout was recorded for a vault without a project: %v", h.vault.roots)
+	}
+	// the choice is used once
+	if r := h.app.CreateVault(strongPW, strongPW, false); codeOf(r) != "new_no_project" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestChoosingProjectAndNoProjectReplaceEachOther(t *testing.T) {
+	h := newVaultApp(t)
+	h.project()
+	h.app.NewVaultNoProject()
+	h.app.mu.Lock()
+	root, path := h.app.newRoot, h.app.newPath
+	h.app.mu.Unlock()
+	if root != "" || path != "" {
+		t.Fatalf("the project choice stayed: %q %q", root, path)
+	}
+	h.project()
+	if r := h.app.CreateVault(strongPW, strongPW, false); r.Status != 200 || h.maker.noProject[filepath.Join(h.root, "plain", "vault", "v.kdbx")] {
+		t.Fatalf("a project chosen after \"without\" made a vault without a project: %+v", r)
+	}
+}
+
+func TestUseWithoutAProject(t *testing.T) {
+	fv := &fakeVaults{needRoot: map[string]bool{"/v/loose.kdbx": true}}
+	a := New(Options{Vaults: fv, Vault: "/v/loose.kdbx"})
+	if p, _ := dataOf(a.ListVaults())["problem"].(map[string]any); p == nil || p["code"] != "vault_needs_root" {
+		t.Fatalf("%+v", dataOf(a.ListVaults())["problem"])
+	}
+	if r := a.UseWithoutProject(); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if !fv.noProject["/v/loose.kdbx"] {
+		t.Fatal("the vault was not marked")
+	}
+	if dataOf(a.ListVaults())["problem"] != nil {
+		t.Fatal("the lock screen still has a problem")
+	}
+	if r := a.Unlock("password", "pw"); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	// it acts only on the question about a checkout: in any other state nothing is marked
+	for name, e := range map[string]error{"another problem": &Error{Status: 409, Code: "setup_no_model"}, "no problem": nil} {
+		other := &fakeVaults{needRoot: map[string]bool{}, prepareErr: e}
+		o := New(Options{Vaults: other, Vault: "/v/other.kdbx"})
+		if r := o.UseWithoutProject(); r.Status != 409 || codeOf(r) != "no_project_refused" || len(other.noProject) != 0 {
+			t.Fatalf("%s: %+v marked %v", name, r, other.noProject)
+		}
+	}
+	// refusals: no list, no vault chosen, a failing mark
+	if r := New(Options{}).UseWithoutProject(); codeOf(r) != "vaults_off" {
+		t.Fatalf("%+v", r)
+	}
+	if r := New(Options{Vaults: &fakeVaults{}}).UseWithoutProject(); codeOf(r) != "no_vault_chosen" {
+		t.Fatalf("%+v", r)
+	}
+	bad := New(Options{Vaults: &fakeVaults{needRoot: map[string]bool{"/v/x.kdbx": true}, noProjectErr: errors.New("/secret/path")}, Vault: "/v/x.kdbx"})
+	if r := bad.UseWithoutProject(); r.Status < 400 || codeOf(r) == "" || strings.Contains(toJSON(r), "secret") {
 		t.Fatalf("%+v", r)
 	}
 }

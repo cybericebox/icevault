@@ -327,7 +327,7 @@ func vaultPath(e *Env) (string, error) {
 	}
 	d, err := e.description()
 	if err != nil {
-		return "", fail("the vault path is unknown: set ICEVAULT_VAULT, or ICEVAULT_ROOT (the project checkout with its description)")
+		return "", fail("the vault path is unknown: set ICEVAULT_VAULT, or ICEVAULT_ROOT (the project checkout with its description); a vault without a project is made with init-vault --no-project --vault PATH")
 	}
 	return filepath.Join(checkoutDir(d), filepath.FromSlash(d.Checkout.Vault)), nil
 }
@@ -370,12 +370,16 @@ func unlock(path string, e *Env) (*vault.Vault, error) {
 
 func cmdInit(args []string, e *Env) error {
 	var ms int
-	var generate bool
+	var generate, noProject bool
 	if _, err := parse("init-vault", args, e, 0, func(fs *flag.FlagSet) {
+		fs.BoolVar(&noProject, "no-project", false, "a vault without a project: it has no environments; the path is --vault PATH")
 		fs.IntVar(&ms, "decryption-time", 0, "key derivation time in ms, 100 to 5000")
 		fs.BoolVar(&generate, "generate", false, "make a random passphrase of six words, show it once and ask for it again")
 	}); err != nil {
 		return err
+	}
+	if noProject && e.Getenv("ICEVAULT_VAULT") == "" {
+		return fail("--no-project needs the place of the vault: --vault PATH (or ICEVAULT_VAULT); the project description names none for it")
 	}
 	path, err := vaultPath(e)
 	if err != nil {
@@ -401,11 +405,17 @@ func cmdInit(args []string, e *Env) error {
 		return err
 	}
 	name := "IceVault"
-	if d, derr := e.description(); derr == nil {
+	if d, derr := e.description(); derr == nil && !noProject {
 		name = d.Name
 	}
-	if err := e.NewVault(path, pw, kf, name, time.Duration(ms)*time.Millisecond); err != nil {
+	if err := e.NewVault(path, pw, kf, name, time.Duration(ms)*time.Millisecond, noProject); err != nil {
 		return err
+	}
+	if noProject {
+		fmt.Fprintf(e.Out, "made the vault %s (mode 0600), with no project: it has no environments, only shared secrets, connections and other secrets, which the window (icevault ui) opens and edits.\n"+
+			"  Write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault.\n"+
+			"  icevault copy --to <dir>  makes copies on other volumes.\n", path)
+		return nil
 	}
 	fmt.Fprintf(e.Out, "made the vault %s (mode 0600). Next:\n"+
 		"  1. write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault\n"+
@@ -484,7 +494,7 @@ func checkNewPassword(pw []byte, keyFile string) error {
 
 // NewVault makes the vault file at path: the policy for the password first, then the file (KDBX 4, mode 0600), its empty vault model and its
 // info file. The window and init-vault both come here. Nothing is written when the policy refuses or the path is taken.
-func (e *Env) NewVault(path string, pw []byte, keyFile, name string, decryption time.Duration) error {
+func (e *Env) NewVault(path string, pw []byte, keyFile, name string, decryption time.Duration, noProject bool) error {
 	if _, err := os.Lstat(path); err == nil {
 		return fail("%s already exists: not overwritten", path)
 	}
@@ -507,7 +517,11 @@ func (e *Env) NewVault(path string, pw []byte, keyFile, name string, decryption 
 	if err := os.Chmod(path, 0o600); err != nil {
 		return err
 	}
-	return writeInfo(path, freshInfo())
+	m := freshInfo()
+	if noProject {
+		m[infoNoProject] = true
+	}
+	return writeInfo(path, m)
 }
 
 func wipeBytes(b []byte) {

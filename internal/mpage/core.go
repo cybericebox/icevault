@@ -39,6 +39,8 @@ type Core struct {
 	d *project.Description // nil: no project description found
 	// DescPath is where the description was read from ("" when none); DescErr is why it could not be read.
 	DescPath, DescErr string
+	// NoProject says the vault has no project on purpose (no description is expected): the page does not offer the missing description as a problem.
+	NoProject bool
 	// Remember saves a description path the window was given (cli.RememberProject); nil: not offered.
 	Remember func(path string) error
 }
@@ -441,7 +443,7 @@ func (c *Core) Nav() map[string]any {
 			products = append(products, map[string]any{jName: p.Name, jTitle: text(p.Title)})
 		}
 	}
-	desc := map[string]any{"found": c.d != nil, "path": c.DescPath, "error": c.DescErr, "can_remember": c.Remember != nil}
+	desc := map[string]any{"found": c.d != nil, "path": c.DescPath, "error": c.DescErr, "can_remember": c.Remember != nil, "no_project": c.NoProject}
 	if c.d != nil {
 		desc[jName] = c.d.Name
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/cybericebox/icevault/internal/cli"
 	"github.com/cybericebox/icevault/internal/desktop"
+	"github.com/cybericebox/icevault/internal/render"
 	"github.com/cybericebox/icevault/internal/vmodel"
 	"github.com/cybericebox/icevault/pkg/vault"
 )
@@ -117,16 +118,19 @@ func (f *fileVaults) Prepare(path string) (desktop.Target, error) {
 	}
 	f.mu.Unlock()
 	root := cli.RootOf(path, saved)
-	if root == "" {
+	var plat *render.Project
+	if root != "" {
+		var err error
+		plat, err = cli.LoadProject(root)
+		if err != nil {
+			return desktop.Target{}, &desktop.Error{Status: 409, Code: "setup_no_model"}
+		}
+		f.mu.Lock()
+		f.roots[path] = root
+		f.mu.Unlock()
+	} else if !cli.IsNoProject(path) {
 		return desktop.Target{}, &desktop.Error{Status: 409, Code: "vault_needs_root"}
-	}
-	plat, err := cli.LoadProject(root)
-	if err != nil {
-		return desktop.Target{}, &desktop.Error{Status: 409, Code: "setup_no_model"}
-	}
-	f.mu.Lock()
-	f.roots[path] = root
-	f.mu.Unlock()
+	} // else: a vault without a project (marked in its info file): no checkout, no description, plat stays nil
 	u := &vaultUnlocker{env: f.env, path: path, keyFile: f.env.Getenv("ICEVAULT_KEYFILE"), plat: plat, root: root}
 	t := desktop.Target{Unlocker: u}
 	if f.env.TouchIDEnabled(path) {
@@ -158,6 +162,14 @@ func (f *fileVaults) DefaultVault(root string) (string, error) {
 	f.roots[p] = root // so that the page can show it with its checkout
 	f.mu.Unlock()
 	return p, nil
+}
+
+// SetNoProject marks the file as one used without a project (its info file): the lock screen asks for no checkout any more.
+func (f *fileVaults) SetNoProject(path string) error {
+	if err := cli.MarkNoProject(path); err != nil {
+		return &desktop.Error{Status: 500, Code: "no_project_not_saved"}
+	}
+	return nil
 }
 
 func (f *fileVaults) SetRoot(path, root string) error {

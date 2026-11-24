@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"errors"
 	"path/filepath"
 
 	"github.com/cybericebox/icevault/internal/password"
@@ -38,6 +39,8 @@ type Vaults interface {
 	// DefaultVault is the vault file the project description in the folder root names (the place init-vault uses), for a new vault. Refusals are *Error
 	// with a code: vault_bad_root (no description in the folder), setup_no_model (it cannot be read).
 	DefaultVault(root string) (string, error)
+	// SetNoProject records that the file is used without a project (the lock screen's "Open without a project"): no checkout is asked for any more.
+	SetNoProject(path string) error
 	// SetRoot names the checkout of a vault (the folder dialog); vault_bad_root when the folder has no project description.
 	SetRoot(path, root string) error
 	// Opened records that the file was unlocked: it goes first in the list.
@@ -124,6 +127,29 @@ func (a *App) OpenVault(title string) Response {
 		return ok(cancelledAnswer())
 	}
 	return a.selectVault(p)
+}
+
+// UseWithoutProject is the answer to a vault that lies in no project: it is opened without one (no environments, only the shared secrets, the connections and
+// the other secrets), and no checkout is asked for any more. The vault chosen is prepared again.
+func (a *App) UseWithoutProject() Response {
+	if a.o.Vaults == nil {
+		return fail(409, "vaults_off")
+	}
+	a.mu.Lock()
+	path, problem := a.vault, a.problem
+	a.mu.Unlock()
+	if path == "" {
+		return fail(409, "no_vault_chosen")
+	}
+	// only the question about a checkout is answered this way: a vault that has its project, or one that fails for another reason, is left as it is
+	var pe *Error
+	if !errors.As(problem, &pe) || pe.Code != "vault_needs_root" {
+		return fail(409, "no_project_refused")
+	}
+	if err := a.o.Vaults.SetNoProject(path); err != nil {
+		return answer(err)
+	}
+	return a.selectVault(path)
 }
 
 // ChooseRoot shows the folder dialog for the project checkout of the chosen vault, saves it and prepares the vault again.

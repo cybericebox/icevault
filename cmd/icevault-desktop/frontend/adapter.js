@@ -34,6 +34,8 @@
       case "vault-open": return app.OpenVault(String(b.title || ""));
       case "vault-root": return app.ChooseRoot(String(b.title || ""));
       case "vault-forget": return app.ForgetVault(String(b.path || ""));
+      case "vault-new-noproject": return app.NewVaultNoProject();
+      case "vault-no-project": return app.UseWithoutProject();
       case "vault-new-project": return app.NewVaultProject(String(b.title || ""));
       case "vault-new-place": return app.NewVaultPlace(String(b.title || ""));
       case "vault-new-strength": return app.PasswordStrength(typeof b.password === "string" ? b.password : "");

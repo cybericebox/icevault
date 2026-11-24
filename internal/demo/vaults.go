@@ -95,6 +95,11 @@ func (v *Vaults) Opened(path string) error {
 	return nil
 }
 
+// SetNoProject: the demo's vaults have their project.
+func (v *Vaults) SetNoProject(string) error {
+	return &desktop.Error{Status: 409, Code: "new_unavailable"}
+}
+
 // DefaultVault: the demo makes no vaults.
 func (v *Vaults) DefaultVault(string) (string, error) {
 	return "", &desktop.Error{Status: 409, Code: "new_unavailable"}

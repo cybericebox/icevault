@@ -23,7 +23,7 @@ import (
 // VaultMaker makes vault files and Touch ID bindings (internal/cli in the window program).
 type VaultMaker interface {
 	// Create makes the vault file at path (the file does not exist, the password passed the policy).
-	Create(path string, password []byte) error
+	Create(path string, password []byte, noProject bool) error
 	// TouchIDReady says whether a Touch ID binding can be made here (the platform, and age and age-plugin-se installed).
 	TouchIDReady() bool
 	// TouchIDBind keeps the password of the vault just made behind Touch ID.
@@ -35,8 +35,9 @@ type VaultMaker interface {
 type SavePicker func(title, dir, name string) (string, error)
 
 const (
-	kitKeep    = 15 * time.Minute // how long the password waits for the recovery kit
-	maxKitText = 8 << 10
+	defaultVaultFile = "IceVault.kdbx"  // the name the save dialog suggests when no project names one
+	kitKeep          = 15 * time.Minute // how long the password waits for the recovery kit
+	maxKitText       = 8 << 10
 )
 
 // The password of the new vault reaches CreateVault as a Go string (the bridge's type), which cannot be wiped; the byte copies made here are wiped,
@@ -110,15 +111,19 @@ func (a *App) NewVaultPlace(title string) Response {
 		return fail(409, "new_unavailable")
 	}
 	a.mu.Lock()
-	root, cur, def := a.newRoot, a.newPath, a.newDefault
+	root, loose, cur, def := a.newRoot, a.newNoProj, a.newPath, a.newDefault
 	a.mu.Unlock()
-	if root == "" {
+	if root == "" && !loose {
 		return fail(409, "new_no_project")
 	}
 	if cur == "" {
 		cur = def
 	}
-	p, err := a.o.PickSave(title, nearestDir(filepath.Dir(cur)), filepath.Base(cur))
+	dir, name := "", defaultVaultFile // without a project the system's folder and a plain name
+	if cur != "" {
+		dir, name = nearestDir(filepath.Dir(cur)), filepath.Base(cur)
+	}
+	p, err := a.o.PickSave(title, dir, name)
 	if err != nil {
 		return fail(500, "pick_failed")
 	}
@@ -154,6 +159,18 @@ func nearestDir(dir string) string {
 	}
 }
 
+// NewVaultNoProject is the other first step: a vault without a project (no folder, no description; it has no environments, only the shared secrets, the
+// connections and the other secrets). The place is then chosen with the save dialog. Answer: {touchid}.
+func (a *App) NewVaultNoProject() Response {
+	if !a.canCreate() {
+		return fail(409, "new_unavailable")
+	}
+	a.mu.Lock()
+	a.newRoot, a.newNoProj, a.newDefault, a.newPath = "", true, "", ""
+	a.mu.Unlock()
+	return ok(map[string]any{keyTouchID: a.o.Maker.TouchIDReady()})
+}
+
 // NewVaultProject is the first step: the system folder dialog for the project folder (the one with icevault-project.yaml). The vault file the
 // description names becomes the place at once (the page shows it; NewVaultPlace chooses another). {cancelled: true} when no folder was chosen. The answer:
 // {checkout, file, folder, exists, touchid}; exists says that the file of the description is there already (no place is set then).
@@ -182,7 +199,7 @@ func (a *App) NewVaultProject(title string) Response {
 	_, statErr := os.Lstat(def)
 	exists := statErr == nil
 	a.mu.Lock()
-	a.newRoot, a.newDefault, a.newPath = dir, def, ""
+	a.newRoot, a.newNoProj, a.newDefault, a.newPath = dir, false, def, ""
 	if !exists {
 		a.newPath = def
 	}
@@ -202,9 +219,9 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 		return fail(409, "new_unavailable")
 	}
 	a.mu.Lock()
-	path, root := a.newPath, a.newRoot
+	path, root, loose := a.newPath, a.newRoot, a.newNoProj
 	a.mu.Unlock()
-	if root == "" {
+	if root == "" && !loose {
 		return fail(409, "new_no_project")
 	}
 	if path == "" {
@@ -219,7 +236,7 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 	if _, err := os.Lstat(path); err == nil {
 		return fail(409, "vault_exists")
 	}
-	if err := a.o.Maker.Create(path, pwb); err != nil {
+	if err := a.o.Maker.Create(path, pwb, loose); err != nil {
 		a.say("the new vault could not be made")
 		return fail(500, "new_failed")
 	}
@@ -238,11 +255,14 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 	}
 	a.dropKit()
 	a.mu.Lock()
-	a.newPath, a.newRoot, a.newDefault = "", "", ""
+	a.newPath, a.newRoot, a.newDefault, a.newNoProj = "", "", "", false
 	a.mu.Unlock()
-	// the vault opens with the project folder that was chosen, wherever the file was saved: no question about a checkout on the lock screen
-	if err := a.o.Vaults.SetRoot(path, root); err != nil {
-		a.say("the project folder of the new vault was not recorded")
+	// the vault opens with the project folder that was chosen, wherever the file was saved: no question about a checkout on the lock screen (a vault
+	// made without a project was marked when it was made, and has no checkout)
+	if root != "" {
+		if err := a.o.Vaults.SetRoot(path, root); err != nil {
+			a.say("the project folder of the new vault was not recorded")
+		}
 	}
 	// the new vault is the chosen one on the lock screen (a file it cannot prepare yet, for want of a checkout, shows what to do there)
 	a.selectVault(path)

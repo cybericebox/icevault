@@ -12,8 +12,8 @@ import (
 // window opens.
 type vaultMaker struct{ env *cli.Env }
 
-func (m vaultMaker) Create(path string, password []byte) error {
-	return m.env.NewVault(path, password, m.env.Getenv("ICEVAULT_KEYFILE"), "IceVault", 0)
+func (m vaultMaker) Create(path string, password []byte, noProject bool) error {
+	return m.env.NewVault(path, password, m.env.Getenv("ICEVAULT_KEYFILE"), "IceVault", 0, noProject)
 }
 
 func (m vaultMaker) TouchIDReady() bool { return m.env.TouchIDReady() }

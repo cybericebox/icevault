@@ -266,6 +266,7 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .vcur b { font-weight:600; color:var(--ib-ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vcur small { font-size:13px; color:var(--ib-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .card .vroot { margin-top:12px; }
+.nvloose { margin-top:8px; }
 .vlist-wrap { margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid var(--ib-line); }
 #lockedbody .err { min-height:0; margin:0 0 12px; } #lockedbody .err:empty { display:none; }   /* no reserved empty block on the lock screen */
 #lockedbody .lk { margin-bottom:8px; } #lockedbody h1 { margin-bottom:16px; } #lockedbody p:not(.fine) { margin:0 0 8px; }
@@ -554,6 +555,7 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
       <button type="button" class="ibtn" id="themebtn"></button>
       <button type="button" class="ibtn hidden" id="refreshbtn" data-i18n-tip="refresh.tip"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
       <button type="button" class="ibtn hidden" id="updbtn" data-i18n-tip="upd.tip"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg></button>
+      <button type="button" class="ibtn hidden" id="descbtn" data-i18n-tip="m.desc.choose"><svg class="i" aria-hidden="true"><use href="#i-edit"/></svg></button>
       <button type="button" class="ibtn hidden" id="clibtn" data-i18n-tip="cli.tip"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg></button>
       <button type="button" class="ibtn hidden" id="pwbtn" data-i18n-tip="cp.tip"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></button>
       <button type="button" class="ibtn hidden" id="lockbtn" data-i18n-tip="lock"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></button>
@@ -1003,7 +1005,7 @@ async function loadStatus() {
 }
 function renderChrome() {
   const lk = status.locked;
-  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); $("pwbtn").classList.toggle("hidden", lk || !status.can_change_password); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
+  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); if (lk) $("descbtn").classList.add("hidden"); $("pwbtn").classList.toggle("hidden", lk || !status.can_change_password); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
   if (lk) $("disknote").classList.add("hidden");
   $("seg-view").setAttribute("aria-pressed", String(status.mode !== "edit")); $("seg-edit").setAttribute("aria-pressed", String(status.mode === "edit"));
   $("locked").classList.toggle("hidden", !lk); $("main").classList.toggle("hidden", lk); $("side").classList.toggle("hidden", lk);
@@ -1062,12 +1064,18 @@ function lockedUI(withPassword, why) {
     box.append(err); showErr(srv(problem));
     if (problem.code === "vault_needs_root") {
       const b = btn(t("vaults.choose_root"), "folder", null, "primary lg block vroot");
+      const nb = btn(t("vaults.no_project"), "file", null, "lg block vroot");
+      nb.addEventListener("click", async () => {
+        const idle = busy(nb, t("busy.opening")); const x = await api("/api/vault-no-project", {}); idle();
+        if (x.status !== 200) { showErr(srv(x.data)); return; }
+        await redrawLocked();
+      });
       b.addEventListener("click", async () => {
         const idle = busy(b, t("busy.opening")); const x = await api("/api/vault-root", { title: t("vaults.dialog_root") }); idle();
         if (x.status !== 200) { showErr(srv(x.data)); return; }
         if (!x.data.cancelled) await redrawLocked();
       });
-      box.append(b);
+      box.append(b, nb, el("p", "fine", t("vaults.no_project_note")));
     }
   }
   if (!canUnlock) { if (!problem) box.append(err); return; }
@@ -1176,6 +1184,7 @@ function openNewVault() {
   const jrow = el("div", "valbox nvplace"), jwhere = el("div", "vcur"); jwhere.append(el("span", "quiet", t("nv.no_project")));
   const jbtn = btn(t("nv.choose_project"), "folder", null, ""); jrow.append(jwhere, jbtn); box.append(jrow);
   const jhelp = el("div", "help", t("nv.project_help")); jhelp.id = "nv-project-h"; box.append(jhelp); addErr("project", jbtn, jhelp);
+  const nbtn = btn(t("nv.without"), "file", null, "nvloose"); box.append(nbtn);       // the other first step: a vault without a project
   // 2. the place: the file the description names, at once; the save dialog for another
   const lp = el("label", "", t("nv.place_label")); box.append(lp);
   const prow = el("div", "valbox nvplace"), where = el("div", "vcur"); where.append(el("span", "quiet", t("nv.no_place")));
@@ -1185,10 +1194,17 @@ function openNewVault() {
     clearErr("project"); clearErr("place"); const idle = busy(jbtn, t("busy.opening")); const r = await api("/api/vault-new-project", { title: t("nv.dialog_project") }); idle();
     if (r.status !== 200) return fieldErr("project", srv(r.data));
     if (r.data.cancelled) return;
-    jwhere.textContent = ""; jwhere.append(midPath(r.data.checkout || "")); jbtn.lastChild.textContent = t("nv.change_project");
-    pbtn.disabled = false; touchAvail = !!r.data.touchid; trow.hidden = !touchAvail; showPlace(r.data); pbtn.lastChild.textContent = t("nv.change_place");
+    jwhere.textContent = ""; jwhere.append(midPath(r.data.checkout || "")); jbtn.lastChild.textContent = t("nv.change_project"); jhelp.textContent = t("nv.project_help");
+    phelp.textContent = t("nv.place_help"); pbtn.disabled = false; touchAvail = !!r.data.touchid; trow.hidden = !touchAvail; showPlace(r.data); pbtn.lastChild.textContent = t("nv.change_place");
     placed = !r.data.exists;
     if (r.data.exists) { where.textContent = ""; where.append(el("span", "quiet", t("nv.no_place"))); fieldErr("place", srv({ code: "vault_exists" })); }
+  });
+  nbtn.addEventListener("click", async () => {
+    clearErr("project"); clearErr("place"); const r = await api("/api/vault-new-noproject", {});
+    if (r.status !== 200) return fieldErr("project", srv(r.data));
+    jwhere.textContent = ""; jwhere.append(el("b", "", t("nv.without_chosen"))); jbtn.lastChild.textContent = t("nv.choose_project"); jhelp.textContent = t("nv.without_help");
+    pbtn.disabled = false; pbtn.lastChild.textContent = t("nv.choose_place"); placed = false; touchAvail = !!r.data.touchid; trow.hidden = !touchAvail;
+    where.textContent = ""; where.append(el("span", "quiet", t("nv.no_place_loose"))); phelp.textContent = t("nv.place_help_loose");
   });
   pbtn.addEventListener("click", async () => {
     clearErr("place"); const idle = busy(pbtn, t("busy.opening")); const r = await api("/api/vault-new-place", { title: t("nv.dialog_place") }); idle();
@@ -1425,6 +1441,7 @@ async function openCliPanel() {
   const r = await api("/api/cli"); if (r.status === 200) render(r.data); else showErr(srv(r.data));
 }
 $("clibtn").addEventListener("click", () => openCliPanel());
+$("descbtn").addEventListener("click", () => mprojectDialog());
 // updates of the application: the program asks GitHub for the latest release, downloads and checks it, and swaps itself only on "Restart and update"
 let upd = null, updTimer = 0;
 function drawUpdChrome() {
@@ -2586,7 +2603,9 @@ function mempty(text, action) { const e = el("div", "empty block"); e.append(ico
 function mhead(main, iconName, title, sub, actions) {
   const crumb = $("crumb"); crumb.textContent = ""; crumb.append(icon(iconName, "lg"), el("b", "", title));
   const head = el("div", "head"); head.append(el("h1", "", title)); const meta = el("div", "meta"); if (sub) meta.append(el("span", "", sub)); (actions || []).forEach((a) => meta.append(a)); head.append(meta); main.append(head);
-  if (nav.description && !nav.description.found) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
+  // a vault without a project has no description on purpose: no warning, but the header button lets one be attached to a project later
+  $("descbtn").classList.toggle("hidden", !(nav.description && !nav.description.found && nav.description.no_project));
+  if (nav.description && !nav.description.found && !nav.description.no_project) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
   if (nav.read_only) { const b = el("div", "banner warn"); b.append(icon("lock"), el("div", "", t("m.read_only"))); main.append(b); }
 }
 

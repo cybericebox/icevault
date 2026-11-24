@@ -17,6 +17,8 @@ type fakeVaults struct {
 	opened, forgotten              []string
 	prepareErr, rootErr, forgetErr error
 	defaultErr                     error
+	noProject                      map[string]bool
+	noProjectErr                   error
 	defaults                       map[string]string
 }
 
@@ -34,13 +36,27 @@ func (f *fakeVaults) Prepare(p string) (Target, error) {
 	if f.prepareErr != nil {
 		return Target{}, f.prepareErr
 	}
-	if f.needRoot[p] && f.roots[p] == "" {
+	if f.needRoot[p] && f.roots[p] == "" && !f.noProject[p] {
 		return Target{}, &Error{Status: 409, Code: "vault_needs_root"}
 	}
 	if u := f.unlockers[p]; u != nil {
 		return Target{Unlocker: u}, nil
 	}
 	return Target{Unlocker: &MemoryUnlocker{Password: "pw"}}, nil
+}
+
+// SetNoProject marks the file as one used without a project: Prepare then no longer asks for a checkout.
+func (f *fakeVaults) SetNoProject(p string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.noProjectErr != nil {
+		return f.noProjectErr
+	}
+	if f.noProject == nil {
+		f.noProject = map[string]bool{}
+	}
+	f.noProject[p] = true
+	return nil
 }
 
 // DefaultVault: <root>/plain/vault/v.kdbx unless a default is named for the root; defaultErr refuses.

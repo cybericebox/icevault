@@ -41,6 +41,27 @@ func readInfo(v string) info {
 	return m
 }
 
+// infoNoProject marks a vault that has no project (init-vault --no-project, the window's "without a project"): it has no environments, only the shared
+// secrets, the connections and the other secrets. It is the only place the fact is kept, so that the command line and the window agree; no project
+// description is ever written for it.
+const infoNoProject = "no_project"
+
+// IsNoProject says whether the vault file is marked as one without a project.
+func IsNoProject(vaultFile string) bool {
+	b, _ := readInfo(vaultFile)[infoNoProject].(bool)
+	return b
+}
+
+// MarkNoProject marks the vault as one without a project, keeping the rest of its info file (a vault with none gets a fresh one).
+func MarkNoProject(vaultFile string) error {
+	m := readInfo(vaultFile)
+	if m == nil {
+		m = freshInfo()
+	}
+	m[infoNoProject] = true
+	return writeInfo(vaultFile, m)
+}
+
 func freshInfo() info { return info{"sealed": map[string]any{}, "copies": []any{}} }
 
 func writeInfo(v string, m info) error {
