@@ -116,6 +116,18 @@ func TestReferencesAndPreview(t *testing.T) {
 			t.Errorf("the picker shows a value: %s", secret)
 		}
 	}
+	// the variable being edited is never offered, nor a variable that refers back to it
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "BACK_MAIL", "value": "${{ self.ADMIN_MAIL }}", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	own, err := c.Read("references", map[string]any{"scope": "env/prod/general", "key": "ADMIN_MAIL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawOwn, _ := json.Marshal(own)
+	if strings.Contains(string(rawOwn), `"key":"ADMIN_MAIL"`) || strings.Contains(string(rawOwn), `"key":"BACK_MAIL"`) || !strings.Contains(string(rawOwn), `"key":"CONTACT_ADDRESS"`) {
+		t.Errorf("the edited variable or a cycle is offered: %s", rawOwn)
+	}
 	sh, _ := c.Read("references", map[string]any{"scope": "shared"})
 	if raw, _ := json.Marshal(sh); strings.Contains(string(raw), `"system":"self"`) {
 		t.Errorf("a shared value is offered self: %s", raw)
@@ -358,6 +370,22 @@ func TestWritesAskBeforeTouchingWhatIsUsed(t *testing.T) {
 	}
 	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "SHARED_NOTE", "delete": true}); code(err) != "confirm_shared_used" {
 		t.Fatalf("a shared value in use: %v", err)
+	}
+	// a reference ${{ shared.KEY }} in a value counts as a use, with the key of the value that holds it
+	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "value": "id-1", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "GOOGLE_CLIENT_ID", "value": "${{ shared.OAUTH_ID }}", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "delete": true}); code(err) != "confirm_shared_used" {
+		t.Fatalf("a shared value used by a reference: %v", err)
+	}
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "GOOGLE_CLIENT_ID", "delete": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "delete": true}); err != nil {
+		t.Fatalf("an unused shared value: %v", err)
 	}
 	if _, err := c.Write("m-env", map[string]any{"action": "copy", "name": "staging", "from": "prod", "title": "Staging"}); err != nil {
 		t.Fatal(err)

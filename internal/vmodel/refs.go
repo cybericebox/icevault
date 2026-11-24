@@ -307,6 +307,159 @@ func (m *Vault) RefTargets(d *project.Description, p Place) []RefTarget {
 	return out
 }
 
+// RefTargetsFor is RefTargets for a value of the variable key at place: it leaves out the variable itself and every target whose chain of
+// references reaches the variable (a reference to it would be a cycle) or is so deep that the value would go past model.MaxRefDepth. An empty key
+// (a variable not named yet) leaves the list as RefTargets gives it. The graph of who refers to whom is built once per projection (once per
+// site for a value of General in an environment with several sites), not once per target.
+func (m *Vault) RefTargetsFor(d *project.Description, p Place, key string) []RefTarget {
+	all := m.RefTargets(d, p)
+	if key == "" {
+		return all
+	}
+	own := model.SelfRef
+	if p.Env == nil {
+		own = model.GlobalRef
+	}
+	ownName := own + "." + key
+	bad := map[string]bool{ownName: true}
+	mark := func(g *refGraph) {
+		for n := range g.unusable(ownName) {
+			bad[n] = true
+		}
+	}
+	if p.Env == nil {
+		// the draft stands in for the shared variable of that key (a new one when there is none); its value has no references of its own here
+		draft := &Var{Key: key, Value: "x", Vis: VisPlain, Managed: ManagedOwner}
+		shared := make([]*Var, 0, len(m.Shared)+1)
+		replaced := false
+		for _, x := range m.Shared {
+			if x.Key == key {
+				shared, replaced = append(shared, draft), true
+				continue
+			}
+			shared = append(shared, x)
+		}
+		if !replaced {
+			shared = append(shared, draft)
+		}
+		mark(newRefGraph(CompatWith(&Vault{Shared: shared, Connections: m.Connections}, descOf(d), CompatOptions{}).Snap, nil))
+	} else {
+		sites := []*Site{p.siteOf()}
+		if sites[0] == nil && len(p.Env.Sites) >= 2 {
+			sites = p.Env.Sites
+		}
+		for _, s := range sites {
+			projectEnv(m, d, p.Env, s, &Var{Key: key, Value: "x", Vis: VisPlain, Managed: ManagedOwner, Description: previewMark}, p, func(cs *CompatSnapshot) {
+				mark(newRefGraph(cs.Snap, cs.Snap.Resolve(model.SecEnvs, p.Env.Name, "", nil)))
+			})
+		}
+	}
+	out := make([]RefTarget, 0, len(all))
+	for _, t := range all {
+		if !bad[t.System+"."+t.Key] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// refGraph is who refers to whom in one projection: a node is "self.KEY", "shared.KEY" or "<system>.KEY"; an edge is a reference in the value
+// the node stands for (as stored, before its own references are expanded).
+type refGraph struct {
+	edges map[string][]string
+}
+
+func newRefGraph(snap *model.Snapshot, res *model.Resolution) *refGraph {
+	g := &refGraph{edges: map[string][]string{}}
+	add := func(node, value string, selfOK bool) {
+		for _, r := range model.ReferencesIn(value) {
+			if r[0] == model.SelfRef && !selfOK { // a value with no environment: self is an error there, not an edge
+				continue
+			}
+			g.edges[node] = append(g.edges[node], r[0]+"."+r[1])
+		}
+	}
+	if res != nil {
+		for k, rs := range res.ByKey {
+			for _, r := range rs {
+				v := r.Entry.Value
+				if r.Entry.Raw != nil {
+					v = *r.Entry.Raw
+				}
+				add(model.SelfRef+"."+k, v, true)
+			}
+		}
+	}
+	for _, it := range snap.All() {
+		switch it.Section {
+		case model.SecGlobal:
+			for _, e := range it.Entries {
+				add(model.GlobalRef+"."+e.Key, e.Value, false)
+			}
+		case model.SecExternal:
+			for _, e := range it.Entries {
+				add(it.Name+"."+e.Key, e.Value, false)
+			}
+		}
+	}
+	return g
+}
+
+// unusable lists the nodes that must not be referred to by the node own: those that reach own (a cycle) and those whose longest chain of
+// references is deeper than model.MaxRefDepth.
+func (g *refGraph) unusable(own string) map[string]bool {
+	rev := map[string][]string{}
+	for from, tos := range g.edges {
+		for _, to := range tos {
+			rev[to] = append(rev[to], from)
+		}
+	}
+	out := map[string]bool{}
+	queue := []string{own}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for _, from := range rev[n] {
+			if !out[from] {
+				out[from] = true
+				queue = append(queue, from)
+			}
+		}
+	}
+	depth := map[string]int{}
+	onStack := map[string]bool{}
+	var longest func(n string) int
+	longest = func(n string) int {
+		if v, ok := depth[n]; ok {
+			return v
+		}
+		if onStack[n] {
+			return 0
+		}
+		onStack[n] = true
+		best := 0
+		for _, to := range g.edges[n] {
+			if to != own {
+				best = max(best, longest(to))
+			}
+		}
+		onStack[n] = false
+		depth[n] = best + 1
+		return best + 1
+	}
+	for n := range g.edges {
+		if longest(n) > model.MaxRefDepth {
+			out[n] = true
+		}
+	}
+	for n := range rev { // a target that is only ever referred to (no value of its own) is one link deep
+		if longest(n) > model.MaxRefDepth {
+			out[n] = true
+		}
+	}
+	return out
+}
+
 // Broken is a reference of a variable that does not resolve: where the variable is (general, site or product, with the name of the site or
 // product), its key and the reason.
 type Broken struct {

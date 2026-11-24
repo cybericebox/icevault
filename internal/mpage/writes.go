@@ -130,12 +130,8 @@ func (c *Core) writeVar(a map[string]any) error {
 			return refuse("not_found", nil)
 		}
 		if str(a, "scope") == "shared" {
-			for _, e := range c.m.Envs {
-				for _, s := range e.Imports {
-					if s == x && !flag(a, "confirm") {
-						return refuse("confirm_shared_used", map[string]any{jList: c.importers(x)})
-					}
-				}
+			if us := c.m.SharedUsers(x); len(us) > 0 && !flag(a, "confirm") {
+				return refuse("confirm_shared_used", map[string]any{jList: us})
 			}
 			for _, e := range c.m.Envs {
 				var keep []*vmodel.Var
@@ -201,18 +197,6 @@ func (c *Core) writeVar(a map[string]any) error {
 		x.Description = str(a, "description")
 	}
 	return nil
-}
-
-func (c *Core) importers(x *vmodel.Var) []string {
-	var out []string
-	for _, e := range c.m.Envs {
-		for _, s := range e.Imports {
-			if s == x {
-				out = append(out, e.Name)
-			}
-		}
-	}
-	return out
 }
 
 func (c *Core) env(a map[string]any) (*vmodel.Environment, error) {
