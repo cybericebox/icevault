@@ -77,3 +77,63 @@ func TestAValueThatDoesNotFitItsTypeIsReportedAndStopsTheRender(t *testing.T) {
 		t.Fatalf("a fitting value: %s %s", h.out.String(), h.errb.String())
 	}
 }
+
+// setPlace moves a product of the vault of the harness (the BRAIN / INDEXER word of the project) and sets some of its variables.
+func setPlace(t *testing.T, h *harness, env, product, place string, vars map[string]string) {
+	t.Helper()
+	v, err := vault.Open(h.env["ICEVAULT_VAULT"], vault.Credentials{Password: []byte(pw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	m, err := vmodel.Load(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.Env(env).Product(product)
+	p.Place = place
+	for k, val := range vars {
+		x := hasKey(p.Vars, k)
+		if x == nil {
+			x = &vmodel.Var{Key: k, Managed: vmodel.ManagedOwner, Vis: vmodel.VisPlain}
+			p.Vars = append(p.Vars, x)
+		}
+		x.Value = val
+	}
+	if err := vmodel.Sync(v, m); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A variable the description needs for one place only (required-when: INDEXER=cluster, INDEXER in [host, cluster]) is listed as missing exactly
+// while the place says so: the rule is the project's, never fixed in the tool (the Brain rule of the infrastructure has the same form).
+func TestMissingFollowsThePlaceOfAProduct(t *testing.T) {
+	h := goldenHarness(t)
+	missing := func() string {
+		h.out.Reset()
+		h.errb.Reset()
+		if rc := h.run("view", "--env", "prod"); rc != 0 {
+			t.Fatalf("view: %s %s", h.out.String(), h.errb.String())
+		}
+		out := h.out.String()
+		if i := strings.Index(out, "missing:"); i >= 0 {
+			return out[i:]
+		}
+		return ""
+	}
+	setPlace(t, h, "prod", "indexer", "cluster", map[string]string{"BROKER_URL": "", "BROKER_PASSWORD": ""})
+	if m := missing(); !strings.Contains(m, "BROKER_URL") || !strings.Contains(m, "BROKER_PASSWORD") {
+		t.Fatalf("on the cluster both are listed:\n%s", m)
+	}
+	setPlace(t, h, "prod", "indexer", "host", nil)
+	if m := missing(); strings.Contains(m, "BROKER_URL") || !strings.Contains(m, "BROKER_PASSWORD") {
+		t.Fatalf("on a host only the password:\n%s", m)
+	}
+	setPlace(t, h, "prod", "indexer", "none", nil)
+	if m := missing(); strings.Contains(m, "BROKER_") {
+		t.Fatalf("not run: nothing:\n%s", m)
+	}
+}
