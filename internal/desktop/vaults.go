@@ -35,6 +35,9 @@ type Vaults interface {
 	// Prepare finds the project checkout of the file, reads its settings model and makes the Target. Refusals are *Error with a code:
 	// vault_missing, vault_needs_root (the page offers the folder dialog), setup_no_model.
 	Prepare(path string) (Target, error)
+	// DefaultVault is the vault file the project description in the folder root names (the place init-vault uses), for a new vault. Refusals are *Error
+	// with a code: vault_bad_root (no description in the folder), setup_no_model (it cannot be read).
+	DefaultVault(root string) (string, error)
 	// SetRoot names the checkout of a vault (the folder dialog); vault_bad_root when the folder has no project description.
 	SetRoot(path, root string) error
 	// Opened records that the file was unlocked: it goes first in the list.

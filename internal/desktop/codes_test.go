@@ -187,7 +187,7 @@ func assertCoded(t *testing.T, what string, r Response) {
 		}
 	}
 	for k, v := range data {
-		if s, isStr := v.(string); isStr && k != "code" && k != "value" && k != "mode" && k != "password" && k != "file" && k != "folder" {
+		if s, isStr := v.(string); isStr && k != "code" && k != "value" && k != "mode" && k != "password" && k != "file" && k != "folder" && k != "checkout" {
 			t.Errorf("%s: unexpected string field %s=%q", what, k, s)
 		}
 	}
@@ -281,16 +281,22 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 	for _, e := range bad {
 		fv := &fakeVaults{}
 		m := &fakeMaker{createErr: e, bindErr: e, touchReady: true}
-		n := New(Options{Vaults: fv, Maker: m, PickSave: func(string, string) (string, error) { return filepath.Join(t.TempDir(), "n.kdbx"), nil }})
+		n := New(Options{Vaults: fv, Maker: m, Pick: func(string, string) (string, error) { return t.TempDir(), nil }, PickSave: func(string, string, string) (string, error) { return filepath.Join(t.TempDir(), "n.kdbx"), nil }})
+		assertCoded(t, "NewVaultPlace without a project", n.NewVaultPlace("t"))
+		assertCoded(t, "NewVaultProject", n.NewVaultProject("t"))
 		assertCoded(t, "NewVaultPlace", n.NewVaultPlace("t"))
 		assertCoded(t, "CreateVault fails", n.CreateVault("k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ", true))
 		assertCoded(t, "CreateVault weak", n.CreateVault("Qwerty123!", "Qwerty123!", true))
 		assertCoded(t, "SaveRecoveryKit none", n.SaveRecoveryKit("t", "{password}"))
-		bad := New(Options{Vaults: fv, Maker: m, PickSave: func(string, string) (string, error) { return "", e }})
+		bad := New(Options{Vaults: fv, Maker: m, Pick: func(string, string) (string, error) { return "", e }, PickSave: func(string, string, string) (string, error) { return "", e }})
 		assertCoded(t, "NewVaultPlace pick fails", bad.NewVaultPlace("t"))
-		covered["NewVaultPlace"], covered["CreateVault"], covered["SaveRecoveryKit"] = true, true, true
+		assertCoded(t, "NewVaultProject pick fails", bad.NewVaultProject("t"))
+		fv.defaultErr = e
+		assertCoded(t, "NewVaultProject refused", n.NewVaultProject("t"))
+		covered["NewVaultPlace"], covered["NewVaultProject"], covered["CreateVault"], covered["SaveRecoveryKit"] = true, true, true, true
 	}
 	assertCoded(t, "NewVaultPlace off", l.NewVaultPlace("t"))
+	assertCoded(t, "NewVaultProject off", l.NewVaultProject("t"))
 	assertCoded(t, "CreateVault off", l.CreateVault("a", "a", false))
 	assertCoded(t, "SaveRecoveryKit off", l.SaveRecoveryKit("t", "{password}"))
 	for _, r := range []Response{l.PasswordStrength("x"), l.GeneratePassword(), l.DiscardRecoveryKit()} { // answers without refusals: success shapes only

@@ -95,6 +95,11 @@ func (v *Vaults) Opened(path string) error {
 	return nil
 }
 
+// DefaultVault: the demo makes no vaults.
+func (v *Vaults) DefaultVault(string) (string, error) {
+	return "", &desktop.Error{Status: 409, Code: "new_unavailable"}
+}
+
 func (v *Vaults) Forget(path string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()

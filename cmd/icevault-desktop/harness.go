@@ -239,7 +239,7 @@ func main() {
 	}
 	// the stand-in of the save dialog (a new vault, its recovery kit): a fresh name in one temp folder of the harness
 	var saveDir string
-	pickSave := func(_, name string) (string, error) {
+	pickSave := func(_, _, name string) (string, error) {
 		if saveDir == "" {
 			d, err := os.MkdirTemp("", "icevault-harness-save-")
 			if err != nil {
@@ -264,7 +264,14 @@ func main() {
 	if *updMode != "" {
 		upd = newHarnessUpdater(*updMode)
 	}
-	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Clipboard: &memClipboard{}, Idle: *idle, PickDescription: pickDescription, PickSave: pickSave, Maker: makerFor(vaults),
+	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Clipboard: &memClipboard{}, Idle: *idle, PickDescription: pickDescription, PickSave: pickSave,
+		// the stand-in of the folder dialog: the project checkout of the harness
+		Pick: func(kind, _ string) (string, error) {
+			if kind == "folder" {
+				return env.Root, nil
+			}
+			return "", nil
+		}, Maker: makerFor(vaults),
 		Update: upd, OpenURL: func(url string) { fmt.Fprintln(os.Stderr, "ui-harness: open in the browser:", url) },
 		Quit:   func() { end("the page ended the program") },
 		Say:    func(text string) { fmt.Fprintln(os.Stderr, "ui-harness: settings screen:", text) },

@@ -12,9 +12,9 @@ import (
 func auditSnap(t *testing.T) *model.Snapshot {
 	o := "managed-by=owner\nvisibility="
 	return snapOf(t,
-		row{"environments/staging/web", "WIDGET_SITE_KEY", "v", o + "secret"},         // the old import default, now plain
+		row{"environments/staging/web", "WIDGET_SITE_KEY", "v", o + "secret"},          // the old import default, now plain
 		row{"environments/staging/web", "FOO_NOTE", "v", o + "secret"},                 // unknown key: old default secret, now plain
-		row{"environments/staging/web", "BASE_HOST", "v", o + "plain"},                    // already right
+		row{"environments/staging/web", "BASE_HOST", "v", o + "plain"},                 // already right
 		row{"environments/staging/web", "MY_TOKEN", "v", o + "plain"},                  // plain by hand: left
 		row{"environments/staging/web", "OWNER_NOTE", "v", o + "secret\nvis-by=owner"}, // chosen in the screen: left
 		row{"environments/staging/web", "SEALED_NOTE", "v", o + "sealed"},              // never unsealed

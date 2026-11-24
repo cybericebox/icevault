@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +139,25 @@ func (f *fileVaults) Prepare(path string) (desktop.Target, error) {
 		}
 	}
 	return t, nil
+}
+
+// DefaultVault is the vault file the description in the folder names (what init-vault uses); the folder is the checkout of a vault made there.
+func (f *fileVaults) DefaultVault(root string) (string, error) {
+	root = filepath.Clean(root)
+	if !cli.ValidRoot(root) {
+		return "", &desktop.Error{Status: 409, Code: "vault_bad_root"}
+	}
+	p, err := cli.DefaultVaultPath(root)
+	if errors.Is(err, cli.ErrOutsideRoot) {
+		return "", &desktop.Error{Status: 409, Code: "vault_outside_root"}
+	}
+	if err != nil {
+		return "", &desktop.Error{Status: 409, Code: "setup_no_model"}
+	}
+	f.mu.Lock()
+	f.roots[p] = root // so that the page can show it with its checkout
+	f.mu.Unlock()
+	return p, nil
 }
 
 func (f *fileVaults) SetRoot(path, root string) error {

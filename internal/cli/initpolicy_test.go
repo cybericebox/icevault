@@ -69,6 +69,26 @@ func TestInitVaultRefusesWeakPasswordsBeforeAnythingIsWritten(t *testing.T) {
 	}
 }
 
+// With no --vault, init-vault makes the vault at the path the project description names: the place the window offers for a new vault.
+func TestInitVaultUsesThePathOfTheDescription(t *testing.T) {
+	h := newHarness(t)
+	delete(h.env, "ICEVAULT_VAULT")
+	want, err := DefaultVaultPath(h.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.pw = []string{"k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ"}
+	if rc := h.run("init-vault", "--decryption-time", "100"); rc != 0 {
+		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+	if !strings.Contains(h.out.String(), want) {
+		t.Fatalf("the vault is not at %s: %s", want, h.out.String())
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInitVaultAcceptsAStrongPassword(t *testing.T) {
 	h := newHarness(t)
 	h.pw = []string{"k7Qm2xVb9RtZ", "k7Qm2xVb9RtZ"}
