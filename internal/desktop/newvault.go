@@ -59,9 +59,6 @@ func (k *recoveryKit) wipe() {
 	wipe(k.password)
 }
 
-// keyTouchID is the key of the answers that say whether Touch ID is there.
-const keyTouchID = "touchid"
-
 // cancelledAnswer is the data of a dialog the person closed without choosing.
 func cancelledAnswer() map[string]any { return map[string]any{"cancelled": true} }
 
