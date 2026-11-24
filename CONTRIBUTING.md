@@ -38,6 +38,8 @@ printed file>`, `ICEVAULT_ROOT=<that temp checkout>`, and the password typed whe
 
 A release is made by a maintainer pushing a tag `vX.Y.Z` (final releases only: there are no release candidates here). Nothing else starts it, and nothing is released by hand: no hand-made release page, no assets uploaded from a machine.
 
+`.github/release-notes.md` has one section of changes, **"Changes since <previous tag>"**: only what changed against the release just before (a patch against the previous patch, a minor against the last release before it), never a history of older versions. Before the tag, write that section; right after the release, reset it to "Changes since <the new tag>" with no items. Steps a reader must take when coming from an older version go into the release that needs them, once.
+
 ```
 git tag vX.Y.Z      # on the commit to release
 git push origin vX.Y.Z
@@ -47,7 +49,7 @@ The `release` workflow (`.github/workflows/release.yml`) then, with the same mis
 
 1. builds on a macOS runner the application for arm64 and amd64 (cross-built) and joins the two into one universal `IceVault.app` (lipo, signed ad hoc), then packs `IceVault-vX.Y.Z-macos.dmg` (the recommended download: open, drag to Applications), `IceVault-vX.Y.Z-macos.pkg` (the same application as an installer: into /Applications and the link `/usr/local/bin/icevault` to the command inside it, made by `internal/appbundle/pkg/postinstall` with the rules of `internal/cliinstall`; not signed) and `icevault-vX.Y.Z-darwin-<arch>.tar.gz` for arm64 and amd64 (mise downloads these); on Linux `icevault-vX.Y.Z-linux-amd64.tar.gz`. `mise run release-assets-macos` (with `VERSION=vX.Y.Z`) makes the same files in `dist/` on a Mac; check a package with `pkgutil --payload-files` and `pkgutil --expand` (never install a test package on a working machine);
 2. writes `SHA256SUMS`;
-3. creates a **draft** release (`.github/release-notes.md`), uploads every asset to it, then publishes it: releases are immutable once published, so a published release is never edited. It is marked as the latest release only when it is the newest final version (`relprune -newest`): a patch of an older minor never takes that place from a newer minor;
+3. creates a **draft** release (`.github/release-notes.md`), uploads every asset to it, then publishes it: its assets and tag are immutable once published (its notes stay editable). It is marked as the latest release only when it is the newest final version (`relprune -newest`): a patch of an older minor never takes that place from a newer minor;
 4. applies the retention policy below.
 
 The tag is the version: it goes into both programs (`icevault --version`, `icevault-desktop --version`) and into the Info.plist of the application. There is no Windows build and no Linux window. Neither the installer nor the application is signed with a Developer ID, and nothing is notarised; the release text says how to open them (Gatekeeper asks once). If a step before the publish fails, the draft is removed and the tag can be fixed and pushed again only as a new version (a published or attempted tag name is not reused; delete a failed tag only after checking that no release uses it).
