@@ -182,3 +182,19 @@ func TestAdoptConnectionsNeverMovesASealedValue(t *testing.T) {
 		t.Fatalf("%+v", plan2)
 	}
 }
+
+// The connection the description names is taken only while no other environment uses it: prod never fills the Stats of staging.
+func TestAdoptConnectionsNeverFillsANamedConnectionOfAnotherEnvironment(t *testing.T) {
+	d := descWithKind(t)
+	m, _ := portalWithOwnValues(t)
+	stats := &Connection{Name: "Stats", Kind: "stats", Fields: []*Field{{Name: "site_id", Value: ""}}}
+	m.Connections = append(m.Connections, stats)
+	m.Envs = append(m.Envs, &Environment{Name: "staging", Products: []*Product{{Name: "portal", Enabled: true, Connections: []*Connection{stats}}}})
+	plan, _ := AdoptConnections(m, d, "prod")
+	if len(plan) != 1 || !plan[0].New || plan[0].Chosen != "new" || plan[0].Connection == "Stats" {
+		t.Fatalf("%+v", plan)
+	}
+	if stats.Field("site_id").Value != "" || len(stats.Fields) != 1 {
+		t.Fatal("the connection of staging was filled")
+	}
+}

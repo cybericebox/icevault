@@ -19,7 +19,7 @@ type Adoption struct {
 	Connection string
 	New        bool
 	// Chosen says why this connection: "product" (the product already has one of the kind), "this-environment" (another product or site of the
-	// environment uses it), "named" (the one the description names) or "new".
+	// environment uses it), "named" (the one the description names, when no other environment uses it) or "new".
 	Chosen string
 	// Variables are the names that move (in the order of the description).
 	Variables []string
@@ -228,7 +228,7 @@ func adoptTarget(m *Vault, d *project.Description, e *Environment, p *Product, u
 		}
 	}
 	k, _ := d.Kinds().Kind(use.Kind)
-	if c := m.Connection(or(use.Name, k.Title)); c != nil && c.Kind == use.Kind {
+	if c := m.Connection(or(use.Name, k.Title)); c != nil && c.Kind == use.Kind && !usedByAnotherEnvironment(m, e, c) {
 		return c, "named"
 	}
 	return nil, "new"
@@ -242,4 +242,26 @@ func without(list []*Var, x *Var) []*Var {
 		}
 	}
 	return out
+}
+
+// usedByAnotherEnvironment says whether a site or a product of an environment other than e uses the connection: filling it would change that one.
+func usedByAnotherEnvironment(m *Vault, e *Environment, c *Connection) bool {
+	for _, o := range m.Envs {
+		if o == e {
+			continue
+		}
+		for _, s := range o.Sites {
+			if s.Connection == c || s.State == c {
+				return true
+			}
+		}
+		for _, p := range o.Products {
+			for _, x := range p.Connections {
+				if x == c {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
