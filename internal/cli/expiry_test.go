@@ -77,3 +77,21 @@ func TestStatusExportAndSessionWarnAboutExpiredOnes(t *testing.T) {
 		t.Fatalf("session stderr:\n%s", e)
 	}
 }
+
+func TestExportAppWarnsOnlyAboutWhatTheAppTakes(t *testing.T) {
+	h := goldenHarness(t)
+	h.editModel(func(m *vmodel.Vault) {
+		for _, x := range m.Env("prod").General {
+			if x.Key == "PUBLIC_HOST" || x.Key == "NOTES_LABEL" {
+				x.Expires = day(-3)
+			}
+		}
+	})
+	h.exec = fakeGit{ignored: true}
+	if rc := h.run("export-app", "--env", "prod", "--app", "web-client"); rc != 0 {
+		t.Fatalf("export-app: %s", h.errb.String())
+	}
+	if e := h.errb.String(); !strings.Contains(e, "PUBLIC_HOST has expired") || strings.Contains(e, "NOTES_LABEL") {
+		t.Fatalf("export-app stderr:\n%s", e)
+	}
+}

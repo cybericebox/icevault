@@ -32,9 +32,9 @@ func ParseDay(s string) (time.Time, error) {
 	return t, nil
 }
 
-// Today is the day of t in UTC (the day an expiry date is compared with).
+// Today is the local day of t as a UTC midnight (the day an expiry date is compared with; see vault.ExpiryEnd for the zone).
 func Today(t time.Time) time.Time {
-	y, m, d := t.UTC().Date()
+	y, m, d := t.In(time.Local).Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
@@ -184,16 +184,37 @@ func (m *Vault) ExpiringIn(e *Environment, today time.Time, days int) []ExpiryIt
 	return s.sorted()
 }
 
-// connExpiry is the earliest date of the fields of a connection ("" when none has one).
+// connExpiry is the earliest date of the fields of a connection ("" when none has one); a date that does not parse is skipped.
 func connExpiry(c *Connection) string {
-	min := ""
+	var min time.Time
 	for _, f := range c.Fields {
-		if f.Expires != "" && (min == "" || f.Expires < min) {
-			min = f.Expires
+		if d, err := ParseDay(f.Expires); err == nil && !d.IsZero() && (min.IsZero() || d.Before(min)) {
+			min = d
 		}
 	}
-	return min
+	return dayText(min)
 }
 
-// dayOf is the date of an entry's expiry as the model keeps it.
-func dayOf(i vault.EntryInfo) string { return dayText(i.Expires) }
+// importEntryExpiry gives the native expiry of a connection entry (set in a KeePass client, with no date of its own on any field) to its secret fields,
+// or to all its fields when none is secret, so the next write keeps it.
+func importEntryExpiry(c *Connection, day string) {
+	any := false
+	for _, f := range c.Fields {
+		if f.Secret {
+			f.Expires, any = day, true
+		}
+	}
+	if !any {
+		for _, f := range c.Fields {
+			f.Expires = day
+		}
+	}
+}
+
+// dayOf is the date of an entry's expiry as the model keeps it: the local day of the instant.
+func dayOf(i vault.EntryInfo) string {
+	if i.Expires.IsZero() {
+		return ""
+	}
+	return dayText(vault.ExpiryDay(i.Expires))
+}

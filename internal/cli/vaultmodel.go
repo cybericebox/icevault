@@ -138,8 +138,8 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 			return 1, err
 		}
 	}
-	if env := flagVals(cmd, args)["env"]; env != "" && (cmd == cmdExport || cmd == cmdExportApp) {
-		warnExpired(e, mv.m, env)
+	if env := flagVals(cmd, args)["env"]; env != "" && cmd == cmdExport {
+		warnExpired(e, mv.m, env, nil)
 	}
 	switch cmd {
 	case cmdView:
@@ -150,7 +150,9 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		}
 		return 0, runExport(e, args, out, plat, snap)
 	case cmdExportApp:
-		return 0, runExportApp(e, args, out, plat, snap)
+		return 0, runExportApp(e, args, out, plat, snap, func(keys []string) {
+			warnExpired(e, mv.m, flagVals(cmd, args)["env"], &appUse{keys: keys, d: mv.d})
+		})
 	case cmdStatus:
 		if err := runStatus(e, args, out, plat, snap); err != nil {
 			return 0, err

@@ -7,7 +7,7 @@ import (
 
 func TestExpiryIsSetListedAndNeverCarriesValues(t *testing.T) {
 	c, v := newCore(t)
-	c.Now = func() time.Time { return time.Date(2030, 1, 10, 9, 0, 0, 0, time.UTC) }
+	c.Now = func() time.Time { return time.Date(2030, 1, 10, 12, 0, 0, 0, time.UTC) }
 	gcp := c.Model().Connections[0]
 	steps := []struct {
 		op string

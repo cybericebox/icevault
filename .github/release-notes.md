@@ -2,6 +2,8 @@ IceVault {{VERSION}}
 
 ## Changes since v0.7.1
 
+- Secret values may have an expiry date (the native KeePass expiry, so KeePassXC shows it): a date field and badges in the window, `icevault expiring`, expired and soon-expiring lines in `status`, and stderr warnings from `export`, `export-app` and `session` about expired values they use.
+
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 ## What is here

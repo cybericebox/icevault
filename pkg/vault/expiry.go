@@ -7,12 +7,20 @@ import (
 )
 
 // The expiry of an entry is the native KeePass one (the "Expires" tick and the expiry time of the entry), so KeePassXC shows it and marks the entry
-// when it has passed. A date is kept as the last second of that day (UTC): the entry is valid through its date.
+// when it has passed. A date is kept as the last second of that day in the LOCAL time zone of the machine (the entry is valid through its date), and an
+// instant is read as the local day it falls on: KeePassXC shows an expiry in local time too, and the file keeps no zone (it is UTC). The same date on
+// machines in other zones can differ by a day; a date that is already the same local day is never rewritten.
 
-// ExpiryEnd is the instant an expiry date stands for: the last second of that day in UTC.
+// ExpiryEnd is the instant an expiry date stands for: the last second of that day in the local time zone of the machine (day only gives the date).
 func ExpiryEnd(day time.Time) time.Time {
 	y, m, d := day.Date()
-	return time.Date(y, m, d, 23, 59, 59, 0, time.UTC)
+	return time.Date(y, m, d, 23, 59, 59, 0, time.Local)
+}
+
+// ExpiryDay is the date (as a UTC midnight) an expiry instant falls on in the local time zone: the day KeePassXC shows for it.
+func ExpiryDay(t time.Time) time.Time {
+	y, m, d := t.In(time.Local).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // Expiry returns the expiry time of an entry; ok is false when the entry does not expire.
@@ -43,10 +51,10 @@ func (v *Vault) SetExpiry(path string, day time.Time) error {
 		v.touch(e)
 		return nil
 	}
-	end := ExpiryEnd(day)
-	if on && cur.Equal(end) {
-		return nil
+	if on && ExpiryDay(cur).Equal(time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)) {
+		return nil // the same day, whatever the time of day KeePassXC keeps: not touched
 	}
+	end := ExpiryEnd(day)
 	v.snapshot(e)
 	t := now(v)
 	t.Time = end

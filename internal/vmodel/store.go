@@ -226,7 +226,15 @@ func Load(v *vault.Vault) (*Vault, error) {
 			}
 			sort.Strings(names)
 			for _, n := range names {
-				c.Fields = append(c.Fields, &Field{Name: n, Value: fs[n].Value, Secret: fs[n].Protected, Expires: fs[fExpiresPrefix+n].Value})
+				exp := fs[fExpiresPrefix+n].Value
+				if _, err := ParseDay(exp); err != nil {
+					prob("connection %s field %s: the expiry is not a date (YYYY-MM-DD) and is ignored", c.Name, n)
+					exp = ""
+				}
+				c.Fields = append(c.Fields, &Field{Name: n, Value: fs[n].Value, Secret: fs[n].Protected, Expires: exp})
+			}
+			if d := dayOf(i); d != "" && connExpiry(c) == "" {
+				importEntryExpiry(c, d)
 			}
 			m.Connections = append(m.Connections, c)
 			connByUUID[c.UUID] = c
