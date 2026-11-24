@@ -295,6 +295,9 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 		assertCoded(t, "NewVaultProject refused", n.NewVaultProject("t"))
 		covered["NewVaultPlace"], covered["NewVaultProject"], covered["CreateVault"], covered["SaveRecoveryKit"] = true, true, true, true
 	}
+	assertCoded(t, "NewVaultNoProject off", l.NewVaultNoProject())
+	assertCoded(t, "UseWithoutProject off", l.UseWithoutProject())
+	covered["NewVaultNoProject"], covered["UseWithoutProject"] = true, true
 	assertCoded(t, "NewVaultPlace off", l.NewVaultPlace("t"))
 	assertCoded(t, "NewVaultProject off", l.NewVaultProject("t"))
 	assertCoded(t, "CreateVault off", l.CreateVault("a", "a", false))

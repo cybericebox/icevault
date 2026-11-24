@@ -20,6 +20,8 @@ Or download a release: `IceVault-vX.Y.Z-macos.dmg` (the window with the command 
 
 ```
 icevault init-vault [--generate]        a new vault at the path the description names; --generate makes a six-word passphrase
+icevault init-vault --no-project --vault PATH
+                                       a vault without a project, anywhere (no environments)
 icevault project check                 validate the project description
 icevault project used --env E          which files an environment reads (JSON)
 icevault trust [--forget]              trust the description and its required-check script
@@ -48,6 +50,14 @@ A new vault (`init-vault`, or **New vault** in the window) needs a master passwo
 `icevault init-vault --generate` makes a passphrase of six random words from the [EFF large wordlist](https://www.eff.org/dice) (drawn from the system's random source), shows it once on the terminal and asks for it to be typed back before anything is made. It is never written to a file or a log.
 
 In the window, **New vault** (on the lock screen, beside Open vault) asks for the project folder first (the one with `icevault-project.yaml`), offers the vault file its description names as the place (the system save dialog changes it; the vault still opens with that project), a password with a live strength meter or **Generate**, and the password again. It can also switch on Touch ID for the new vault and save a **recovery kit**: a small text file (mode 0600) with the vault's name and path, the date and the password, to a place you choose with the save dialog. Keep it away from the vault file (another device, paper, a password manager). It is the only time the window writes the password anywhere, and nothing is written until you press Create (the recovery kit only where you choose to save it).
+
+## A vault without a project
+
+A vault normally belongs to a project (the folder with `icevault-project.yaml`: environments, products, the files the deploy scripts read). A vault can also be used **without a project**: it then has no environments, only the shared secrets, the connections and the other secrets, which the window opens and edits. Nothing is written for the project: no `icevault-project.yaml` is made. The vault is marked in its info file next to it (`<vault>.info.json`).
+
+- `icevault init-vault --no-project --vault PATH` makes such a vault anywhere (`--vault PATH` or `ICEVAULT_VAULT` names the file).
+- In the window, **New vault** offers **Without a project** beside the project folder; a vault that lies in no project (the lock screen asks for a checkout folder) can be opened with **Open without a project**.
+- A command that needs environments (`status`, `view`, `import`, `export`, `export-app`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
 
 ## Development
 

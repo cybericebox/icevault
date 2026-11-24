@@ -103,6 +103,7 @@ type App struct {
 	strength    sync.Mutex // one password estimate at a time (newvault.go)
 	newRoot     string     // the project folder chosen for a new vault, and the file its description names
 	newDefault  string
+	newNoProj   bool         // a vault without a project was chosen for the new vault
 	newPath     string       // the place the person chose for a new vault (newvault.go)
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 
@@ -371,7 +372,7 @@ func (a *App) status() map[string]any {
 	if left < 0 {
 		left = 0
 	}
-	return map[string]any{"locked": a.core == nil, "mode": a.mode, "touchid": a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
+	return map[string]any{"locked": a.core == nil, "mode": a.mode, keyTouchID: a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
 		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault}
 }
 

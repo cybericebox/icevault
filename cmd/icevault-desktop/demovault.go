@@ -77,7 +77,7 @@ func (u *demoUnlocker) Open(password []byte) (desktop.Core, error) {
 		v.Close()
 		return nil, err
 	}
-	c, err := newModelCore(v, plat, env, env.Root)
+	c, err := newModelCore(v, plat, env, env.Root, false)
 	if err != nil {
 		v.Close()
 		return nil, err

@@ -21,13 +21,13 @@ func TestMakerAppliesThePolicyAndMakesAnOpenableVault(t *testing.T) {
 		t.Fatal("no maker for a list of vaults on files")
 	}
 	p := filepath.Join(t.TempDir(), "v.kdbx")
-	if err := m.Create(p, []byte("Qwerty123456!asdf")); err == nil {
+	if err := m.Create(p, []byte("Qwerty123456!asdf"), false); err == nil {
 		t.Fatal("a weak password made a vault")
 	}
 	if _, err := os.Stat(p); err == nil {
 		t.Fatal("a file was written for a refused password")
 	}
-	if err := m.Create(p, []byte(newPW)); err != nil {
+	if err := m.Create(p, []byte(newPW), false); err != nil {
 		t.Fatal(err)
 	}
 	if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o600 {
@@ -38,7 +38,7 @@ func TestMakerAppliesThePolicyAndMakesAnOpenableVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Close()
-	if err := m.Create(p, []byte(newPW)); err == nil {
+	if err := m.Create(p, []byte(newPW), false); err == nil {
 		t.Fatal("an existing vault was overwritten")
 	}
 	if makerFor(nil) != nil {
@@ -164,5 +164,88 @@ func TestNoMakerNoNewVault(t *testing.T) {
 	a := desktop.New(desktop.Options{Unlocker: &desktop.MemoryUnlocker{Password: "throwaway"}})
 	if r := a.NewVaultPlace("t"); r.Status != 409 {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// A vault without a project through the real list and the real unlocker: made anywhere with the save dialog, marked in its info file (no description is
+// written), opened with no description, and the window's model reads (the shared secrets, connections and other secrets live on the vault alone).
+func TestNewVaultWithoutAProjectThroughTheApp(t *testing.T) {
+	env, _ := testEnv(t, nil)
+	f := newFileVaults(env)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "loose.kdbx")
+	a := desktop.New(desktop.Options{Vaults: f, Maker: makerFor(f),
+		PickSave: func(string, string, string) (string, error) { return target, nil }})
+	if r := a.NewVaultNoProject(); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if r := a.NewVaultPlace("t"); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if r := a.CreateVault(newPW, newPW, false); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if !cli.IsNoProject(target) {
+		t.Fatal("the vault is not marked as one without a project")
+	}
+	if d, _ := a.ListVaults().Data.(map[string]any); d["problem"] != nil {
+		t.Fatalf("the lock screen asks something: %+v", d["problem"])
+	}
+	if r := a.Unlock("password", newPW); r.Status != 200 {
+		t.Fatalf("the vault without a project does not unlock: %+v", r)
+	}
+	if r := a.Read("nav", map[string]any{}); r.Status != 200 {
+		t.Fatalf("the window cannot read the vault without a project: %+v", r)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".yaml" || filepath.Ext(e.Name()) == ".yml" {
+			t.Fatalf("a project description was written: %s", e.Name())
+		}
+	}
+}
+
+// A vault that lies in no project: the lock screen asks for a checkout; "without a project" marks it and opens it.
+func TestOpenALooseVaultWithoutAProject(t *testing.T) {
+	env, _ := testEnv(t, nil)
+	f := newFileVaults(env)
+	target := filepath.Join(t.TempDir(), "loose.kdbx")
+	if err := env.NewVault(target, []byte(newPW), "", "IceVault", 0, false); err != nil { // made the old way: in no project, not marked
+		t.Fatal(err)
+	}
+	a := desktop.New(desktop.Options{Vaults: f, Vault: target, Maker: makerFor(f)})
+	d, _ := a.ListVaults().Data.(map[string]any)
+	if p, _ := d["problem"].(map[string]any); p == nil || p["code"] != "vault_needs_root" {
+		t.Fatalf("%+v", d["problem"])
+	}
+	if r := a.UseWithoutProject(); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if !cli.IsNoProject(target) {
+		t.Fatal("not marked")
+	}
+	if r := a.Unlock("password", newPW); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	if r := a.Read("nav", map[string]any{}); r.Status != 200 {
+		t.Fatalf("%+v", r)
+	}
+	// still opens after a new start of the window (the mark is in the info file, not in memory)
+	b := desktop.New(desktop.Options{Vaults: newFileVaults(env), Vault: target})
+	if d, _ := b.ListVaults().Data.(map[string]any); d["problem"] != nil {
+		t.Fatalf("after a restart: %+v", d["problem"])
+	}
+	// a vault found inside a project does not use the mark
+	root := checkout(t)
+	inside := filepath.Join(root, "plain", "vault", "in.kdbx")
+	if err := env.NewVault(inside, []byte(newPW), "", "IceVault", 0, true); err != nil {
+		t.Fatal(err)
+	}
+	prep, err := f.Prepare(inside)
+	if err != nil || prep.Unlocker == nil {
+		t.Fatalf("%v", err)
+	}
+	if u, ok := prep.Unlocker.(*vaultUnlocker); !ok || u.plat == nil {
+		t.Fatal("a vault inside a project lost its project because it carries the mark")
 	}
 }
