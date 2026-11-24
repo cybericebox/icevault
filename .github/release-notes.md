@@ -1,15 +1,12 @@
 IceVault {{VERSION}}
 
-## From 0.4
+## From 0.5
 
-IceVault no longer knows anything about a particular project: everything project-specific comes from the project description, `icevault-project.yaml` at the root of the checkout (`icevault project check` validates it).
+- **A new vault needs a strong master password.** `init-vault` and the window refuse a password shorter than 12 characters or one a strength estimate (zxcvbn) finds guessable: dictionary words, keyboard walks, repeats, dates, patterns such as `Qwerty123!`. A password longer than 256 characters is refused too. Only a new vault is checked: an existing vault opens as before, whatever its password. A vault with a key file and no password is still allowed.
+- **`icevault init-vault --generate`** makes the password for you: six random words from the EFF large wordlist (about 77 bits), shown once on the terminal and typed back to confirm you recorded it.
+- **New vault… in the window**, next to Open vault…: choose where the file goes, type a password (with a strength meter) or press Generate, type it once more, then optionally turn on Touch ID and save a **recovery kit**: a small text file (mode 0600) with the vault name, path, date and password. Keep the recovery kit away from the vault file: another device, paper, or your password manager. A new vault joins the list of recent vaults at its first unlock.
 
-- The description is in **format 2**: it declares the checkout layout (templates, committed settings, plaintext trees, the vault file), the conditions under which each file is read (`used-when`, `partly-used`), the files kept in the vault (`kept-files`, guards), the files left out, the session, the apps, `required-when` of a variable and `serve-as` of a vault connection. A format 1 description is refused: set `format: 2` and add what `icevault project check` reports.
-- The vault format stays 1. A vault still in the layout before the vault model (IceVault 0.2) is refused: move it with IceVault 0.4 first (`icevault migrate --apply`), then open it with this version. `migrate` itself is gone.
-- The environment variables are renamed: `ICEVAULT_ROOT`, `ICEVAULT_PROJECT`, `ICEVAULT_VAULT`, `ICEVAULT_KEYFILE`, `ICEVAULT_NO_VAULT`, `ICEVAULT_NO_TOUCHID`, `ICEVAULT_TOUCHID_DIR`, `ICEVAULT_ERROR_FILE`, `ICEVAULT_CONFIG_DIR`. The variables of a session take the names the description gives (`session.variables`).
-- The list of vaults of the window keeps the checkout of each vault under the key `checkout`: choose the folder of a vault once more after the update. The window's own choices (language, theme, widths) start from the defaults once.
-- The info file next to the vault records the guarded files per guard word (`guards`); the first unlock after the update writes it.
-- The required-check of a description is a script inside the checkout run with `sh`, `bash` or `python3 -I`, without a shell, and only after `icevault trust` has recorded the SHA-256 of the description and of the script for your user.
+Coming from 0.4: read the notes of 0.5.0 first (project description format 2, renamed variables, `migrate` gone).
 
 ## What is here
 
