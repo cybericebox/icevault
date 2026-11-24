@@ -221,7 +221,7 @@ func TestModelTablesShareOneLayout(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`["name", "32%"], ["value", "38%"], ["labels", "auto"]`, "n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD", `el("td", "emptycell")`,
+		`["name", "32%"], ["value", "38%"], ["labels", "auto"]`, "n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD", "const slotOf = (b)", `t("m.empty.hidden")`, `el("td", "emptycell")`,
 		".mtable .abox { display:flex; justify-content:flex-end;", ".mtable td.emptycell {", ".mblock-h { display:flex; align-items:center; gap:8px; min-height:32px; }",
 	} {
 		if !strings.Contains(page, want) {

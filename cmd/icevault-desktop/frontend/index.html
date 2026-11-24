@@ -2808,7 +2808,12 @@ function mnamecell(label, key, mono, help) {
 }
 function mactcell() { const td = el("td", "acts"); const box = el("div", "abox"); td.append(box); return [td, box]; }
 function mtable(parent, rows, empty) {
-  const tb = el("table", "rows mtable"); const cg = el("colgroup"); const n = Math.max(1, ...rows.map((r) => (r.querySelector(".abox") || { children: [] }).children.length));
+  // the buttons of a row sit in fixed slots (eye, edit, remove): a slot that some row of the table uses is an empty placeholder in the rows without it
+  const slotOf = (b) => { const u = b.querySelector && b.querySelector("use"); const h = u ? u.getAttribute("href") : ""; return h === "#i-eye" || h === "#i-eye-off" ? 0 : h === "#i-edit" ? 1 : h === "#i-archive" || h === "#i-x" ? 2 : -1; };
+  const used = [false, false, false]; rows.forEach((r) => { const ab = r.querySelector(".abox"); if (ab) [...ab.children].forEach((b) => { const s = slotOf(b); if (s >= 0) used[s] = true; }); });
+  rows.forEach((r) => { const ab = r.querySelector(".abox"); if (!ab) return; const have = [...ab.children]; ab.textContent = ""; used.forEach((u, s) => { if (!u) return; const b = have.find((x) => slotOf(x) === s); ab.append(b || el("span", "islot")); }); });
+  const n = Math.max(1, used.filter(Boolean).length);
+  const tb = el("table", "rows mtable"); const cg = el("colgroup");
   [["name", "32%"], ["value", "38%"], ["labels", "auto"], ["acts", (n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD) + "px"]].forEach(([c, w]) => { const x = el("col", "c-" + c); if (w !== "auto") x.style.width = w; cg.append(x); }); tb.append(cg);
   const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
   const body = el("tbody");
@@ -2843,12 +2848,11 @@ function mvars(parent, rows, scope, opts) {
     const [ac, ab] = mactcell();
     if (r.state !== "empty" && r.visibility === "secret" && !r.imported) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k)));
     if (editing() && !r.system && !(r.imported && !r.overridden && opts.general)) ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mvarDialog(scope, r)));
-    if (editing() && r.imported && !r.overridden && opts.onUnimport) ab.append(el("span", "islot"), ibtn("x", t("m.env.unimport", { name: mlabel(r) }), () => opts.onUnimport(r.key)));   // an imported value can be taken out again from here
-    if (editing() && !r.missing && !(r.imported && !r.overridden) && r.system) ab.append(el("span", "islot")); // keeps the delete button in its column
+    if (editing() && r.imported && !r.overridden && opts.onUnimport) ab.append(ibtn("x", t("m.env.unimport", { name: mlabel(r) }), () => opts.onUnimport(r.key)));   // an imported value can be taken out again from here
     if (editing() && !r.missing && !(r.imported && !r.overridden)) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), scope === "shared" && r.users && r.users.length ? t("m.confirm_shared_used.note", { list: r.users.join(", ") }) : t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
     tr.append(nc, vc, kc, ac); trs.push(tr);
   });
-  mtable(parent, trs);
+  mtable(parent, trs, t("m.empty.hidden"));
   if (hidden || (munused && rows.some((r) => r.active === false))) { const u = el("button", "side-add mtoggle"); u.type = "button"; u.setAttribute("aria-pressed", String(munused)); u.append(icon(munused ? "eye-off" : "eye"), el("span", "t", munused ? t("m.hide_unused") : t("m.show_unused", { n: hidden }))); u.addEventListener("click", () => { munused = !munused; renderMMain(); }); parent.append(u); }
 }
 
