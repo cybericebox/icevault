@@ -101,3 +101,43 @@ func TestAKindOnlyTheDescriptionKnowsStaysInTheVault(t *testing.T) {
 		t.Fatalf("a connection of a kind this tool does not know is kept: %v", errs)
 	}
 }
+
+// A sealed value never moves, in any path: it stays an own value with its visibility, and the adoption names it as kept.
+func TestAdoptConnectionsNeverMovesASealedValue(t *testing.T) {
+	d := descWithKind(t)
+	m, p := portalWithOwnValues(t)
+	for _, x := range p.Vars {
+		if x.Key == "BILLING_ACCOUNT" {
+			x.Vis = VisSealed
+			x.Value = "sealed-secret-9"
+		}
+	}
+	plan, err := AdoptConnections(m, d, "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 1 || strings.Join(plan[0].Variables, ",") != "ANALYTICS_ID" || strings.Join(plan[0].Sealed, ",") != "BILLING_ACCOUNT" || strings.Join(plan[0].Conflicts, ",") != "BILLING_ACCOUNT" {
+		t.Fatalf("%+v", plan)
+	}
+	kept := false
+	for _, x := range p.Vars {
+		if x.Key == "BILLING_ACCOUNT" {
+			kept = x.Vis == VisSealed && x.Value == "sealed-secret-9"
+		}
+	}
+	if !kept {
+		t.Fatal("the sealed value moved or lost its visibility")
+	}
+	if f := m.Connection("Stats").Field("token"); f != nil && f.Value != "" {
+		t.Fatal("the sealed value is in the connection")
+	}
+	// only sealed values: nothing moves and no connection is made
+	m2, p2 := portalWithOwnValues(t)
+	p2.Vars = p2.Vars[:1]
+	p2.Vars = append(p2.Vars, &Var{Key: "ANALYTICS_ID", Value: "x", Vis: VisSealed})
+	n := len(m2.Connections)
+	plan2, _ := AdoptConnections(m2, d, "prod")
+	if len(plan2) != 1 || plan2[0].Count() != 0 || len(m2.Connections) != n || len(p2.Connections) != 1 {
+		t.Fatalf("%+v", plan2)
+	}
+}

@@ -31,8 +31,11 @@ func runAdopt(e *Env, a envArgs, out io.Writer, v *vault.Vault, plat *render.Pro
 		if x.Count() > 0 {
 			fmt.Fprintf(out, "  %s: %s -> connection %s [%s]%s\n", x.Product, strings.Join(x.Variables, ", "), x.Connection, x.Kind, made)
 		}
-		if len(x.Conflicts) > 0 {
-			fmt.Fprintf(out, "  %s: kept as they are, the connection %s holds another value: %s\n", x.Product, x.Connection, strings.Join(x.Conflicts, ", "))
+		if rest := without(x.Conflicts, x.Sealed); len(rest) > 0 {
+			fmt.Fprintf(out, "  %s: kept as they are, the connection %s holds another value: %s\n", x.Product, x.Connection, strings.Join(rest, ", "))
+		}
+		if len(x.Sealed) > 0 {
+			fmt.Fprintf(out, "  %s: kept as they are, sealed (a sealed value never moves): %s\n", x.Product, strings.Join(x.Sealed, ", "))
 		}
 	}
 	if moved == 0 {
@@ -58,4 +61,19 @@ func runAdopt(e *Env, a envArgs, out io.Writer, v *vault.Vault, plat *render.Pro
 	fmt.Fprintf(out, "env adopt-connections: %d value(s) of %s moved into connections; no value was printed\n", moved, a.env)
 	afterChange(v.Path(), before, out)
 	return 0, nil
+}
+
+// without lists the names of a that are not in b.
+func without(a, b []string) []string {
+	var out []string
+	for _, x := range a {
+		keep := true
+		for _, y := range b {
+			keep = keep && x != y
+		}
+		if keep {
+			out = append(out, x)
+		}
+	}
+	return out
 }

@@ -424,11 +424,11 @@ func (c *Core) adoptView(env string) []map[string]any {
 		return out
 	}
 	for _, a := range plan {
-		if a.Count() == 0 {
+		if a.Count() == 0 && len(a.Sealed) == 0 {
 			continue
 		}
 		k, _ := c.kinds().Kind(a.Kind)
-		out = append(out, map[string]any{jProduct: a.Product, jKind: a.Kind, "kind_title": k.Title, "kind_titles": map[string]string(k.TitleText), jConn: a.Connection, "new": a.New, "variables": a.Variables, "conflicts": a.Conflicts})
+		out = append(out, map[string]any{jProduct: a.Product, jKind: a.Kind, "kind_title": k.Title, "kind_titles": map[string]string(k.TitleText), jConn: a.Connection, "new": a.New, "variables": a.Variables, "conflicts": a.Conflicts, "sealed": a.Sealed})
 	}
 	return out
 }

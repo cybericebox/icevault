@@ -22,6 +22,9 @@ type Adoption struct {
 	Variables []string
 	// Conflicts are variables whose connection field already holds another value: they stay where they are.
 	Conflicts []string
+	// Sealed are variables that stay where they are because their value is sealed (never shown, never moved: a connection field can be revealed).
+	// They are also listed in Conflicts.
+	Sealed []string
 }
 
 // Count is the number of values the adoption moves.
@@ -95,12 +98,21 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		vis   string
 	}
 	var moves []move
+	var sealed []string
 	for _, v := range use.Variables {
 		if v.Field == "" {
 			continue
 		}
 		homes := ownValue(d, e, p, v.Name)
 		if len(homes) == 0 {
+			continue
+		}
+		isSealed := false
+		for _, h := range homes {
+			isSealed = isSealed || h.v.Vis == VisSealed
+		}
+		if isSealed {
+			sealed = append(sealed, v.Name) // a sealed value never moves: the visibility is never lowered
 			continue
 		}
 		mv := move{name: v.Name, field: v.Field, homes: homes, vis: VisPlain}
@@ -117,10 +129,10 @@ func adoptUse(m *Vault, d *project.Description, e *Environment, p *Product, use 
 		}
 		moves = append(moves, mv)
 	}
+	a := Adoption{Product: p.Name, Kind: use.Kind, Sealed: sealed, Conflicts: append([]string(nil), sealed...)}
 	if len(moves) == 0 {
-		return Adoption{}, false
+		return a, len(sealed) > 0
 	}
-	a := Adoption{Product: p.Name, Kind: use.Kind}
 	c := adoptTarget(m, d, p, use)
 	if c == nil {
 		k, _ := d.Kinds().Kind(use.Kind)

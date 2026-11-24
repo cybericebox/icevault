@@ -3096,9 +3096,12 @@ function mEnv(main) {
 function madoptBanner(main, e) {
   const n = e.adopt.reduce((s, a) => s + a.variables.length, 0);
   const kinds = e.adopt.map((a) => ckTitle(a.kind)).filter((x, i, l) => l.indexOf(x) === i).join(", ");
+  const sealed = e.adopt.reduce((l, a) => l.concat(a.sealed || []), []);
   const b = el("div", "banner"); b.append(icon("info")); const d = el("div");
-  d.append(el("div", "", t("m.adopt.banner", { n, kind: kinds })), el("div", "dim", e.adopt.map((a) => t("m.adopt.line", { product: a.product, list: a.variables.join(", "), connection: a.connection })).join(" · ")));
+  if (n) d.append(el("div", "", t("m.adopt.banner", { n, kind: kinds })), el("div", "dim", e.adopt.filter((a) => a.variables.length).map((a) => t("m.adopt.line", { product: a.product, list: a.variables.join(", "), connection: a.connection })).join(" · ")));
+  if (sealed.length) d.append(el("div", n ? "dim" : "", t("m.adopt.sealed", { list: sealed.join(", ") })));
   b.append(d);
+  if (!n) { main.append(b); return; }
   const go = btn(t("m.adopt.move"), "refresh", () => confirmBox(t("m.adopt.title", { n }), t("m.adopt.note"), t("m.adopt.move"), { onOk: async () => { const r = await api("/api/m-env-adopt", { env: e.name }); if (r.status !== 200) return srv(r.data); await mreload(); say(t("m.adopt.done", { n }), "ok"); return true; } }), "primary");
   b.append(go); main.append(b);
 }
