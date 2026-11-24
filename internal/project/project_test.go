@@ -128,7 +128,7 @@ func TestValidationOfFormat2(t *testing.T) {
 }
 
 func TestValidationListsEveryProblem(t *testing.T) {
-	bad := `format: 3
+	bad := `format: 4
 name: ""
 files: [a.env, a.env, /abs]
 general:
@@ -156,7 +156,7 @@ derived:
 	if err == nil {
 		t.Fatal("accepted")
 	}
-	want := []string{"format is 3", "name is empty", "a.env twice", "not a relative path", "is not a variable name", "nope.env is not in files", "a condition is",
+	want := []string{"format is 4", "name is empty", "a.env twice", "not a relative path", "is not a variable name", "nope.env is not in files", "a condition is",
 		"the condition names NOPE, which the description does not have", "language", "moon-base: not a site kind", "a local kind has no connection", "lower case letters",
 		"connection kind \"ftp\"", "names its field", "from is site.provider"}
 	all := strings.Join(err.(*Errors).List, "\n")

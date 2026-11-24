@@ -62,8 +62,10 @@ cmd "env" help=#"Create an environment, or add what it lacks, from the project d
     }
   }
   flag "--from-checkout" help=#"take the site kind and the products from the committed settings"# global=#true
+  flag "--dry-run" help=#"list what would move and change nothing"# global=#true
   cmd "create" help=#"make the environment with its site and products"#
   cmd "fill-missing" help=#"add the entries an environment lacks"#
+  cmd "adopt-connections" help=#"move own values into the connections the description now gives them"#
 }
 cmd "trust" help=#"Trust the project description (its required-check may run)"# {
   flag "--forget" help=#"remove the record"#

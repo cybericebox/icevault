@@ -215,13 +215,13 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 		kind, _ := kinds.SiteKind(s.Kind)
 		if use := sk.Connection; use != nil && use.Kind == kind.Connection {
 			if s.Connection == nil {
-				s.Connection = connFor(m, use, rep)
+				s.Connection = connFor(m, d, use, rep)
 			}
 			addFields(s.Connection, use)
 		}
 		if use := sk.State; use != nil && kind.State {
 			if s.State == nil {
-				s.State = connFor(m, use, rep)
+				s.State = connFor(m, d, use, rep)
 			}
 			addFields(s.State, use)
 		}
@@ -262,7 +262,7 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 				if use.Optional {
 					continue
 				}
-				c = connFor(m, use, rep)
+				c = connFor(m, d, use, rep)
 				p.Connections = append(p.Connections, c)
 			}
 			addFields(c, use)
@@ -273,8 +273,8 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 
 // connFor is the connection a use links: the one of its name and kind, else the only one of its kind, else a new empty one (named by the use
 // or the kind, made unique).
-func connFor(m *Vault, use *project.ConnectionUse, rep *FillReport) *Connection {
-	k, _ := kinds.ConnectionKind(use.Kind)
+func connFor(m *Vault, d *project.Description, use *project.ConnectionUse, rep *FillReport) *Connection {
+	k, _ := d.Kinds().Kind(use.Kind)
 	name := or(use.Name, k.Title)
 	if name == "" {
 		name = use.Kind

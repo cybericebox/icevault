@@ -5,6 +5,7 @@ import (
 
 	"github.com/cybericebox/icevault/internal/desktop"
 	"github.com/cybericebox/icevault/internal/kinds"
+	"github.com/cybericebox/icevault/internal/project"
 	"github.com/cybericebox/icevault/internal/render"
 	"github.com/cybericebox/icevault/internal/vmodel"
 )
@@ -20,6 +21,7 @@ import (
 //	m-env        {action: create|copy|update|delete, name, from?, new_name?, title?, confirm?}
 //	m-other      {action: create|update|delete, uuid?, title, value?, notes?}
 //	m-env-fill   {env}                                                              every owner variable the description says the environment needs, empty
+//	m-env-adopt  {env}                                                              move the own values a connection of the description now takes over into it
 //	m-project    {path}                                                             remember the project description file the window was given
 //
 // A change that something uses (renaming or removing a used connection or site, removing an environment, changing the connection of a site that
@@ -70,6 +72,8 @@ func (c *Core) Write(op string, a map[string]any) (any, error) {
 		err = c.writeEnv(a)
 	case "m-other":
 		err = c.writeOther(a)
+	case "m-env-adopt":
+		err = c.writeAdopt(a)
 	case "m-env-fill":
 		var rep *vmodel.FillReport
 		if rep, err = c.fillEnv(str(a, jEnv)); err == nil {
@@ -98,6 +102,16 @@ func (c *Core) Write(op string, a map[string]any) (any, error) {
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (c *Core) writeAdopt(a map[string]any) error {
+	if c.d == nil {
+		return refuse("not_found", nil)
+	}
+	if _, err := vmodel.AdoptConnections(c.m, c.d, str(a, jEnv)); err != nil {
+		return refuse("no_env", map[string]any{jEnv: str(a, jEnv)})
+	}
+	return nil
 }
 
 func (c *Core) commit() error {
@@ -285,7 +299,7 @@ func (c *Core) writeConnection(a map[string]any) error {
 	name := strings.TrimSpace(str(a, jName))
 	switch str(a, "action") {
 	case actCreate:
-		if _, ok := kinds.ConnectionKind(str(a, jKind)); !ok {
+		if _, ok := c.kinds().Kind(str(a, jKind)); !ok {
 			return refuse("bad_kind", nil)
 		}
 		if !vmodel.ValidConnectionName(name) {
@@ -375,14 +389,23 @@ func (c *Core) writeField(a map[string]any) error {
 		x.Fields = keep
 		return nil
 	}
-	k, _ := kinds.ConnectionKind(x.Kind)
+	k, known := c.kinds().Kind(x.Kind)
+	if !known {
+		return refuse("unknown_kind", map[string]any{jKind: x.Kind}) // read only: this vault was opened without the description that declares the kind
+	}
 	secret := flag(a, "secret")
-	if kf := k.Field(name); kf != nil {
+	kf := k.Field(name)
+	if kf != nil {
 		secret = secret || kf.Secret
 	}
 	v := str(a, "value")
-	if strings.ContainsAny(v, "\n\r") {
+	if strings.ContainsAny(v, "\n\r") && (kf == nil || !kf.Multiline) {
 		return refuse("line_break", nil)
+	}
+	if kf != nil && k.Declared {
+		if rule := (project.Variable{Type: kf.Type, Choices: kf.Choices, Pattern: kf.Pattern}).ValueProblem(v); rule != "" {
+			return refuse("bad_value", map[string]any{jKey: name, "rule": rule})
+		}
 	}
 	if f := x.Field(name); f != nil {
 		if has(a, "value") {
@@ -498,8 +521,8 @@ func (c *Core) writeSite(a map[string]any) error {
 // siteConnections sets the connection and the state connection of a site from the args (uuid, "" for none) when they are given.
 func (c *Core) siteConnections(s *vmodel.Site, a map[string]any) error {
 	sk, _ := kinds.SiteKind(s.Kind)
-	if has(a, "connection") {
-		u := str(a, "connection")
+	if has(a, jConn) {
+		u := str(a, jConn)
 		if u == "" {
 			s.Connection = nil
 		} else if x := c.connByUUID(u); x == nil {

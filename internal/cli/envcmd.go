@@ -20,6 +20,7 @@ const (
 	cmdEnv      = "env"
 	envCreate   = "create"
 	envFill     = "fill-missing"
+	envAdopt    = "adopt-connections"
 	flagFromCO  = "from-checkout"
 	flagProduct = "products"
 )
@@ -27,12 +28,13 @@ const (
 type envArgs struct {
 	sub, env, site, products string
 	fromCheckout             bool
+	dryRun                   bool
 }
 
 func parseEnvArgs(e *Env, args []string) (envArgs, error) {
 	var a envArgs
-	if len(args) == 0 || (args[0] != envCreate && args[0] != envFill) {
-		return a, &parseErr{msg: "env needs create or fill-missing"}
+	if len(args) == 0 || (args[0] != envCreate && args[0] != envFill && args[0] != envAdopt) {
+		return a, &parseErr{msg: "env needs create, fill-missing or adopt-connections"}
 	}
 	a.sub = args[0]
 	if _, err := parse("env "+a.sub, args[1:], e, 0, func(fs *flag.FlagSet) {
@@ -40,14 +42,21 @@ func parseEnvArgs(e *Env, args []string) (envArgs, error) {
 		fs.StringVar(&a.site, "site", "", "")
 		fs.StringVar(&a.products, flagProduct, "", "")
 		fs.BoolVar(&a.fromCheckout, flagFromCO, false, "")
+		fs.BoolVar(&a.dryRun, "dry-run", false, "")
 	}); err != nil {
 		return a, err
 	}
 	if a.env == "" {
 		return a, &parseErr{msg: "env " + a.sub + " needs --env E"}
 	}
-	if a.sub == envFill && (a.site != "" || a.products != "" || a.fromCheckout) {
+	if a.sub == envFill && (a.site != "" || a.products != "" || a.fromCheckout || a.dryRun) {
 		return a, &parseErr{msg: "env fill-missing takes only --env E: the environment has its site and products"}
+	}
+	if a.sub == envAdopt && (a.site != "" || a.products != "" || a.fromCheckout) {
+		return a, &parseErr{msg: "env adopt-connections takes only --env E and --dry-run"}
+	}
+	if a.sub == envCreate && a.dryRun {
+		return a, &parseErr{msg: "--dry-run is for env adopt-connections"}
 	}
 	return a, nil
 }
@@ -157,6 +166,9 @@ func runEnv(e *Env, args []string, out io.Writer, v *vault.Vault, plat *render.P
 	m, err := vmodel.Load(v)
 	if err != nil {
 		return 1, fail("%v", err)
+	}
+	if a.sub == envAdopt {
+		return runAdopt(e, a, out, v, plat, m)
 	}
 	before, _ := sha256File(v.Path())
 	var rep *vmodel.FillReport

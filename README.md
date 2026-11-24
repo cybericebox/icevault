@@ -4,6 +4,41 @@ IceVault keeps every setting and secret of every environment of a project in **o
 
 IceVault knows nothing about a particular project. A project describes itself in `icevault-project.yaml` at the root of its checkout: its products, the variables of each, the site kinds it deploys to, the connections they need, the files its scripts read and when, the files it keeps in the vault, the apps that get an env file. The tool only reads that description. `icevault project check` validates it.
 
+## Connection kinds a description declares
+
+A connection is an access to one outside service. IceVault has built-in kinds with their own behaviour (`aws`, `google`, `cloudflare`, `dockerhub`, `hcp`, `s3`, `other`); a description adds kinds of its own with a top-level `connection-kinds:` list, one kind per concrete service, and a product then uses them like a built-in one:
+
+```yaml
+format: 3                      # connection-kinds needs format 3 (IceVault 0.8 or newer); an older IceVault refuses the file by its format number
+connection-kinds:
+  - id: mailer                 # lower case letters, digits, dashes; never a built-in id
+    title: {en: Mail relay}      # en is required; uk and ru are optional (a missing language falls back to en)
+    help: {en: What the service is for.}
+    fields:
+      - name: host
+        label: {en: Host}                # en, uk, ru
+        help: {en: Where the relay listens.}
+        type: domain                     # string (default), bool, int, email, url, domain, enum
+        required: true
+      - {name: api_key, label: {en: API key}, secret: true, required: true}
+      - {name: mode, type: enum, choices: [live, test]}
+      - {name: signing_key, secret: true, multiline: true}   # a value of several lines
+      - {name: sender, type: email, pattern: ".+@example\\.org"}
+products:
+  - name: portal
+    connections:
+      - kind: mailer
+        optional: true
+        variables:
+          - {name: MAIL_HOST, field: host}
+          - {name: MAIL_KEY, field: api_key, secret: true, required-when: "MAIL_PROVIDER=relay"}
+```
+
+- A variable of a connection of a declared kind takes the type, choices and pattern of its field when it names none.
+- `required-when` on a variable of an optional connection makes the connection needed while the condition holds.
+- A vault opened without the project only has the built-in kinds: connections of any other kind are shown as they are, cannot be edited and are never dropped.
+- When a description starts to take a variable from a connection while an environment still holds it as its own value, `icevault env adopt-connections --env E` (and the banner on the environment screen of the window) moves it: the raw value goes into a connection of that kind (made if need be; a reference stays a reference), the product selects it and the own value is removed. A value the connection already holds differently stays where it is. `--dry-run` prints names only.
+
 A description may name a script that `status` runs to report required values still to fill. It runs only after `icevault trust` has recorded the SHA-256 of the description and of the script for your user, and it runs again only while neither file has changed. The record covers that one script: it runs alone, from a private copy, with `sh`, `bash` or `python3 -I` and no shell; a file it sources or runs is not covered, so read the script before you trust it.
 
 ## Install
@@ -30,6 +65,8 @@ icevault trust [--forget]              trust the description and its required-ch
 icevault env create --env E --site KIND --products a,b[=PLACE] | --from-checkout
                                        a new environment: its site, its products and every variable it needs, as empty entries
 icevault env fill-missing --env E      add the empty entries an environment lacks (nothing that exists changes)
+icevault env adopt-connections --env E [--dry-run]
+                                       move values an environment holds as its own into the connection the description now gives them (names only are printed)
 icevault import --env E [--dry-run]    read the plaintext tree of an environment into the vault
 icevault export --env E --to DIR       write the settings files of an environment
 icevault export-app --env E --app A    write the env file of an app into <dir>/.env (the app's dir: of the description,

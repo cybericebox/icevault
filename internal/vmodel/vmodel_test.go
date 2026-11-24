@@ -111,9 +111,9 @@ func TestCheckRefusesBrokenModels(t *testing.T) {
 	m := sample()
 	m.Envs[0].Sites[0].Connection = m.Connections[2] // the blob store on a Google Cloud site
 	m.Envs[0].Products[0].Site = &Site{Name: "elsewhere", Kind: "compose"}
-	m.Connections = append(m.Connections, &Connection{Name: "a/b", Kind: "ftp"})
+	m.Connections = append(m.Connections, &Connection{Name: "a/b", Kind: "FTP"})
 	errs := strings.Join(m.Check(), "\n")
-	for _, w := range []string{"needs a connection of kind \"google\"", "its site is not a site of prod", "not a name", "unknown kind"} {
+	for _, w := range []string{"needs a connection of kind \"google\"", "its site is not a site of prod", "not a name", "not a kind id"} {
 		if !strings.Contains(errs, w) {
 			t.Errorf("no %q in %s", w, errs)
 		}

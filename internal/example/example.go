@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 //go:embed all:checkout
@@ -44,3 +45,32 @@ func Description() []byte {
 
 // Environments are the environments of the example with a plaintext tree.
 var Environments = []string{"prod", "staging"}
+
+// DescriptionDeclaringKind is the example's description in the shape a project takes after it declares a connection kind of its own (format 3): the
+// portal's ANALYTICS_ID and BILLING_ACCOUNT come from a connection of the declared kind "stats" (a made-up service), not from values of their own.
+func DescriptionDeclaringKind() []byte {
+	s := string(Description())
+	s = strings.Replace(s, "format: 2", "format: 3", 1)
+	s = strings.Replace(s, "      - {name: ANALYTICS_ID, label: {en: Analytics id}}\n", "", 1)
+	s = strings.Replace(s, "      - {name: BILLING_ACCOUNT, label: {en: Billing account}, secret: true}\n", "", 1)
+	s = strings.Replace(s, "products:\n", `connection-kinds:
+  - id: stats
+    title: {en: Stats service, uk: Сервіс статистики}
+    help: {en: Page statistics of the portal.}
+    fields:
+      - {name: site_id, label: {en: Site id, uk: Ідентифікатор сайту}}
+      - {name: token, label: {en: Token}, secret: true}
+products:
+`, 1)
+	s = strings.Replace(s, "    connections:\n      - kind: s3\n        name: Blob store", `    connections:
+      - kind: stats
+        name: Stats
+        optional: true
+        file: services/portal.env
+        variables:
+          - {name: ANALYTICS_ID, field: site_id}
+          - {name: BILLING_ACCOUNT, field: token, secret: true}
+      - kind: s3
+        name: Blob store`, 1)
+	return []byte(s)
+}

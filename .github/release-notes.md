@@ -3,6 +3,8 @@ IceVault {{VERSION}}
 ## Changes since v0.7.1
 
 - Secret values may have an expiry date (the native KeePass expiry, so KeePassXC shows it): a date field and badges in the window, `icevault expiring`, expired and soon-expiring lines in `status`, and stderr warnings from `export`, `export-app` and `session` about expired values they use.
+- A project description can declare its own connection kinds (`connection-kinds:`, format 3): one kind per outside service, with fields, texts in three languages, types and required flags; the window, `project check`, export and status use them like the built-in kinds.
+- `icevault env adopt-connections --env E [--dry-run]` and a banner in the window move values an environment holds as its own into the connection the description now gives them.
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 

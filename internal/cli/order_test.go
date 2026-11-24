@@ -83,7 +83,7 @@ func TestRefusalsAndAnswersComeBeforeThePasswordPrompt(t *testing.T) {
 		{"init-vault: exists", []string{"init-vault"}, 1, "already exists"},
 		{"init-vault --generate: exists", []string{"init-vault", "--generate"}, 1, "already exists"},
 		{"init-vault --no-project: exists", []string{"init-vault", "--no-project"}, 1, "already exists"},
-		{"env: no action", []string{"env", "--env", "qa"}, 2, "env needs create or fill-missing"},
+		{"env: no action", []string{"env", "--env", "qa"}, 2, "env needs create, fill-missing or adopt-connections"},
 		{"env create: no --env", []string{"env", "create", "--site", "compose"}, 2, "needs --env E"},
 		{"env create: bad name", []string{"env", "create", "--env", "Bad", "--site", "compose", "--products", "portal"}, 1, "is not an environment name"},
 		{"env create: no site", []string{"env", "create", "--env", "qa", "--products", "portal"}, 2, "needs --site KIND"},

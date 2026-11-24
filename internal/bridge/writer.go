@@ -724,7 +724,7 @@ func findVar(vs []*vmodel.Var, key string) *vmodel.Var {
 func (w *Writer) newConn(use *project.ConnectionUse) *vmodel.Connection {
 	name := use.Name
 	if name == "" {
-		k, _ := kinds.ConnectionKind(use.Kind)
+		k, _ := w.d.Kinds().Kind(use.Kind)
 		name = k.Title
 	}
 	base := name
@@ -758,7 +758,7 @@ func (w *Writer) connFor(item, key string) (*vmodel.Connection, string) {
 		}
 	}
 	if kind == "" {
-		if _, ok := kinds.ConnectionKind(item); ok && item != kinds.Other {
+		if _, ok := w.d.Kinds().Kind(item); ok && item != kinds.Other {
 			kind = item
 		}
 	}
