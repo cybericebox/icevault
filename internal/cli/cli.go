@@ -449,7 +449,7 @@ func (e *Env) generatedPassword() ([]byte, error) {
 	if err != nil {
 		return nil, fail("%v", err)
 	}
-	pw := []byte(p)
+	pw := []byte(p) // the string p (shown, compared) cannot be wiped; the byte copies can, and are
 	fmt.Fprintf(e.Err, "The new master password (shown once, here only):\n\n    %s\n\n"+
 		"Write it down now and keep it away from the vault file. Nothing is saved anywhere for you.\n", p)
 	for i := 0; i < generateTries; i++ {
