@@ -258,3 +258,46 @@ func TestKeyFilesAndKitGuardsOfTheDialogs(t *testing.T) {
 		}
 	}
 }
+
+// The audit's last items: the open vault's file name under the sidebar title, an imported value can be taken out from its row, the lock screen heading
+// does not wrap against its buttons, the New vault dialog keeps its layout (the Touch ID row keeps its place, the no-project button goes after a
+// choice, the passwords have a show toggle), and the Touch ID labels read alike.
+func TestAuditLastItems(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		`document.querySelector(".side-head small")`, "onUnimport: (k) =>", `t("m.env.unimport"`, ".vlist-head { display:flex; flex-wrap:wrap;", ".nvtouch.off { visibility:hidden; }",
+		"nbtn.hidden = true;", `const cfw = el("div", "valbox")`, `const curw = el("div", "valbox")`, `(nav.envs || []).length ? t("m.env.copy_note") : ""`, "c.title = countTip",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if strings.Contains(page, "trow.hidden = ") {
+		t.Error("the Touch ID row is hidden again instead of kept in place")
+	}
+}
+
+// A JSON key read from a file stays as it is typed unless it has line breaks; a select inside a dialog opens inside the dialog; the lock screen keeps the
+// place of its error line.
+func TestKeyTextAsTypedAndListInsideDialog(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"try { JSON.parse(text); if (/[\\r\\n]/.test(text)) text = JSON.stringify(JSON.parse(text)); }", `trig.closest(".dlgbox")`, "hb.bottom - r.bottom - 8", "#lockedbody .err { min-height:20px;",
+		"new ResizeObserver(fit).observe(s)", "danger: /delete|unimport/.test(code)", ".mpath .mh { flex:none;", `host.querySelector(".actions")`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if strings.Contains(page, "text = JSON.stringify(JSON.parse(text)); } catch (e) { text = text.trim(); }") {
+		t.Error("a JSON key is re-serialised even when it is one line")
+	}
+}
