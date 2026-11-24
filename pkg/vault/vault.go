@@ -235,9 +235,11 @@ func (v *Vault) SetPassword(pw []byte) error {
 		next.Key, next.Windows = c.Key, c.Windows
 	}
 	if len(pw) > 0 {
-		h := sha256.Sum256(pw)
-		next.Passphrase = append([]byte(nil), h[:]...)
-		wipe(h[:])
+		hashed, err := Credentials{Password: pw}.build() // the one place that turns a password into the KDBX key part
+		if err != nil {
+			return err
+		}
+		next.Passphrase = hashed.Passphrase
 	}
 	v.db.Credentials = next
 	if err := v.Save(); err != nil {
