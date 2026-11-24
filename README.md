@@ -20,6 +20,8 @@ Or download a release: `IceVault-vX.Y.Z-macos.dmg` (the window with the command 
 
 ```
 icevault init-vault [--generate]        a new vault at the path the description names; --generate makes a six-word passphrase
+icevault change-password [--generate] [--refresh-copies]
+                                       change the master password of the vault (same policy as init-vault)
 icevault project check                 validate the project description
 icevault project used --env E          which files an environment reads (JSON)
 icevault trust [--forget]              trust the description and its required-check script
@@ -48,6 +50,18 @@ A new vault (`init-vault`, or **New vault** in the window) needs a master passwo
 `icevault init-vault --generate` makes a passphrase of six random words from the [EFF large wordlist](https://www.eff.org/dice) (drawn from the system's random source), shows it once on the terminal and asks for it to be typed back before anything is made. It is never written to a file or a log.
 
 In the window, **New vault** (on the lock screen, beside Open vault) asks for the project folder first (the one with `icevault-project.yaml`), offers the vault file its description names as the place (the system save dialog changes it; the vault still opens with that project), a password with a live strength meter or **Generate**, and the password again. It can also switch on Touch ID for the new vault and save a **recovery kit**: a small text file (mode 0600) with the vault's name and path, the date and the password, to a place you choose with the save dialog. Keep it away from the vault file (another device, paper, a password manager). It is the only time the window writes the password anywhere, and nothing is written until you press Create (the recovery kit only where you choose to save it).
+
+### Changing it
+
+`icevault change-password` (or the key button of the unlocked window) asks for the current password (typed: the one behind Touch ID is not taken), then the new one under the same policy, or `--generate`, and re-encrypts the vault file in place with the atomic save (the key derivation settings and the key file stay). A refused password writes nothing. After a change:
+
+- the Touch ID binding holds the old password and is removed; `touchid enable` stores the new one (the window offers it in the same dialog);
+- the info file records `password_changed` (a date, never a secret);
+- copies made before (`copies add` destinations, `copy --to` outputs) still open with the **old** password: they are listed and never deleted, and `--refresh-copies` (a check box in the window) writes the new file to the standing destinations now. A refresh keeps the copy it replaces as `.prev`, which also still opens with the old password and is listed;
+- the vault's own previous copy (`<vault>.prev`) opens with the old password too and is removed; if it cannot be removed, it is listed with the copies;
+- **after `--refresh-copies`, `<destination>/<file>.prev` stays**: the refresh keeps the copy it replaces under that name, and it opens with the **old** password. It is listed in the output. Delete it yourself when the old password must stop working everywhere (`rm <destination>/<file>.prev`); nothing deletes a file in a destination for you;
+- a Touch ID binding that cannot be removed is reported with its file names (it holds the old password): delete the files or run `icevault touchid disable`;
+- the window can save a new recovery kit from the new password.
 
 ## Development
 

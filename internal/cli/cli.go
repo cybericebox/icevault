@@ -237,6 +237,8 @@ func runCommand(cmd string, rest []string, e *Env) int {
 	switch cmd {
 	case "init-vault":
 		err = cmdInit(rest, e)
+	case "change-password":
+		err = cmdChangePassword(rest, e)
 	case "touchid":
 		err = cmdTouchID(rest, e)
 	case "copies":

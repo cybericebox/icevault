@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -216,6 +217,49 @@ func decode(data []byte, cred *gokeepasslib.DBCredentials) (*gokeepasslib.Databa
 	}
 	return db, f, nil
 }
+
+// SetPassword replaces the master password and saves the file at once (the same atomic save as every other: a lock, a temp file, fsync, a read-back that
+// must open with the NEW key, one previous copy, a rename). The key derivation settings are kept (Save only gives the file fresh seeds), and the key file,
+// if the vault has one, stays the same: the composite key keeps its key part. An empty password is accepted only when a key file holds the key. When the
+// save fails the old file is as it was and the open vault keeps the old password, so it can be saved again. The caller wipes pw. The previous copy
+// (<vault>.prev) holds the old password and is removed once the new file is in place; when that removal fails, its path is returned as prevLeft (the
+// change stands, and the file still opens with the old password: the caller says so).
+func (v *Vault) SetPassword(pw []byte) (prevLeft string, err error) {
+	if v.db == nil {
+		return "", errors.New("the vault is closed")
+	}
+	old := v.db.Credentials
+	if len(pw) == 0 && (old == nil || len(old.Key) == 0) {
+		return "", ErrNoCredentials
+	}
+	next := &gokeepasslib.DBCredentials{}
+	if c := copyCreds(old); c != nil {
+		next.Key, next.Windows = c.Key, c.Windows
+	}
+	if len(pw) > 0 {
+		next.Passphrase = passwordKey(pw)
+	}
+	v.db.Credentials = next
+	if err := v.Save(); err != nil {
+		v.db.Credentials = old
+		wipeCreds(next)
+		return "", err
+	}
+	wipeCreds(old)
+	// the file saved just before is <vault>.prev, still encrypted under the OLD password: after a change made because the old one is compromised it
+	// would defeat the change, so it is removed (the new file was verified before the rename)
+	real := v.path
+	if r, err := filepath.EvalSymlinks(v.path); err == nil {
+		real = r
+	}
+	if err := removeFile(real + ".prev"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return real + ".prev", nil // the change stands; the caller must tell that this file still opens with the old password
+	}
+	return "", nil
+}
+
+// removeFile is os.Remove; a variable so a test can make the removal fail.
+var removeFile = os.Remove
 
 // Path is the vault file.
 func (v *Vault) Path() string { return v.path }

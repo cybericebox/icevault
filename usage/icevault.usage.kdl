@@ -12,6 +12,10 @@ cmd "init-vault" help=#"Make the vault (KDBX 4, Argon2d)"# {
     }
   }
 }
+cmd "change-password" help=#"Change the master password of the vault"# {
+  flag "--generate" help=#"a random six-word passphrase, shown once and typed back"#
+  flag "--refresh-copies" help=#"write the new file to the standing copy destinations now"#
+}
 cmd "keyfile" help=#"Make a KeePass key file"# subcommand_required=#true {
   cmd "new" help=#"make a key file"# {
     arg "<path>" help=#"the new file"# {

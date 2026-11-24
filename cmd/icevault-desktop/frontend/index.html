@@ -555,6 +555,7 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
       <button type="button" class="ibtn hidden" id="refreshbtn" data-i18n-tip="refresh.tip"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
       <button type="button" class="ibtn hidden" id="updbtn" data-i18n-tip="upd.tip"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg></button>
       <button type="button" class="ibtn hidden" id="clibtn" data-i18n-tip="cli.tip"><svg class="i" aria-hidden="true"><use href="#i-terminal"/></svg></button>
+      <button type="button" class="ibtn hidden" id="pwbtn" data-i18n-tip="cp.tip"><svg class="i" aria-hidden="true"><use href="#i-key"/></svg></button>
       <button type="button" class="ibtn hidden" id="lockbtn" data-i18n-tip="lock"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg></button>
       <button type="button" class="ibtn" id="closebtn" data-i18n-tip="close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
     </header>
@@ -1002,7 +1003,7 @@ async function loadStatus() {
 }
 function renderChrome() {
   const lk = status.locked;
-  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
+  $("seg").classList.toggle("hidden", lk); $("lockbtn").classList.toggle("hidden", lk); $("pwbtn").classList.toggle("hidden", lk || !status.can_change_password); $("clibtn").classList.toggle("hidden", lk); $("refreshbtn").classList.toggle("hidden", lk);
   if (lk) $("disknote").classList.add("hidden");
   $("seg-view").setAttribute("aria-pressed", String(status.mode !== "edit")); $("seg-edit").setAttribute("aria-pressed", String(status.mode === "edit"));
   $("locked").classList.toggle("hidden", !lk); $("main").classList.toggle("hidden", lk); $("side").classList.toggle("hidden", lk);
@@ -1263,16 +1264,12 @@ function openNewVault() {
   [pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));
   jbtn.focus();
 }
-// the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
-function newVaultDone(d) {
-  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
-  panel.open(t("nv.done_title"), finish); const box = panel.box;
-  box.append(el("div", "note", t("nv.done_note", { file: d.file })));
-  if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
+// the recovery kit step shared by a new vault and a password change: a section with the save button; the program makes the kit from the password it holds
+function kitSection() {
   const kit = el("section", "nvkit"); kit.append(el("h3", "", t("nv.kit_title")), el("div", "note", t("nv.kit_note")));
   const out = el("div", "ferr"); out.setAttribute("role", "status"); const note = el("div", "help");
   const save = btn(t("nv.kit_save"), "download", null, "");
-  kit.append(save, out, note); box.append(kit);
+  kit.append(save, out, note);
   save.addEventListener("click", async () => {
     out.textContent = ""; out.classList.remove("okline"); note.textContent = "";
     const idle = busy(save, t("busy.kit"));
@@ -1282,8 +1279,125 @@ function newVaultDone(d) {
     out.classList.add("okline"); out.append(icon("ok"), document.createTextNode(t("nv.kit_saved"))); save.disabled = true;
     if (r.data.same_folder) note.textContent = t("nv.kit_same_folder");
   });
+  return kit;
+}
+// the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
+function newVaultDone(d) {
+  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); await redrawLocked(); };
+  panel.open(t("nv.done_title"), finish); const box = panel.box;
+  box.append(el("div", "note", t("nv.done_note", { file: d.file })));
+  if (d.touchid && d.touchid !== "off") box.append(el("p", "note", t("nv.touch_" + d.touchid)));
+  box.append(kitSection());
   const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
 }
+// ---------------------------------------------------------------- change the master password (unlocked vault): current, new with the live meter, typed again, Touch ID, copies, recovery kit
+// The passwords go to the program in one call and are cleared from the page at once; the recovery kit is made there from the new password.
+async function openChangePassword() {
+  const info = await api("/api/vault-change-info"); if (info.status !== 200) { say(srv(info.data), "err"); return; }
+  if (!info.data.available) { say(srv({ code: "change_unavailable" }), "err"); return; }
+  const I = info.data; let seq = 0, timer = 0; const min = I.min || 12;
+  panel.open(t("cp.title"), () => panel.close()); const box = panel.box;
+  box.append(el("div", "note", t("cp.intro")));
+  const errs = {}, nodes = {};
+  const clearErr = (n) => { errs[n].textContent = ""; if (nodes[n]) nodes[n].removeAttribute("aria-invalid"); };
+  const fieldErr = (n, text) => { errs[n].textContent = ""; errs[n].append(icon("alert"), document.createTextNode(text)); if (nodes[n]) { nodes[n].setAttribute("aria-invalid", "true"); if (nodes[n].focus) nodes[n].focus(); } };
+  const addErr = (n, node, help) => {
+    const fe = el("div", "ferr"); fe.id = "cp-" + n + "-e"; fe.setAttribute("role", "alert"); errs[n] = fe; nodes[n] = node;
+    node.setAttribute("aria-describedby", [help ? help.id : "", fe.id].filter(Boolean).join(" ")); box.append(fe);
+  };
+  const secret = (id, label) => { const i = el("input", "input lg"); i.type = "password"; i.id = id; i.autocomplete = "off"; i.spellcheck = false; i.setAttribute("aria-label", label);
+    ["data-lpignore", "data-1p-ignore", "data-bwignore", "data-form-type"].forEach((a) => i.setAttribute(a, a === "data-form-type" ? "other" : "true")); return i; };
+  // 1. the current password
+  const lcur = el("label", "", t("cp.current_label")); lcur.htmlFor = "cp-cur"; box.append(lcur);
+  const cur = secret("cp-cur", t("cp.current_label")); box.append(cur); addErr("cur", cur, null);
+  cur.addEventListener("input", () => clearErr("cur"));
+  // 2. the new one: typed, or generated
+  const lw = el("label", "", t("cp.new_label")); lw.htmlFor = "cp-pw"; box.append(lw);
+  const pw = secret("cp-pw", t("cp.new_label")), wrap = el("div", "valbox");
+  const gen = btn(t("nv.generate"), "key", null, ""); setTip(gen, t("nv.generate_tip"));
+  const genNote = el("div", "help", t("nv.generated_note")); genNote.hidden = true;
+  wrap.append(pw, ibtn("eye", t("val.reveal_field"), () => { pw.type = pw.type === "text" ? "password" : "text"; }), gen); box.append(wrap);
+  const bar = el("div", "pwm"); bar.setAttribute("aria-hidden", "true"); for (let i = 0; i < 4; i++) bar.append(el("i"));
+  const mtxt = el("div", "pwtxt"); mtxt.id = "cp-pw-h"; mtxt.setAttribute("role", "status"); mtxt.setAttribute("aria-live", "polite"); box.append(bar, mtxt);
+  addErr("pw", pw, mtxt);
+  const paint = (d) => {
+    bar.dataset.l = String(d ? d.level : 0); mtxt.textContent = ""; mtxt.classList.toggle("ok", !!(d && d.ok));
+    if (!d) { mtxt.textContent = t("nv.help_pw", { min }); return; }
+    const hint = d.ok ? "" : d.code === "password_too_short" ? t("nv.short", { n: d.length, min: d.min }) : d.code === "password_too_long" ? t("nv.long", { n: d.length, max: d.max }) : t("nv.reason." + d.reason);
+    mtxt.append(el("b", "", t("nv.meter." + d.level)), document.createTextNode(hint ? " " + hint : ""));
+  };
+  paint(null);
+  let inflight = false, waiting = false;                                                            // one meter call in flight, the latest typed value waits behind it
+  const run = async () => {
+    if (inflight) { waiting = true; return; }
+    inflight = true; waiting = false; const my = ++seq; const v = pw.value; if (!v) { inflight = false; paint(null); return; }
+    const r = await api("/api/vault-new-strength", { password: v }); inflight = false;
+    if (my === seq && r.status === 200 && pw.value === v) paint(r.data);
+    if (waiting) run();
+  };
+  const judge = () => { clearTimeout(timer); if (!pw.value) { seq++; paint(null); return; } timer = setTimeout(run, 120); };
+  pw.addEventListener("input", () => { clearErr("pw"); judge(); });
+  // 3. typed again
+  const lc = el("label", "", t("cp.confirm_label")); lc.htmlFor = "cp-cf"; box.append(lc);
+  const cf = secret("cp-cf", t("cp.confirm_label")); box.append(cf); addErr("cf", cf, null);
+  cf.addEventListener("input", () => clearErr("cf"));
+  gen.addEventListener("click", async () => {
+    const idle = busy(gen, t("busy.generating")); const r = await api("/api/vault-new-generate", {}); idle();
+    if (r.status !== 200) return fieldErr("pw", srv(r.data));
+    clearErr("pw"); clearErr("cf"); pw.type = "text"; pw.value = r.data.password; cf.value = ""; judge(); genNote.hidden = false; cf.focus();
+  });
+  box.append(genNote);
+  // 4. the choices: Touch ID again (where this Mac can), the standing copies
+  const checks = el("div", "mchecks"); box.append(checks);
+  const choice = (id, text, on) => { const row = el("label", "mcheck"), cb = el("input"); cb.type = "checkbox"; cb.id = id; cb.checked = on; row.htmlFor = id; row.append(cb, el("span", "", text)); checks.append(row); return cb; };
+  const tcb = I.touchid_ready ? choice("cp-touch", t("cp.touch"), !!I.touchid_on) : null;
+  if (I.touchid_on) checks.append(el("div", "help", t("cp.touch_was")));
+  const rcb = I.destinations > 0 ? choice("cp-refresh", t("cp.refresh", { n: I.destinations }), true) : null;
+  if (rcb) checks.append(el("div", "help", t("cp.refresh_help")));
+  const err = el("div", "err"); err.setAttribute("role", "alert");
+  const actions = el("div", "actions"), cancel = btn(t("btn.cancel"), "", () => panel.close(), "lg"), ok = btn(t("cp.change"), "", null, "primary lg");
+  actions.append(cancel, ok); box.append(err, actions);
+  const failAt = (r) => {
+    const d = r.data, c = d && d.code;
+    if (c === "password_too_short" || c === "password_weak" || c === "password_too_long") return fieldErr("pw", srv({ code: c, params: { min: d.params.min, max: d.params.max, why: d.params.reason ? t("nv.reason." + d.params.reason) : "" } }));
+    if (c === "new_password_mismatch") return fieldErr("cf", srv(d));
+    if (c === "change_wrong_password" || c === "type_password") return fieldErr("cur", srv(d));
+    if (c === "change_same_password") return fieldErr("pw", srv(d));
+    err.textContent = ""; err.append(icon("alert"), document.createTextNode(srv(d)));
+  };
+  ok.addEventListener("click", async () => {
+    ["cur", "pw", "cf"].forEach(clearErr); err.textContent = "";
+    if (!cur.value) return fieldErr("cur", t("err.required"));
+    if (!pw.value) return fieldErr("pw", t("err.required"));
+    if (!cf.value) return fieldErr("cf", t("err.required"));
+    if (pw.value !== cf.value) return fieldErr("cf", t("srv.new_password_mismatch"));
+    const idle = busy(ok, t("busy.changing")); cancel.disabled = true;
+    const r = await api("/api/vault-change", { current: cur.value, password: pw.value, confirm: cf.value, touchid: !!(tcb && tcb.checked), refresh: !!(rcb && rcb.checked) });
+    if (r.status === 423) { idle(); panel.close(); await loadStatus(); return; }                // five wrong current passwords: the program locked the vault
+    if (r.status !== 200) { idle(); cancel.disabled = false; failAt(r); return; }
+    cur.value = ""; pw.value = ""; cf.value = ""; clearTimeout(timer); seq++; waiting = false;       // out of the page before the next step
+    changePasswordDone(r.data);
+  });
+  [cur, pw, cf].forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } }));
+  cur.focus();
+}
+// the password is changed: what happened to Touch ID and the copies, and the recovery kit (the new password, to a place the person chooses)
+function changePasswordDone(d) {
+  const finish = async () => { await api("/api/kit-discard", {}); panel.close(); };
+  panel.open(t("cp.done_title"), finish); const box = panel.box;
+  box.append(el("div", "note", t("cp.done_note", { file: d.file })));
+  if (d.touchid_remove_failed) box.append(el("p", "note err", t("cp.touch_remove_failed")));
+  if (d.touchid === "on") box.append(el("p", "note", t("cp.touch_on")));
+  else if (d.was_touchid || d.touchid !== "off") box.append(el("p", "note", t("cp.touch_" + (d.touchid === "off" ? "off" : d.touchid))));
+  if (d.refreshed && d.refreshed.length) box.append(el("p", "note", t("cp.refreshed", { n: d.refreshed.length })));
+  if (d.stale && d.stale.length) {
+    const sec = el("section", "nvkit"); sec.append(el("h3", "", t("cp.stale_title")), el("div", "note", t("cp.stale_note")));
+    const list = el("ul", "help"); d.stale.forEach((f) => { const li = el("li"); li.append(midPath(f)); list.append(li); }); sec.append(list); box.append(sec);
+  }
+  box.append(kitSection());
+  const actions = el("div", "actions"), done = btn(t("nv.done"), "", finish, "primary lg"); actions.append(done); box.append(actions); done.focus();
+}
+$("pwbtn").addEventListener("click", () => openChangePassword());
 // the icevault command: the program inside the application, linked into a folder of the PATH (the window asks nothing in a terminal and runs no installer)
 async function openCliPanel() {
   panel.open(t("cli.title")); const box = panel.box;
