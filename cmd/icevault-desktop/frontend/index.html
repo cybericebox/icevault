@@ -519,7 +519,8 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mcheck { display:grid; grid-template-columns:20px max-content 1fr; align-items:center; gap:8px; min-height:36px; padding:0 8px; border-radius:var(--ib-r); cursor:pointer; }
 .mcheck:hover { background:var(--ib-hover); }
 .mcheck input { width:16px; height:16px; accent-color:var(--ib-action); }
-.mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
+.broken { font-size:13px; font-weight:500; color:var(--ib-danger); }
+.mtable td:has(.ksub), .mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
 .mtable .ksub { margin-top:2px; font-size:12px; line-height:1.3; color:var(--ib-dim); white-space:normal; overflow-wrap:anywhere; }
 .mtoggle { width:auto; margin-top:4px; }
 .mplan { margin-top:12px; }
@@ -2801,6 +2802,25 @@ function mblock(main, title, iconName, buttons, note) {
 // the one table of the model page (variables, connection fields, other secrets): name 32%, value 38%, labels take the rest, the actions column is as wide as its
 // icons (32px buttons, 8px gap, 8px cell padding) and sits flush right; an empty table keeps its header and shows the empty state in the body
 const MT_ICON = 32, MT_GAP = 8, MT_PAD = 8;
+// the value of a row. A value that holds references shows what it resolves to (the strictest visibility of its parts decides the mask), with a second line
+// of small text that says where it comes from; a broken reference shows the state in red, never a value. Editing still works on the raw text.
+function mvaluecell(vc, w, r, k) {
+  const rv = r.resolved, vis = rv ? rv.vis : r.visibility;
+  if (r.state === "empty") return false;
+  if (rv && rv.broken) w.append(el("span", "broken", t("state.broken")));
+  else if (rv && rv.varies) w.append(el("span", "notset", t("m.var.varies")));
+  else if (vis === "plain") w.append(el("span", "val", rv ? rv.value : (r.value || "")));
+  else if (vis === "sealed") w.append(withIcon("lock", t("val.sealed"), "sealed"));
+  else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k)));
+  else w.append(el("span", "mask", "••••••"));
+  vc.append(w);
+  if (rv && rv.refs && rv.refs.length) vc.append(el("div", "ksub mono", "← " + rv.refs.join(", ")));
+  return true;
+}
+// can the eye show this row: a secret (own or by what it refers to), and not a broken or a site-dependent result
+// the visibility a row has in the end: the strictest of its own and of what it refers to (a broken or site-dependent result keeps its own)
+const mvis = (r) => (r.resolved && !r.resolved.broken && !r.resolved.varies ? r.resolved.vis : r.visibility);
+const mcanreveal = (r) => r.state !== "empty" && (r.resolved ? r.resolved.vis === "secret" && !r.resolved.broken && !r.resolved.varies : r.visibility === "secret");
 function mnamecell(label, key, mono, help, sub) {
   const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw);
   kw.append(el("div", "kname" + (!key && mono ? " kmono" : ""), label)); if (key) kw.append(el("div", "ktitle mono", key));
@@ -2835,19 +2855,15 @@ function mvars(parent, rows, scope, opts) {
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, mtext(r.help) || r.description, opts.users ? (r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users")) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(r.required && r.active !== false ? withIcon("alert", t("m.var.required"), "needed") : el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
-    else if (r.visibility === "plain") w.append(el("span", "val", r.value || ""));
-    else if (r.visibility === "sealed") w.append(withIcon("lock", t("val.sealed"), "sealed"));
-    else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k)));
-    else w.append(el("span", "mask", "••••••"));
-    vc.append(w);
+    if (r.state !== "empty") mvaluecell(vc, w, r, k); else vc.append(w);
     const kc = el("td"); const tags = el("div", "mtags");
     if (r.imported) tags.append(el("span", "tag", r.overridden ? t("m.env.overridden") : t("m.env.imported")));
     if (r.system) tags.append(el("span", "tag", t("m.var.system")));
-    else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + r.visibility)));
+    else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + mvis(r))));
     if (r.active === false) { const x = el("span", "tag warn", t("m.var.inactive")); setTip(x, r.when || ""); tags.append(x); }
     kc.append(tags);
     const [ac, ab] = mactcell();
-    if (r.state !== "empty" && r.visibility === "secret" && !r.imported) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k)));
+    if (mcanreveal(r) && !r.imported) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k, r.resolved ? "resolved" : "")));
     if (editing() && !r.system && !(r.imported && !r.overridden && opts.general)) ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mvarDialog(scope, r)));
     if (editing() && r.imported && !r.overridden && opts.onUnimport) ab.append(ibtn("x", t("m.env.unimport", { name: mlabel(r) }), () => opts.onUnimport(r.key)));   // an imported value can be taken out again from here
     if (editing() && !r.missing && !(r.imported && !r.overridden)) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), scope === "shared" && r.users && r.users.length ? t("m.confirm_shared_used.note", { list: r.users.join(", ") }) : t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
@@ -2857,10 +2873,10 @@ function mvars(parent, rows, scope, opts) {
   if (hidden || (munused && rows.some((r) => r.active === false))) { const u = el("button", "side-add mtoggle"); u.type = "button"; u.setAttribute("aria-pressed", String(munused)); u.append(icon(munused ? "eye-off" : "eye"), el("span", "t", munused ? t("m.hide_unused") : t("m.show_unused", { n: hidden }))); u.addEventListener("click", () => { munused = !munused; renderMMain(); }); parent.append(u); }
 }
 
-async function mreveal(scope, key, k) {
+async function mreveal(scope, key, k, group) {
   if (mrevealed.has(k)) { mrevealed.delete(k); renderMMain(); return; }
   if (status.touchid) { $("waittext").textContent = t("wait.touch"); $("wait").classList.add("on"); }
-  const x = await api("/api/reveal", { section: "m", name: scope, group: "", key }); $("wait").classList.remove("on");
+  const x = await api("/api/reveal", { section: "m", name: scope, group: group || "", key }); $("wait").classList.remove("on");
   if (x.status !== 200) { say(t("flash.refused", { why: srv(x.data) }), "err"); return; }
   mrevealed.set(k, x.data.value); renderMMain(); setTimeout(() => { if (mrevealed.delete(k)) renderMMain(); }, REVEAL_MS);
 }
@@ -2938,7 +2954,7 @@ function mConnections(main) {
     const sec = mblock(main, c.name, "plug", b);
     const meta = el("div", "mmeta"); meta.append(el("span", "tag", ckTitle(c.kind)));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);
-    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, missing: !f.present,
+    const rows = c.fields.map((f) => ({ key: f.name, label: { [lang]: f.title ? fieldTitle(f.name) : f.name }, state: f.state, visibility: f.secret ? "secret" : "plain", value: f.value, resolved: f.resolved, missing: !f.present,
       help: f.variables && f.variables.length ? { [lang]: t("m.conn.exported_as", { list: f.variables.join(", ") }) } : null }));
     mfields(sec, rows, c);
   });
@@ -2951,12 +2967,10 @@ function mfields(parent, rows, c) {
     const tr = el("tr"); const k = "conn/" + c.uuid + "|" + r.key;
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, r.help ? mtext(r.help) : "");
     const vc = el("td"); const w = el("div", "vcell");
-    if (r.state === "empty") w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
-    else if (r.visibility === "plain") w.append(el("span", "val", r.value || "")); else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k))); else w.append(el("span", "mask", "••••••"));
-    vc.append(w);
-    const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + r.visibility)));
+    if (r.state === "empty") { w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
+    const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + mvis(r))));
     const [ac, ab] = mactcell();
-    if (r.state !== "empty" && r.visibility === "secret") ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k)));
+    if (mcanreveal(r)) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k, r.resolved ? "resolved" : "")));
     if (editing()) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
     tr.append(nc, vc, kc, ac); trs.push(tr);
   });

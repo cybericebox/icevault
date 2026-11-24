@@ -492,7 +492,7 @@ func TestRequiredWhenFollowsThePlaceOfTheProduct(t *testing.T) {
 	e.Products = append(e.Products, &vmodel.Product{Name: "indexer", Enabled: true, Place: "cluster", Site: e.Sites[0], Sub: map[string][]*vmodel.Var{}})
 	missing := func() []string {
 		var keys []string
-		for _, p := range c.envView(e)["products"].([]map[string]any) {
+		for _, p := range c.envView(e, nil)["products"].([]map[string]any) {
 			if p["name"] == "indexer" {
 				for _, m := range p["missing"].([]map[string]any) {
 					keys = append(keys, m["key"].(string))
