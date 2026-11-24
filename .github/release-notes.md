@@ -1,23 +1,8 @@
 IceVault {{VERSION}}
 
-## From 0.6
+## Changes since v0.7.0
 
-- **References inside an environment**: `${{ self.KEY }}` uses another variable of the same environment (and site), e.g. `SUPPORT_EMAIL = ${{ self.SUPER_ADMIN_EMAIL }}`. `${{ shared.KEY }}` and connection references now work on the environment screen too. Every value field has **Insert reference** (or type `${{`) with a live preview; secret results are never shown. A broken reference is listed in "Missing for deploy" and stops an export with the variable's name. `self` is a reserved name.
-- **Value types and choices**: the project description may give a variable a `type` (string, bool, int, email, url, domain, enum), `choices`, `pattern` and `min`/`max`. The window shows a drop-down for an enum, a switch for a bool and checks the others beside the field; `status`, `export`, `export-app` and `session` refuse a value that does not fit (the variable is named, never the value). A description that uses these keys needs IceVault 0.7 or later.
-- **"Missing for deploy" follows required-when** and the place of each product (a product on a cluster needs its cluster settings); things shared by the environment are counted once.
-- **The environment screen**: collapsible sections and cards, add buttons at the top right, a sticky header, aligned tables with a full frame, a green "ready" state, values set by the system hidden behind **Show set automatically (N)**, secret values typed into masked fields, a service-account key read from a file (one line, up to 64 KiB), field errors beside their field, un-importing a shared value that others use asks first.
-- **The window**: the open vault's file name in the sidebar; a new vault shows in Recent at once, marked "not opened yet"; the lock screen and the New vault dialog keep their size; leaving an unsaved recovery kit asks first.
-
-## From 0.5 (in 0.6.x)
-
-- **Change the master password**: `icevault change-password [--generate] [--refresh-copies]` or the key button of an unlocked window. The current password is typed (Touch ID is not accepted for it); the new one follows the same rules as a new vault. The file is rewritten atomically; `<vault>.prev` (which opens with the old password) is removed, the Touch ID binding of the old password is removed (turn Touch ID on again), and every copy that still opens with the old password is listed (`--refresh-copies` rewrites the standing copies; a `.prev` next to a refreshed copy keeps the old password: delete it).
-- **New icon**: the Cyber ICE Box crest as the body of a padlock.
-- **A vault can be used without a project.** `icevault init-vault --no-project --vault PATH`, **Without a project** in the window's New vault, and **Open without a project** for a vault that lies in no project. Such a vault has no environments, only shared secrets, connections and other secrets; no project file is written. Commands that need environments say so.
-- **A new vault needs a strong master password.** `init-vault` and the window refuse a password shorter than 12 characters or one a strength estimate (zxcvbn) puts under a trillion (1e12) guesses: dictionary words, keyboard walks, repeats, dates, patterns such as `Qwerty123!`. Against the vault's key derivation (Argon2d, 64 MiB) that is about 30 years on one GPU; twelve random characters are the shortest password that reaches it. Separators (space, dash, dot and the like) between words add nothing to the estimate. A password longer than 256 characters is refused too. Only a new vault is checked: an existing vault opens as before, whatever its password. A vault with a key file and no password is still allowed.
-- **`icevault init-vault --generate`** makes the password for you: six random words from the EFF large wordlist (about 77 bits), shown once on the terminal and typed back to confirm you recorded it.
-- **New vault… in the window**, next to Open vault…: choose the project folder (the vault goes where its description says, and opens with that project; Change place… saves it elsewhere), type a password (with a strength meter) or press Generate, type it once more, then optionally turn on Touch ID and save a **recovery kit**: a small text file (mode 0600) with the vault name, path, date and password. Keep the recovery kit away from the vault file: another device, paper, or your password manager. A new vault joins the list of recent vaults at its first unlock.
-
-Coming from 0.4: read the notes of 0.5.0 first (project description format 2, renamed variables, `migrate` gone).
+<!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 ## What is here
 
