@@ -134,3 +134,47 @@ func TestEveryTypeRuleHasAMessage(t *testing.T) {
 		}
 	}
 }
+
+// The variable dialog of the model screen (every scope: shared, General, site, product) gives its value field the reference controls and the live
+// preview with the scope the server needs, and the header of an environment stays at the top while its sections scroll.
+func TestModelScreenWiresReferencesAndStickyHeader(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	m := regexp.MustCompile(`(?s)function mvarDialog\(scope, r\) \{(.*?)\n\}`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("mvarDialog not found")
+	}
+	if !strings.Contains(m[1], "ref: refCtx") || !strings.Contains(m[1], "scope,") {
+		t.Error("the value field of mvarDialog has no reference controls with its scope")
+	}
+	d := regexp.MustCompile(`(?s)function dialog\(.*?\n\}\n`).FindString(page)
+	for _, want := range []string{"refControls(inp, wrap, f.ref.scope)", "liveRefs(inp,", "scope: f.ref.scope"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("dialog() does not wire %s", want)
+		}
+	}
+	e := regexp.MustCompile(`(?s)function mEnv\(main\) \{(.*?)\n\}`).FindStringSubmatch(page)
+	if e == nil || !strings.Contains(e[1], `classList.add("sticky")`) {
+		t.Error("the environment header is not sticky")
+	}
+	if !strings.Contains(page, ".head.sticky") {
+		t.Error("no style for the sticky header")
+	}
+	for _, op := range []string{"references", "preview-value"} {
+		if !strings.Contains(string(mustRead(t, "../mpage/core.go")), `"`+op+`"`) {
+			t.Errorf("the model core does not answer %s", op)
+		}
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

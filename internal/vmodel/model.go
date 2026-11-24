@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cybericebox/icevault/internal/kinds"
+	"github.com/cybericebox/icevault/internal/model"
 )
 
 // Format is the version of the vault model this tool reads and writes. A vault without one is in the layout before the model (IceVault 0.2), which this version does not read.
@@ -309,6 +310,22 @@ func (v *Vault) Check() []string {
 		}
 	}
 	checkVars("shared", v.Shared)
+	noSelf := func(where, value string) {
+		for _, r := range model.ReferencesIn(value) {
+			if r[0] == model.SelfRef {
+				add("%s: a reference to self has no environment here (self is for the values of an environment)", where)
+				return
+			}
+		}
+	}
+	for _, x := range v.Shared {
+		noSelf("shared "+x.Key, x.Value)
+	}
+	for _, c := range v.Connections {
+		for _, f := range c.Fields {
+			noSelf("connection "+c.Name+" field "+f.Name, f.Value)
+		}
+	}
 	shared := map[*Var]bool{}
 	for _, s := range v.Shared {
 		shared[s] = true

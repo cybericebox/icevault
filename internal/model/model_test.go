@@ -240,6 +240,74 @@ func TestReferenceSiteAndChains(t *testing.T) {
 	eq(t, used("dns", "API"), []string{"prod/SVC_TOKEN"}, "used by api")
 }
 
+func TestSelfReferences(t *testing.T) {
+	s := snapOf(t, baseRows(
+		row{"environments/prod/web", "ADMIN", "root@example.org", own + "plain"},
+		row{"environments/prod/web", "SUPPORT", "mail:${{ self.ADMIN }}", own + "plain"},
+		row{"environments/prod/web", "VIA_SHARED", "${{ self.PUBLIC_HOST }}/x", own + "plain"},
+		row{"environments/prod/web", "SELF_TOKEN", "t-${{ self.SECRET }}", own + "plain"},
+		row{"environments/prod/web", "SECRET", "s3", own + "secret"},
+		row{"environments/prod/web", "SEALED", "z", own + "sealed"},
+		row{"environments/prod/web", "THROUGH", "${{ self.SEALED }}", own + "plain"},
+		row{"environments/prod/web", "C1", "${{ self.C2 }}", own + "plain"},
+		row{"environments/prod/web", "C2", "${{ self.C1 }}", own + "plain"},
+		row{"environments/prod/web", "ME", "${{ self.ME }}", own + "plain"},
+		row{"environments/prod/web", "NOPE", "${{ self.NOTHING }}", own + "plain"},
+		row{"environments/prod/web", "TWICE", "${{ self.DUP }}", own + "plain"},
+		row{"environments/prod/web", "DUP", "a", own + "plain"},
+		row{"global/main/net", "G_SELF", "${{ self.ADMIN }}", own + "plain"},
+		row{"environments/prod/web", "USE_G", "${{ shared.G_SELF }}", own + "plain"},
+		row{"environments/prod/edge", "DUP", "b", own + "plain"})...)
+	res := s.Resolve("environments", "prod", "aws-main", nil)
+	v := func(k string) string { return res.ByKey[k][0].Entry.Value }
+	eq(t, v("SUPPORT"), "mail:root@example.org", "self")
+	eq(t, v("VIA_SHARED"), "https://example.org/api/x", "self -> shared chain")
+	eq(t, res.ByKey["SUPPORT"][0].Entry.Vis, "plain", "plain stays plain")
+	eq(t, res.ByKey["SELF_TOKEN"][0].Entry.Vis, "secret", "strictest of own and target")
+	eq(t, res.ByKey["THROUGH"][0].Entry.Vis, "sealed", "sealed target")
+	eq(t, errsOf(res, "C1"), []string{"cycle: self.C2 -> self.C1 -> self.C2"}, "cycle")
+	eq(t, errsOf(res, "ME"), []string{"cycle: self.ME -> self.ME"}, "self cycle")
+	eq(t, errsOf(res, "NOPE"), []string{"no value self.NOTHING"}, "unresolved")
+	if e := errsOf(res, "TWICE"); len(e) != 1 || !strings.Contains(e[0], "self.DUP exists 2 times") {
+		t.Errorf("twice: %v", e)
+	}
+	// a global value has no environment: self is an error there, and through a reference to it
+	if e := errsOf(res, "USE_G"); len(e) != 1 || !strings.Contains(e[0], "no environment") {
+		t.Errorf("global self: %v", e)
+	}
+	_, _, errs := s.Expand("${{ self.ADMIN }}", "plain", "")
+	if len(errs) != 1 || !strings.Contains(errs[0], "no environment") {
+		t.Errorf("Expand: %v", errs)
+	}
+	// the site pair: a group limited to a site wins for that site
+	s = snapOf(t, baseRows(
+		row{"environments/prod/cluster", ".group", "", "state=active\nonly-sites=aws-main"},
+		row{"environments/prod/cluster", "POOL", "main-pool", own + "plain"},
+		row{"environments/prod/other", ".group", "", "state=active\nonly-sites=aws-eu"},
+		row{"environments/prod/other", "POOL", "eu-pool", own + "plain"},
+		row{"environments/prod/web", "WHERE", "${{ self.POOL }}", own + "plain"},
+		row{"environments/prod/web", "ZONE", "${{ self.TARGET_ZONE }}", own + "plain"})...)
+	eq(t, s.Resolve("environments", "prod", "aws-main", nil).ByKey["WHERE"][0].Entry.Value, "main-pool", "pair main")
+	eq(t, s.Resolve("environments", "prod", "aws-eu", nil).ByKey["WHERE"][0].Entry.Value, "eu-pool", "pair eu")
+	eq(t, s.Resolve("environments", "prod", "aws-main", nil).ByKey["ZONE"][0].Entry.Value, "eu-west-1", "site credentials")
+	if e := errsOf(s.Resolve("environments", "prod", "aws-eu", nil), "ZONE"); len(e) != 1 {
+		t.Errorf("zone on eu: %v", e)
+	}
+	if e := errsOf(s.Resolve("environments", "prod", "", nil), "WHERE"); len(e) != 1 || !strings.Contains(e[0], "exists 2 times") {
+		t.Errorf("no site: %v", e)
+	}
+}
+
+func TestSelfNameIsReserved(t *testing.T) {
+	st := &Store{Snap: NewSnapshot()}
+	if _, err := st.CreateItem(SecExternal, "self", "x"); err == nil || !strings.Contains(err.Error(), "'self'") {
+		t.Errorf("item: %v", err)
+	}
+	if err := st.CreateSection("self", "x"); err == nil {
+		t.Error("section self accepted")
+	}
+}
+
 func TestDepthLimit(t *testing.T) {
 	rows := baseRows()
 	for i := 0; i < 10; i++ {

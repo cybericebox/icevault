@@ -147,6 +147,8 @@ main { flex:1; min-height:0; overflow:auto; padding:24px 24px 64px; }
 main:focus { outline:none; }
 
 /* item header */
+.head.sticky { position:sticky; top:-24px; z-index:3; margin:-24px -24px 0; padding:24px 24px 12px; background:var(--ib-surface); border-bottom:1px solid var(--ib-line); }
+.mtable th.h { top:calc(var(--headh, 0px) - 24px); }
 .head h1 { margin:0; font-size:20px; line-height:1.2; font-weight:600; color:var(--ib-ink); }
 .head .meta { margin-top:4px; display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; font-size:13px; color:var(--ib-dim); }
 .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -626,6 +628,7 @@ const prettyParams = (params) => Object.fromEntries(Object.entries(params || {})
 // why a reference does not resolve: the server's English sentence, said in the page language
 function refWhy(why) {
   let m;
+  if ((m = /^self\.(\S+): there is no environment/.exec(why))) return t("ref.why.no_env", { what: "self." + m[1] });
   if ((m = /^no value (\S+)$/.exec(why))) return t("ref.why.no_value", { what: m[1] });
   if ((m = /^no external system '([^']+)'/.exec(why))) return t("ref.why.no_system", { name: m[1] });
   if ((m = /^the external system '([^']+)' is not allowed on site '([^']+)' \(only on (.*)\)$/.exec(why))) return t("ref.why.not_allowed", { name: m[1], site: m[2], list: m[3] });
@@ -849,16 +852,17 @@ function genPopover(anchor, o) {
 }
 
 // ---------------------------------------------------------------- the reference picker: search over the global values and the external systems (no values shown)
-async function pickReference(onPick) {
-  const x = await api("/api/references"); if (x.status !== 200) { say(srv(x.data), "err"); return; }
+const refTitle = (r) => r.system === "self" ? t("ref.self") : r.system === "shared" ? t("ref.shared") : (r.title || r.system);
+async function pickReference(onPick, scope) {
+  const x = await api("/api/references", scope ? { scope } : undefined); if (x.status !== 200) { say(srv(x.data), "err"); return; }
   const targets = x.data.targets; confirmLayer.open(t("ref.pick")); const box = confirmLayer.box;
   const q = el("input", "input lg"); q.type = "search"; q.placeholder = t("ref.search"); q.setAttribute("aria-label", t("ref.search")); box.append(q);
   box.append(el("div", "help", t("ref.shared_note")));
   const lst = el("div", "dlist picker"); box.append(lst);
   const draw = () => { lst.textContent = ""; const s = q.value.trim().toLowerCase();
-    const shown = targets.filter((r) => !s || (r.system + "." + r.key + " " + r.title + " " + r.description + " " + r.labels.join(" ")).toLowerCase().includes(s)).slice(0, 60);
+    const shown = targets.filter((r) => !s || (r.system + "." + r.key + " " + refTitle(r) + " " + r.description + " " + r.labels.join(" ")).toLowerCase().includes(s)).slice(0, 60);
     if (!shown.length) { lst.append(el("div", "quiet", t(targets.length ? "ref.none_match" : "ref.none"))); return; }
-    shown.forEach((r) => { const b = el("button", "pick"); b.type = "button"; b.append(el("span", "mono", r.title + " / " + r.key), el("span", "quiet", r.description || ""), el("span", "tag", t("vis.word." + r.vis)));
+    shown.forEach((r) => { const b = el("button", "pick"); b.type = "button"; b.append(el("span", "mono", refTitle(r) + " / " + r.key), el("span", "quiet", r.description || ""), el("span", "tag", t("vis.word." + r.vis)));
       b.addEventListener("click", () => { confirmLayer.close(); onPick("${{ " + r.system + "." + r.key + " }}"); }); lst.append(b); }); };
   q.addEventListener("input", draw); draw();
   const actions = el("div", "actions"); actions.append(btn(t("btn.cancel"), "", () => confirmLayer.close(), "lg")); box.append(actions); q.focus();
@@ -872,20 +876,20 @@ function insertAtCursor(inp, text, replaceTrigger) {
 // what a value with references is, as the owner types it: the chips, the strictest visibility and why, the resolved text only when that is plain
 function refSummary(info, ownVis) {
   const w = el("div", "refprev"); if (!info.refs || !info.refs.length) return null;
-  const chips = el("div", "refs"); info.refs.forEach((x) => { const b = el("span", "chip" + (x.ok ? "" : " miss")); b.textContent = x.title + " / " + x.key; setTip(b, x.ok ? "" : refWhy(x.why)); chips.append(b); }); w.append(chips);
+  const chips = el("div", "refs"); info.refs.forEach((x) => { const b = el("span", "chip" + (x.ok ? "" : " miss")); b.textContent = refTitle(x) + " / " + x.key; setTip(b, x.ok ? "" : refWhy(x.why)); chips.append(b); }); w.append(chips);
   w.append(el("div", "quiet", info.ref_errors ? t("ref.preview_broken") : info.preview !== null && info.preview !== undefined ? t("ref.preview", { text: info.preview }) : t("ref.preview_hidden", { vis: t("vis.word." + info.eff_vis) })));
   if (info.because && info.because.length) w.append(withIcon("key", t("ref.because", { vis: t("vis.word." + info.eff_vis), list: info.because.join(", ") }), "tag warn"));
   return w;
 }
-function liveRefs(inp, getVis, out) {
+function liveRefs(inp, getVis, out, ctx) {
   let timer = 0; const run = async () => { const v = inp.value; out.textContent = ""; const fld = out.closest(".fld"); if (!v.includes("${{")) { out.hidden = true; if (fld) fld.hidden = true; return; }
-    const x = await api("/api/preview-value", { value: v, visibility: getVis(), site: viewSite || "" }); if (x.status !== 200) return; const n = refSummary(x.data); out.hidden = !n; if (fld) fld.hidden = !n; if (n) out.append(n); };
+    const x = await api("/api/preview-value", Object.assign({ value: v, visibility: getVis(), site: viewSite || "" }, ctx ? ctx() : {})); if (x.status !== 200) return; const n = refSummary(x.data); out.hidden = !n; if (fld) fld.hidden = !n; if (n) out.append(n); };
   inp.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 250); }); run();
 }
 // the same helpers for a value field: Insert reference and the ${{ trigger
-function refControls(inp, host) {
-  inp.addEventListener("input", () => { const a = inp.selectionStart; if (a != null && inp.value.slice(Math.max(0, a - 3), a) === "${{") pickReference((txt) => { insertAtCursor(inp, txt, true); inp.focus(); }); });
-  host.append(btn(t("ref.insert"), "link", () => pickReference((txt) => { insertAtCursor(inp, txt, false); inp.focus(); }), "ghost"));
+function refControls(inp, host, scope) {
+  inp.addEventListener("input", () => { const a = inp.selectionStart; if (a != null && inp.value.slice(Math.max(0, a - 3), a) === "${{") pickReference((txt) => { insertAtCursor(inp, txt, true); inp.focus(); }, scope); });
+  host.append(btn(t("ref.insert"), "link", () => pickReference((txt) => { insertAtCursor(inp, txt, false); inp.focus(); }, scope), "ghost"));
 }
 // ---------------------------------------------------------------- layers: the panel (dialog) and the confirm box above it
 let panelKey = false;
@@ -988,7 +992,12 @@ function dialog(title, fields, submitText, onSubmit, note) {
     } else {
       if (f.type === "textarea") { inp = el("textarea", "input"); inp.value = f.value || ""; }
       else { inp = el("input", "input lg"); inp.type = f.type || "text"; if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
-      inp.id = id; inputs[f.name] = inp; box.append(inp); focusNode = inp;
+      inp.id = id; inputs[f.name] = inp; focusNode = inp;
+      if (f.ref && f.ref.scope) {     // a value that may refer to other values: Insert reference, the ${{ trigger, the live resolved preview
+        const wrap = el("div", "valbox"); wrap.append(inp); refControls(inp, wrap, f.ref.scope); box.append(wrap);
+        const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw);
+        liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) }));
+      } else box.append(inp);
       inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value); if (m) fieldErr(f.name, m); } if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
     }
@@ -2704,7 +2713,8 @@ function mvarDialog(scope, r) {
   const fresh = !r; const fields = [];
   if (fresh) fields.push({ name: "key", label: t("m.var.key"), required: true, help: t("m.var.key_help") });
   const secret = r ? r.visibility !== "plain" : false;
-  const f = { name: "value", label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
+  const refCtx = { scope, key: (inp) => (fresh ? String((inp.key && inp.key.value) || "").trim() : r.key), vis: (inp) => (fresh ? (inp.visibility && inp.visibility.value) || "secret" : r.visibility) };
+  const f = { name: "value", ref: refCtx, label: t("m.var.value"), type: secret ? "password" : "text", value: r && r.visibility === "plain" ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : (r ? mtext(r.help) : "") };
   const ty = r && r.type;
   const word = (rule) => t("m.type." + rule, { min: r && r.min != null ? r.min : "-∞", max: r && r.max != null ? r.max : "∞" });
   const stored = r && r.visibility === "plain" ? (r.value || "") : "";
@@ -2847,6 +2857,7 @@ function mEnv(main) {
   if (editing()) { const fb = btn(t("m.env.fill"), "plus", async () => { const done = busy(fb, t("busy.creating")); let r; try { r = await api("/api/m-env-fill", { env: e.name }); } finally { done(); } if (r.status === 200) { await mreload(); const n = (r.data && r.data.added) || 0; say(n ? t("m.env.filled", { n }) : t("m.env.filled_none"), "ok"); } else say(srv(r.data), "err"); }, "ghost"); setTip(fb, t("m.env.fill_tip")); acts.push(fb); }
   if (editing()) acts.push(btn(t("m.env.copy"), "copy", () => { menvDialog(null, e.name); }, "ghost"), btn(t("m.env.rename_btn"), "edit", () => menvDialog(e), "ghost"), btn(t("m.btn.delete"), "archive", () => mdelete(t("m.env.delete_title", { name: e.name }), t("m.env.delete_note"), "m-env", { action: "delete", name: e.name }), "ghost danger"));
   mhead(main, "layers", e.title || e.name, e.title ? e.name : "", acts);
+  { const hd = main.querySelector(".head"); hd.classList.add("sticky"); main.style.setProperty("--headh", hd.offsetHeight + "px"); }   // the header stays at the top while the sections scroll; table headings stick below it
   // General: the settings of the whole environment, with the imported shared variables
   const g = mblock(main, t("m.env.general"), "layers", [editing() ? btn(t("m.env.import"), "link", () => mimportDialog(e)) : null, editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/general", null)) : null], t("m.env.general_note"));
   mvars(g, e.general, "env/" + e.name + "/general", { general: true });

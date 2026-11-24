@@ -17,6 +17,7 @@ const (
 	SecExternal = "external"
 	SecSites    = "sites"
 	GlobalRef   = "shared"
+	SelfRef     = "self" // in a reference: the environment (and site pair) the value lives in
 	Files       = "files"
 	Retired     = "retired"
 	Blobs       = ".blobs"

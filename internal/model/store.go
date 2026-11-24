@@ -393,7 +393,18 @@ func (s *Store) Compare(section, name, other string) (map[string]CompareCell, er
 
 func isNameOK(name string) bool { return NameRE.MatchString(name) && !IsReserved(name) }
 
+// selfErr refuses the name references use for the environment itself.
+func selfErr(name string) error {
+	if name != SelfRef {
+		return nil
+	}
+	return errp(400, fmt.Sprintf("'%s' is the name references use for the environment itself: pick another name", SelfRef), "name_self")
+}
+
 func (s *Store) CreateSection(name, title string) error {
+	if err := selfErr(name); err != nil {
+		return err
+	}
 	if !isNameOK(name) || name == SecEnvs {
 		return errp(400, "a section name is 1-32 characters: a-z 0-9 _ -", "section_name")
 	}
@@ -495,6 +506,9 @@ func (s *Store) CreateItem(section, name, title string) (*Item, error) {
 		return nil, errp(400, "an item name is 1-32 characters: a-z 0-9 _ -", "item_name")
 	}
 	if _, err := OneLine(title, "a title", 120); err != nil {
+		return nil, err
+	}
+	if err := selfErr(name); err != nil {
 		return nil, err
 	}
 	if section == SecExternal && name == GlobalRef {

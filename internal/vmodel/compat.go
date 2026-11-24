@@ -85,6 +85,7 @@ func CompatWith(m *Vault, d *project.Description, o CompatOptions) *CompatSnapsh
 		out.Snap.Put(compatEnv(e, d, o, out.Targets))
 	}
 	servedItems(m, d, out)
+	sharedItem(m, out)
 	for _, o := range m.Other {
 		if o.Extra != "" {
 			mode := o.Mode
@@ -150,6 +151,23 @@ func servedItems(m *Vault, d *project.Description, out *CompatSnapshot) {
 		}
 		out.Snap.Put(it)
 	})
+}
+
+// sharedItem: the shared variables are the global values of the projection, so ${{ shared.KEY }} in a value resolves (nothing of them is
+// rendered by itself: an environment takes one by import or by a reference).
+func sharedItem(m *Vault, out *CompatSnapshot) {
+	if len(m.Shared) == 0 {
+		return
+	}
+	it := model.NewItem(model.SecGlobal, model.GlobalRef)
+	it.HasMeta = true
+	for _, x := range m.Shared {
+		en := &model.Entry{Key: x.Key, Value: x.Value, Group: GroupShared, Path: join(GroupShared, x.Key), Managed: orDefault(x.Managed, ManagedOwner), Vis: orDefault(x.Vis, VisSecret),
+			Title: x.Key, Description: x.Description, Labels: append([]string(nil), x.Labels...), Changed: x.Changed}
+		en.Notes = notesOf(en.Managed, en.Vis, en.Labels, x.Description)
+		it.Entries = append(it.Entries, en)
+	}
+	out.Snap.Put(it)
 }
 
 func compatEnv(e *Environment, d *project.Description, o CompatOptions, targets map[string]*Target) *model.Item {
