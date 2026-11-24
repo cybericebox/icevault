@@ -1,14 +1,6 @@
 IceVault {{VERSION}}
 
-## Changes since v0.7.1
-
-- **Tables show the real values**: a value that is a reference (`${{ shared.KEY }}`, `${{ self.KEY }}`, a connection field) is shown resolved, with its source under it (`← shared.KEY`); a secret result stays masked until the eye reveals it (20 s), a broken reference is red, a value that differs between sites says so. The "Ознаки" column shows the visibility of the result. The editor still edits the reference itself.
-- **Every field explains itself**: built-in connection kinds have help for each field (what it is, where to get it, what a token needs); a product's own help for a field is shown instead when the description gives one; `project check` warns about a variable or field without help.
-- Secret values may have an expiry date (the native KeePass expiry, so KeePassXC shows it): a date field and badges in the window, `icevault expiring`, expired and soon-expiring lines in `status`, and stderr warnings from `export`, `export-app` and `session` about expired values they use.
-- A project description can declare its own connection kinds (`connection-kinds:`, format 3): one kind per outside service, with fields, texts in three languages, types and required flags; the window, `project check`, export and status use them like the built-in kinds.
-- `icevault env adopt-connections --env E [--dry-run]` and a banner in the window move values an environment holds as its own into the connection the description now gives them. A sealed value never moves, a variable whose places hold different values stays where it is (both are listed), an expiry date moves with its value, and a connection another environment uses is never filled: a new one is made. The command prints which connection it chose and why.
-- A variable that a connection field carries is secret whenever the field is secret. A connection of a kind the description does not know (a vault opened without its project) is shown read-only and never dropped.
-- A description that declares connection kinds is format 3 and needs IceVault 0.8 or later; older versions refuse it.
+## Changes since v0.8.0
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
