@@ -397,7 +397,6 @@ tr.grp.unused th { opacity:.75; }
 .ferr.warn { color:var(--ib-warn, var(--ib-danger)); }
 .switch:focus-visible { outline:2px solid var(--ib-action); outline-offset:2px; } .switch[aria-invalid="true"] .knob { border-color:var(--ib-danger); }
 .chk { display:flex; align-items:center; gap:10px; min-height:32px; font-size:14px; cursor:pointer; } .chk input { width:16px; height:16px; accent-color:var(--ib-action); }
-.dline { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; min-height:32px; font-size:14px; }
 .ibtn.mini { width:20px; height:20px; } .ibtn.mini .i { width:12px; height:12px; }
 .facts2 { display:grid; grid-template-columns:max-content 1fr; gap:6px 16px; margin:16px 0 0; padding-top:12px; border-top:1px solid var(--ib-line); font-size:13px; }
 .facts2 dt { color:var(--ib-dim); } .facts2 dd { margin:0; color:var(--ib-body); overflow-wrap:anywhere; }
@@ -465,24 +464,24 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .side-add > .t, .side-add { text-overflow:ellipsis; }
 .side-add > .t { overflow:hidden; min-width:0; }
 /* the vault model: blocks of a page, cards of sites and products */
-.mblock { margin-top:28px; }
-.mblock-h { display:flex; align-items:center; gap:8px; min-height:36px; }
+.mblock { margin-top:32px; }
+.mblock-h { display:flex; align-items:center; gap:8px; min-height:32px; }
 .mblock-h h2 { margin:0; font-size:16px; font-weight:600; color:var(--ib-ink); }
-.mnote { margin:4px 0 8px; font-size:13px; }
+.mnote { margin:4px 0 0; font-size:13px; }
 .mcard { margin-top:12px; padding:12px; border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); background:var(--ib-surface); }
 .mcard.off { opacity:.75; }
 .mcard-h { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:36px; }
 .mcard-h b { color:var(--ib-ink); font-weight:600; }
-.mctl { display:grid; grid-template-columns:max-content 1fr; gap:8px 12px; align-items:center; margin:8px 0; }
+.mctl { display:grid; grid-template-columns:max-content 1fr; gap:8px 12px; align-items:center; margin:12px 0 0; }
 .mfield { display:contents; }
 .mfield .lbl { font-size:13px; font-weight:500; color:var(--ib-dim); }
 .mchips { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.msub { margin-top:12px; }
+.msub { margin-top:16px; }
 .msub-h { display:flex; align-items:center; gap:6px; min-height:36px; font-size:13px; font-weight:600; color:var(--ib-dim); }
-.mmeta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:4px 0 8px; font-size:13px; }
+.mmeta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:4px 0 0; font-size:13px; }
 .mtable { width:100%; }
 /* one table layout: the cells of a row share one height, border and alignment (the name cell is a table cell, its content a flex box inside), the table has a full frame like a card */
-.mtwrap { border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); overflow:clip; }
+.mtwrap { margin-top:12px; border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); overflow:clip; }
 .mtwrap table.rows th.h { border-top:0; } .mtwrap table.rows tr:last-child td { border-bottom:0; }
 .mtable td, .mtable th { vertical-align:middle; }
 .mtable .kname { white-space:normal; overflow-wrap:anywhere; flex:0 1 auto; min-width:0; } .mtable .ktitle { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }   /* narrow: the key is cut, the name stays */
@@ -502,11 +501,16 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .ibtn.fold { width:28px; height:28px; margin-left:-6px; } .ibtn.fold .i { width:16px; height:16px; }
 .mtable .kname { font-family:var(--ib-font); letter-spacing:normal; }
 .mtable { table-layout:fixed; }
+.mtable td.acts, .mtable th.h:last-child { padding:0 8px 0 0; }
 .mtable td.acts { white-space:nowrap; overflow:visible; }
+.mtable .abox { display:flex; justify-content:flex-end; align-items:center; gap:8px; }
+.mtable td.emptycell { padding:32px 12px; text-align:center; }
+.mtable .emptycell .i { width:24px; height:24px; color:var(--ib-faint); }
+.mtable .emptycell > span { display:block; }
 .mtable .ktitle { font-family:var(--ib-mono); font-size:12px; }
 .mtable .kname.kmono { font-family:var(--ib-mono); }
 .mtable .ktitle { font-size:12px; color:var(--ib-dim); }
-.mtags .quiet { margin-left:6px; }
+.mtags .quiet { margin-left:0; }
 .mtags { display:flex; flex-wrap:wrap; gap:4px; }
 .mmissing { margin:4px 0 0; padding-left:18px; }
 .mswitch { display:inline-flex; align-items:center; gap:6px; min-height:36px; font-size:13px; cursor:pointer; }
@@ -515,7 +519,8 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mcheck { display:grid; grid-template-columns:20px max-content 1fr; align-items:center; gap:8px; min-height:36px; padding:0 8px; border-radius:var(--ib-r); cursor:pointer; }
 .mcheck:hover { background:var(--ib-hover); }
 .mcheck input { width:16px; height:16px; accent-color:var(--ib-action); }
-.mused { margin-top:8px; font-size:13px; }
+.mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
+.mtable .ksub { margin-top:2px; font-size:12px; line-height:1.3; color:var(--ib-dim); white-space:normal; overflow-wrap:anywhere; }
 .mtoggle { width:auto; margin-top:4px; }
 .mplan { margin-top:12px; }
 .mplan h3 { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ib-ink); }
@@ -2328,7 +2333,7 @@ async function toggleReveal(r, ctx) {
   revealed.set(k, { value: v, until: Date.now() + REVEAL_MS, timer: setTimeout(() => { hideReveal(k); renderMain(); }, REVEAL_MS) }); renderMain();
 }
 // a shown secret hides itself after REVEAL_MS; the seconds left stand beside it (one ticker for all, only while something is shown)
-const REVEAL_MS = 30000;
+const REVEAL_MS = 20000;
 const secsLeft = (k) => { const v = revealed.get(k); return v ? Math.max(0, Math.ceil((v.until - Date.now()) / 1000)) : 0; };
 setInterval(() => { if (revealed.size) document.querySelectorAll(".revcd").forEach((n) => { n.textContent = t("reveal.left", { n: secsLeft(n.dataset.k) }); }); }, 1000);
 async function fetchSecret(r, ctx, k) {
@@ -2793,20 +2798,41 @@ function mblock(main, title, iconName, buttons, note) {
   if (note) sec.append(el("p", "dim mnote", note)); main.append(sec); return sec;
 }
 
+// the one table of the model page (variables, connection fields, other secrets): name 32%, value 38%, labels take the rest, the actions column is as wide as its
+// icons (32px buttons, 8px gap, 8px cell padding) and sits flush right; an empty table keeps its header and shows the empty state in the body
+const MT_ICON = 32, MT_GAP = 8, MT_PAD = 8;
+function mnamecell(label, key, mono, help, sub) {
+  const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw);
+  kw.append(el("div", "kname" + (!key && mono ? " kmono" : ""), label)); if (key) kw.append(el("div", "ktitle mono", key));
+  if (sub) nc.append(el("div", "ksub", sub));   // a second line of small text under the name, as a description
+  if (help) setTip(nc, help); return nc;
+}
+function mactcell() { const td = el("td", "acts"); const box = el("div", "abox"); td.append(box); return [td, box]; }
+function mtable(parent, rows, empty) {
+  // the buttons of a row sit in fixed slots (eye, edit, remove): a slot that some row of the table uses is an empty placeholder in the rows without it
+  const slotOf = (b) => { const u = b.querySelector && b.querySelector("use"); const h = u ? u.getAttribute("href") : ""; return h === "#i-eye" || h === "#i-eye-off" ? 0 : h === "#i-edit" ? 1 : h === "#i-archive" || h === "#i-x" ? 2 : -1; };
+  const used = [false, false, false]; rows.forEach((r) => { const ab = r.querySelector(".abox"); if (ab) [...ab.children].forEach((b) => { const s = slotOf(b); if (s >= 0) used[s] = true; }); });
+  rows.forEach((r) => { const ab = r.querySelector(".abox"); if (!ab) return; const have = [...ab.children]; ab.textContent = ""; used.forEach((u, s) => { if (!u) return; const b = have.find((x) => slotOf(x) === s); ab.append(b || el("span", "islot")); }); });
+  const n = Math.max(1, used.filter(Boolean).length);
+  const tb = el("table", "rows mtable"); const cg = el("colgroup");
+  [["name", "32%"], ["value", "38%"], ["labels", "auto"], ["acts", (n * MT_ICON + (n - 1) * MT_GAP + 2 * MT_PAD) + "px"]].forEach(([c, w]) => { const x = el("col", "c-" + c); if (w !== "auto") x.style.width = w; cg.append(x); }); tb.append(cg);
+  const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
+  const body = el("tbody");
+  if (!rows.length) { const tr = el("tr"); const td = el("td", "emptycell"); td.colSpan = 4; td.append(icon("tray"), el("span", "", empty)); tr.append(td); body.append(tr); }
+  rows.forEach((r) => body.append(r));
+  tb.append(body); const tw = el("div", "mtwrap"); tw.append(tb); parent.append(tw);
+}
+
 // the rows of variables of one scope: label (from the description) with the key, the value by its visibility, what it is, the actions of edit mode
 function mvars(parent, rows, scope, opts) {
   opts = opts || {}; rows = rows || [];
   const shown = rows.filter((r) => (munused || r.active !== false) && (mshowauto || !r.system)); const hidden = rows.filter((r) => r.active === false).length; const auto = rows.filter((r) => r.system).length;
-  if (!rows.length) { parent.append(mempty(opts.empty || t("m.empty.vars"))); return; }
-  if (!shown.length && auto && !mshowauto) { parent.append(el("p", "dim mnote", t("m.empty.auto", { n: auto }))); return; }
-  const anyEye = shown.some((r) => r.state !== "empty" && r.visibility === "secret" && !r.imported);
-  const tb = el("table", "rows mtable"); const cg = el("colgroup"); ["34%", "36%", "18%", "136px"].forEach((w) => { const c = el("col"); c.style.width = w; cg.append(c); }); tb.append(cg);
-  const hr = el("tr"); [t("col.name"), t("col.value"), t("col.kind"), ""].forEach((x) => { const th = el("th", "h", x); th.scope = "col"; if (!x) th.setAttribute("aria-label", t("col.actions")); hr.append(th); }); const thead = el("thead"); thead.append(hr); tb.append(thead);
-  const body = el("tbody");
+  if (!rows.length) { mtable(parent, [], opts.empty || t("m.empty.vars")); return; }
+  if (!shown.length && auto && !mshowauto) { mtable(parent, [], t("m.empty.auto", { n: auto })); return; }
+  const trs = [];
   shown.forEach((r) => {
     const tr = el("tr", r.active === false ? "dim" : ""); const k = scope + "|" + r.key;
-    const nc = el("td", "mk"); const kw = el("div", "kcell"); nc.append(kw); kw.append(el("div", mlabel(r) !== r.key ? "kname" : "kname kmono", mlabel(r))); if (mlabel(r) !== r.key) kw.append(el("div", "ktitle mono", r.key));
-    const help = mtext(r.help) || r.description; if (help) setTip(nc, help);
+    const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, mtext(r.help) || r.description, opts.users ? (r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users")) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(r.required && r.active !== false ? withIcon("alert", t("m.var.required"), "needed") : el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
     else if (r.visibility === "plain") w.append(el("span", "val", r.value || ""));
@@ -2820,16 +2846,14 @@ function mvars(parent, rows, scope, opts) {
     else if (r.visibility && r.state !== "empty") tags.append(el("span", "quiet", t("vis.word." + r.visibility)));
     if (r.active === false) { const x = el("span", "tag warn", t("m.var.inactive")); setTip(x, r.when || ""); tags.append(x); }
     kc.append(tags);
-    const ac = el("td", "acts");
-    if (r.state !== "empty" && r.visibility === "secret" && !r.imported) ac.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k)));
-    else if (anyEye) ac.append(el("span", "islot"));   // the icons stay in their columns whether a row has an eye or not
-    if (editing() && !r.system && !(r.imported && !r.overridden && opts.general)) ac.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mvarDialog(scope, r)));
-    if (editing() && r.imported && !r.overridden && opts.onUnimport) ac.append(el("span", "islot"), ibtn("x", t("m.env.unimport", { name: mlabel(r) }), () => opts.onUnimport(r.key)));   // an imported value can be taken out again from here
-    if (editing() && !r.missing && !(r.imported && !r.overridden) && r.system) ac.append(el("span", "islot")); // keeps the delete button in its column
-    if (editing() && !r.missing && !(r.imported && !r.overridden)) ac.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), scope === "shared" && r.users && r.users.length ? t("m.confirm_shared_used.note", { list: r.users.join(", ") }) : t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
-    tr.append(nc, vc, kc, ac); body.append(tr);
+    const [ac, ab] = mactcell();
+    if (r.state !== "empty" && r.visibility === "secret" && !r.imported) ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal(scope, r.key, k)));
+    if (editing() && !r.system && !(r.imported && !r.overridden && opts.general)) ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mvarDialog(scope, r)));
+    if (editing() && r.imported && !r.overridden && opts.onUnimport) ab.append(ibtn("x", t("m.env.unimport", { name: mlabel(r) }), () => opts.onUnimport(r.key)));   // an imported value can be taken out again from here
+    if (editing() && !r.missing && !(r.imported && !r.overridden)) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), scope === "shared" && r.users && r.users.length ? t("m.confirm_shared_used.note", { list: r.users.join(", ") }) : t("m.var.delete_note"), "m-var", { scope, key: r.key, delete: true }), "danger"));
+    tr.append(nc, vc, kc, ac); trs.push(tr);
   });
-  tb.append(body); const tw = el("div", "mtwrap"); tw.append(tb); parent.append(tw);
+  mtable(parent, trs, t("m.empty.hidden"));
   if (hidden || (munused && rows.some((r) => r.active === false))) { const u = el("button", "side-add mtoggle"); u.type = "button"; u.setAttribute("aria-pressed", String(munused)); u.append(icon(munused ? "eye-off" : "eye"), el("span", "t", munused ? t("m.hide_unused") : t("m.show_unused", { n: hidden }))); u.addEventListener("click", () => { munused = !munused; renderMMain(); }); parent.append(u); }
 }
 
@@ -2899,9 +2923,7 @@ function mShared(main) {
   mhead(main, "share", t("m.side.shared"), t("m.shared.note"));
   const sec = mblock(main, t("m.shared.vars"), "share", [editing() ? btn(t("m.btn.add_var"), "plus", () => mvarDialog("shared", null)) : null]);
   const rows = (nav.shared || []).map((r) => Object.assign({}, r));
-  if (!rows.length) { sec.append(mempty(t("m.empty.shared"))); return; }
-  mvars(sec, rows, "shared");
-  const used = el("div", "mused"); rows.forEach((r) => { const line = el("div", "dline"); line.append(el("b", "mono", r.key), el("span", "dim", r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users"))); used.append(line); }); sec.append(used);
+  mvars(sec, rows, "shared", { empty: t("m.empty.shared"), users: true });
 }
 
 function muserText(u) { return t("m.user." + u.kind, { env: u.env, name: u.name }); }
@@ -2924,22 +2946,21 @@ function mConnections(main) {
 
 // the fields of a connection (the rows of mvars with the actions of a field)
 function mfields(parent, rows, c) {
-  const tb = el("table", "rows mtable"); const cg = el("colgroup"); ["34%", "40%", "14%", "136px"].forEach((w) => { const x = el("col"); x.style.width = w; cg.append(x); }); tb.append(cg);
-  const body = el("tbody");
+  const trs = [];
   rows.forEach((r) => {
     const tr = el("tr"); const k = "conn/" + c.uuid + "|" + r.key;
-    const nc = el("td", "kcell"); nc.append(el("div", mlabel(r) !== r.key ? "kname" : "kname kmono", mlabel(r))); if (mlabel(r) !== r.key) nc.append(el("div", "ktitle mono", r.key)); if (r.help) setTip(nc, mtext(r.help));
+    const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, r.help ? mtext(r.help) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
     else if (r.visibility === "plain") w.append(el("span", "val", r.value || "")); else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k))); else w.append(el("span", "mask", "••••••"));
     vc.append(w);
     const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + r.visibility)));
-    const ac = el("td", "acts");
-    if (r.state !== "empty" && r.visibility === "secret") ac.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k)));
-    if (editing()) { ac.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ac.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
-    tr.append(nc, vc, kc, ac); body.append(tr);
+    const [ac, ab] = mactcell();
+    if (r.state !== "empty" && r.visibility === "secret") ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("conn/" + c.uuid, r.key, k)));
+    if (editing()) { ab.append(ibtn("edit", t("m.var.edit", { name: mlabel(r) }), () => mfieldDialog(c, r))); if (!r.missing) ab.append(ibtn("archive", t("m.var.delete", { name: mlabel(r) }), () => mdelete(t("m.var.delete_title", { name: mlabel(r) }), t("m.field.delete_note"), "m-field", { uuid: c.uuid, field: r.key, delete: true }), "danger")); }
+    tr.append(nc, vc, kc, ac); trs.push(tr);
   });
-  tb.append(body); parent.append(tb);
+  mtable(parent, trs, t("m.empty.vars"));
 }
 
 function mconnDialog(c) {
@@ -2969,17 +2990,17 @@ function mOther(main) {
   const list = nav.other || [];
   if (!list.length) { main.append(mempty(t("m.empty.other"))); return; }
   const sec = mblock(main, t("m.side.other"), "key", []);
-  const tb = el("table", "rows mtable"); const cg = el("colgroup"); ["44%", "32%", "12%", "136px"].forEach((w) => { const c = el("col"); c.style.width = w; cg.append(c); }); tb.append(cg); const body = el("tbody");
+  const trs = [];
   list.forEach((o) => {
     const tr = el("tr"); const k = "other/" + o.uuid + "|";
-    const nc = el("td", "kcell"); nc.append(el("div", "kname", o.title)); if (o.notes) setTip(nc, o.notes);
+    const nc = mnamecell(o.title, "", false, o.notes);
     const vc = el("td"); const w = el("div", "vcell"); if (o.state === "empty") w.append(el("span", "notset", t("val.notset"))); else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k))); else w.append(el("span", "mask", "••••••")); vc.append(w);
     const kc = el("td"); if (o.file) kc.append(el("span", "tag", t("m.other.file")));
-    const ac = el("td", "acts"); if (o.state !== "empty") ac.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("other/" + o.uuid, "", k)));
-    if (editing()) ac.append(ibtn("edit", t("m.var.edit", { name: o.title }), () => motherDialog(o)), ibtn("archive", t("m.var.delete", { name: o.title }), () => mdelete(t("m.var.delete_title", { name: o.title }), t("m.var.delete_note"), "m-other", { action: "delete", uuid: o.uuid }), "danger"));
-    tr.append(nc, vc, kc, ac); body.append(tr);
+    const [ac, ab] = mactcell(); if (o.state !== "empty") ab.append(ibtn(mrevealed.has(k) ? "eye-off" : "eye", t(mrevealed.has(k) ? "m.hide" : "m.reveal"), () => mreveal("other/" + o.uuid, "", k)));
+    if (editing()) ab.append(ibtn("edit", t("m.var.edit", { name: o.title }), () => motherDialog(o)), ibtn("archive", t("m.var.delete", { name: o.title }), () => mdelete(t("m.var.delete_title", { name: o.title }), t("m.var.delete_note"), "m-other", { action: "delete", uuid: o.uuid }), "danger"));
+    tr.append(nc, vc, kc, ac); trs.push(tr);
   });
-  tb.append(body); sec.append(tb);
+  mtable(sec, trs, t("m.empty.vars"));
 }
 
 function motherDialog(o) {
