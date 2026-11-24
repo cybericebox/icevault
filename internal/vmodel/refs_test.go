@@ -173,6 +173,54 @@ func TestRefTargetsForLeavesOutCycles(t *testing.T) {
 	}
 }
 
+func targetKeys(l []RefTarget) []string {
+	var out []string
+	for _, x := range l {
+		out = append(out, x.System+"."+x.Key)
+	}
+	return out
+}
+
+func TestRefTargetsForNewKeyConnectionsSitesAndDepth(t *testing.T) {
+	m := sample()
+	d := desc(t)
+	prod := m.Env("prod")
+	// a variable not saved yet: the ones that already refer to its future key are left out
+	prod.General = append(prod.General, &Var{Key: "BACK", Value: "${{ self.NEW }}", Vis: VisPlain}, &Var{Key: "FINE", Value: "ok", Vis: VisPlain})
+	got := targetKeys(m.RefTargetsFor(d, Place{Env: prod}, "NEW"))
+	if contains(got, "self.BACK") || !contains(got, "self.FINE") {
+		t.Errorf("new key: %v", got)
+	}
+	// a served connection whose field refers back to a shared variable
+	m.Shared = append(m.Shared, &Var{Key: "S_EDITED", Value: "x", Vis: VisPlain})
+	m.Connections = append(m.Connections, &Connection{Name: "Uptime monitor", Kind: "other", Fields: []*Field{{Name: "api_key", Value: "${{ shared.S_EDITED }}", Secret: true}, {Name: "account", Value: "acct"}}})
+	sg := targetKeys(m.RefTargetsFor(d, Place{}, "S_EDITED"))
+	if contains(sg, "monitor.MONITOR_KEY") || !contains(sg, "monitor.MONITOR_ACCOUNT") {
+		t.Errorf("connection: %v", sg)
+	}
+	// two sites: a variable of one site that refers back is a cycle for the value of General
+	prod.Site("main").Vars = append(prod.Site("main").Vars, &Var{Key: "SITE_BACK", Value: "${{ self.EDITED }}", Vis: VisPlain})
+	prod.General = append(prod.General, &Var{Key: "EDITED", Value: "x", Vis: VisPlain})
+	if got := targetKeys(m.RefTargetsFor(d, Place{Env: prod}, "EDITED")); contains(got, "self.SITE_BACK") || !contains(got, "self.FINE") {
+		t.Errorf("two sites: %v", got)
+	}
+	// depth: a chain that would make the value go past the limit is left out like a cycle
+	prev := ""
+	for i := 0; i < 9; i++ {
+		k := "D" + string(rune('0'+i))
+		v := "end"
+		if prev != "" {
+			v = "${{ self." + prev + " }}"
+		}
+		prod.General = append(prod.General, &Var{Key: k, Value: v, Vis: VisPlain})
+		prev = k
+	}
+	got = targetKeys(m.RefTargetsFor(d, Place{Env: prod}, "TOP"))
+	if contains(got, "self.D8") || !contains(got, "self.D7") {
+		t.Errorf("depth: %v", got)
+	}
+}
+
 func contains(l []string, x string) bool {
 	for _, y := range l {
 		if y == x {

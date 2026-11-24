@@ -886,8 +886,8 @@ function genPopover(anchor, o) {
 
 // ---------------------------------------------------------------- the reference picker: search over the global values and the external systems (no values shown)
 const refTitle = (r) => r.system === "self" ? t("ref.self") : r.system === "shared" ? t("ref.shared") : (r.title || r.system);
-let pickFilter = { kind: "all", conn: "" };   // the filter of the reference picker, kept while the window is open
 async function pickReference(onPick, scope, getKey) {
+  const pickFilter = { kind: "all", conn: "" };   // every opening starts with All: the last choice belongs to another variable
   const key = getKey ? String(getKey() || "").trim() : "";
   const args = {}; if (scope) args.scope = scope; if (key) args.key = key;
   const x = await api("/api/references", Object.keys(args).length ? args : undefined); if (x.status !== 200) { say(srv(x.data), "err"); return; }
@@ -895,8 +895,6 @@ async function pickReference(onPick, scope, getKey) {
   const kindOf = (r) => (r.system === "self" ? "self" : r.system === "shared" ? "shared" : "conn");
   const count = { all: targets.length, self: 0, shared: 0, conn: 0 }; const conns = new Map();
   targets.forEach((r) => { count[kindOf(r)]++; if (kindOf(r) === "conn") conns.set(r.system, { title: refTitle(r), n: (conns.has(r.system) ? conns.get(r.system).n : 0) + 1 }); });
-  if (!count[pickFilter.kind] && pickFilter.kind !== "all") pickFilter = { kind: "all", conn: "" };
-  if (pickFilter.kind !== "conn" || !conns.has(pickFilter.conn)) pickFilter.conn = "";
   const q = el("input", "input lg"); q.type = "search"; q.placeholder = t("ref.search"); q.setAttribute("aria-label", t("ref.search")); box.append(q);
   const bar = el("div", "pfilters"); bar.setAttribute("role", "radiogroup"); bar.setAttribute("aria-label", t("ref.f.label")); box.append(bar);
   const sub = el("div", "pfilters"); sub.setAttribute("role", "radiogroup"); sub.setAttribute("aria-label", t("ref.f.conn")); box.append(sub);
@@ -908,7 +906,7 @@ async function pickReference(onPick, scope, getKey) {
   const draw = () => {
     bar.textContent = ""; sub.textContent = "";
     const kinds = [["all", t("ref.f.all")], ["self", t("ref.f.self")], ["shared", t("ref.f.shared")], ["conn", t("ref.f.conn")]].filter(([k]) => k === "all" || count[k]);
-    kinds.forEach(([k, label]) => chip(bar, label, count[k], pickFilter.kind === k, () => { pickFilter = { kind: k, conn: "" }; }));
+    kinds.forEach(([k, label]) => chip(bar, label, count[k], pickFilter.kind === k, () => { pickFilter.kind = k; pickFilter.conn = ""; }));
     sub.hidden = pickFilter.kind !== "conn" || conns.size < 2;
     if (!sub.hidden) { chip(sub, t("ref.f.conn_all"), count.conn, !pickFilter.conn, () => { pickFilter.conn = ""; }); conns.forEach((c, sys) => chip(sub, c.title, c.n, pickFilter.conn === sys, () => { pickFilter.conn = sys; })); }
     lst.textContent = ""; const s = q.value.trim().toLowerCase();
@@ -921,11 +919,11 @@ async function pickReference(onPick, scope, getKey) {
   q.addEventListener("input", draw); draw();
   const actions = el("div", "actions"); actions.append(btn(t("btn.cancel"), "", () => confirmLayer.close(), "lg")); box.append(actions); q.focus();
 }
-// arrow keys move inside a radio group of chips (the checked one is the one stop of Tab)
+// arrow keys, Home and End move inside a radio group of chips (the checked one is the one stop of Tab)
 function arrowRadios(e, bar) {
-  const d = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0; if (!d) return;
   const l = [...bar.querySelectorAll("[role=radio]")]; const i = l.indexOf(document.activeElement); if (i < 0) return;
-  e.preventDefault(); l[(i + d + l.length) % l.length].focus(); l[(i + d + l.length) % l.length].click();
+  const j = e.key === "Home" ? 0 : e.key === "End" ? l.length - 1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? (i + 1) % l.length : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (i + l.length - 1) % l.length : -1; if (j < 0) return;
+  e.preventDefault(); l[j].focus(); l[j].click();
 }
 function insertAtCursor(inp, text, replaceTrigger) {
   const a = inp.selectionStart == null ? inp.value.length : inp.selectionStart, b = inp.selectionEnd == null ? a : inp.selectionEnd;
