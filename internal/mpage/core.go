@@ -532,7 +532,7 @@ func (c *Core) Read(op string, a map[string]any) (any, error) {
 	case "nav":
 		return c.Nav(), nil
 	case "references":
-		return c.references(str(a, "scope"))
+		return c.references(str(a, "scope"), str(a, jKey))
 	case "preview-value":
 		return c.previewValue(a)
 	}
@@ -563,14 +563,14 @@ func (c *Core) place(name string) (vmodel.Place, error) {
 }
 
 // references lists what a value of the scope can refer to: variables of its environment (self), shared variables and served connections. Names,
-// descriptions and visibility only, never a value.
-func (c *Core) references(scope string) (any, error) {
+// descriptions and visibility only, never a value. The variable being edited (key) and what would make a cycle through it are left out.
+func (c *Core) references(scope, key string) (any, error) {
 	pl, err := c.place(scope)
 	if err != nil {
 		return nil, err
 	}
 	out := []map[string]any{}
-	for _, t := range c.m.RefTargets(c.d, pl) {
+	for _, t := range c.m.RefTargetsFor(c.d, pl, key) {
 		out = append(out, map[string]any{"system": t.System, jKey: t.Key, jTitle: t.Title, "description": t.Description, "labels": []string{}, "vis": t.Vis})
 	}
 	return map[string]any{"targets": out}, nil

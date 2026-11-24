@@ -151,7 +151,7 @@ func TestModelScreenWiresReferencesAndStickyHeader(t *testing.T) {
 		t.Error("the value field of mvarDialog has no reference controls with its scope")
 	}
 	d := regexp.MustCompile(`(?s)function dialog\(.*?\n\}\n`).FindString(page)
-	for _, want := range []string{"refControls(inp, wrap, f.ref.scope)", "liveRefs(inp,", "scope: f.ref.scope"} {
+	for _, want := range []string{"refControls(inp, wrap, f.ref.scope, () => f.ref.key(inputs))", "liveRefs(inp,", "scope: f.ref.scope"} {
 		if !strings.Contains(d, want) {
 			t.Errorf("dialog() does not wire %s", want)
 		}

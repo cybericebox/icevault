@@ -307,6 +307,68 @@ func (m *Vault) RefTargets(d *project.Description, p Place) []RefTarget {
 	return out
 }
 
+// RefTargetsFor is RefTargets for a value of the variable key at place: it leaves out the variable itself and every target whose resolution
+// reaches the variable (a reference to it would be a cycle). An empty key (a variable not named yet) leaves the list as RefTargets gives it.
+func (m *Vault) RefTargetsFor(d *project.Description, p Place, key string) []RefTarget {
+	all := m.RefTargets(d, p)
+	if key == "" {
+		return all
+	}
+	own := model.SelfRef
+	if p.Env == nil {
+		own = model.GlobalRef
+	}
+	out := make([]RefTarget, 0, len(all))
+	for _, t := range all {
+		if t.System == own && t.Key == key {
+			continue
+		}
+		if m.reachesBack(d, p, key, own+"."+key, "${{ "+t.System+"."+t.Key+" }}") {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// reachesBack says whether the value (a single reference) at the variable key of place resolves into a cycle through that variable (ref is its
+// name in a reference: self.KEY or shared.KEY).
+func (m *Vault) reachesBack(d *project.Description, p Place, key, ref, value string) bool {
+	var errs []string
+	if p.Env == nil {
+		draft := &Var{Key: key, Value: value, Vis: VisPlain, Managed: ManagedOwner}
+		shared := make([]*Var, 0, len(m.Shared)+1)
+		replaced := false
+		for _, x := range m.Shared {
+			if x.Key == key {
+				shared, replaced = append(shared, draft), true
+				continue
+			}
+			shared = append(shared, x)
+		}
+		if !replaced {
+			shared = append(shared, draft)
+		}
+		snap := CompatWith(&Vault{Shared: shared, Connections: m.Connections}, descOf(d), CompatOptions{}).Snap
+		_, _, errs = snap.Expand(value, VisPlain, "")
+	} else {
+		pv := m.PreviewValue(d, p, key, value, VisPlain)
+		errs = pv.Errors
+	}
+	for _, e := range errs {
+		chain, ok := strings.CutPrefix(e, "cycle: ")
+		if !ok {
+			continue
+		}
+		for _, x := range strings.Split(chain, " -> ") {
+			if x == ref {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Broken is a reference of a variable that does not resolve: where the variable is (general, site or product, with the name of the site or
 // product), its key and the reason.
 type Broken struct {

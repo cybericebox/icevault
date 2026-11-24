@@ -135,6 +135,44 @@ func TestBrokenRefsAndTargets(t *testing.T) {
 	}
 }
 
+func TestRefTargetsForLeavesOutCycles(t *testing.T) {
+	m := sample()
+	d := desc(t)
+	prod := m.Env("prod")
+	prod.General = append(prod.General,
+		&Var{Key: "EDITED", Value: "x", Vis: VisPlain},
+		&Var{Key: "BACK", Value: "${{ self.EDITED }}", Vis: VisPlain},
+		&Var{Key: "BACK2", Value: "${{ self.BACK }}", Vis: VisPlain},
+		&Var{Key: "FINE", Value: "ok", Vis: VisPlain})
+	keys := func(l []RefTarget) []string {
+		var out []string
+		for _, x := range l {
+			out = append(out, x.System+"."+x.Key)
+		}
+		return out
+	}
+	got := keys(m.RefTargetsFor(d, Place{Env: prod}, "EDITED"))
+	for _, bad := range []string{"self.EDITED", "self.BACK", "self.BACK2"} {
+		if contains(got, bad) {
+			t.Errorf("%s offered: %v", bad, got)
+		}
+	}
+	for _, ok := range []string{"self.FINE", "self.PUBLIC_HOST", "shared.CONTACT_ADDRESS"} {
+		if !contains(got, ok) {
+			t.Errorf("%s missing: %v", ok, got)
+		}
+	}
+	if all := keys(m.RefTargetsFor(d, Place{Env: prod}, "")); !contains(all, "self.EDITED") || !contains(all, "self.BACK") {
+		t.Errorf("no key must not filter: %v", all)
+	}
+	// the shared level: a shared variable that refers to the edited one is a cycle too
+	m.Shared = append(m.Shared, &Var{Key: "S_EDITED", Value: "x", Vis: VisPlain}, &Var{Key: "S_BACK", Value: "${{ shared.S_EDITED }}", Vis: VisPlain}, &Var{Key: "S_FINE", Value: "y", Vis: VisPlain})
+	sg := keys(m.RefTargetsFor(d, Place{}, "S_EDITED"))
+	if contains(sg, "shared.S_EDITED") || contains(sg, "shared.S_BACK") || !contains(sg, "shared.S_FINE") || !contains(sg, "shared.CONTACT_ADDRESS") {
+		t.Errorf("shared: %v", sg)
+	}
+}
+
 func contains(l []string, x string) bool {
 	for _, y := range l {
 		if y == x {

@@ -116,6 +116,18 @@ func TestReferencesAndPreview(t *testing.T) {
 			t.Errorf("the picker shows a value: %s", secret)
 		}
 	}
+	// the variable being edited is never offered, nor a variable that refers back to it
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "BACK_MAIL", "value": "${{ self.ADMIN_MAIL }}", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	own, err := c.Read("references", map[string]any{"scope": "env/prod/general", "key": "ADMIN_MAIL"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawOwn, _ := json.Marshal(own)
+	if strings.Contains(string(rawOwn), `"key":"ADMIN_MAIL"`) || strings.Contains(string(rawOwn), `"key":"BACK_MAIL"`) || !strings.Contains(string(rawOwn), `"key":"CONTACT_ADDRESS"`) {
+		t.Errorf("the edited variable or a cycle is offered: %s", rawOwn)
+	}
 	sh, _ := c.Read("references", map[string]any{"scope": "shared"})
 	if raw, _ := json.Marshal(sh); strings.Contains(string(raw), `"system":"self"`) {
 		t.Errorf("a shared value is offered self: %s", raw)
