@@ -79,7 +79,7 @@ func text(t project.Text) map[string]string {
 }
 
 // varView is one variable as the page shows it: a plain value only.
-func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) string) map[string]any {
+func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) string, rs map[*vmodel.Var]*vmodel.Resolved) map[string]any {
 	state := "set"
 	if x == nil || x.Value == "" {
 		state = "empty"
@@ -89,6 +89,9 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 		out[jKey], out["visibility"], out["managed"], out["description"], out["changed"] = x.Key, x.Vis, x.Managed, x.Description, x.Changed
 		if x.Vis == vmodel.VisPlain {
 			out["value"] = x.Value
+		}
+		if r := rs[x]; r != nil {
+			out["resolved"] = resolvedView(r)
 		}
 	}
 	if h != nil {
@@ -130,8 +133,22 @@ func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) s
 	return out
 }
 
+// resolvedView is what a value with references comes to, for the table: the references it takes from, the strictest visibility and the text only when
+// that is plain and nothing is wrong (a secret result is never sent here: the eye asks for it).
+func resolvedView(r *vmodel.Resolved) map[string]any {
+	refs := []string{}
+	for _, x := range r.Refs {
+		refs = append(refs, x.System+"."+x.Key)
+	}
+	out := map[string]any{"refs": refs, "vis": r.Vis, "broken": len(r.Errors) > 0, "varies": r.Varies}
+	if len(r.Errors) == 0 && !r.Varies && r.Vis == vmodel.VisPlain {
+		out["value"] = r.Text
+	}
+	return out
+}
+
 // vars lists the variables of a scope: the described ones in the order of the description (present or missing), then the others by key.
-func (c *Core) vars(have []*vmodel.Var, described []project.Variable, values func(string) string) []map[string]any {
+func (c *Core) vars(have []*vmodel.Var, described []project.Variable, values func(string) string, rs map[*vmodel.Var]*vmodel.Resolved) []map[string]any {
 	out := []map[string]any{}
 	seen := map[string]bool{}
 	for i := range described {
@@ -143,7 +160,7 @@ func (c *Core) vars(have []*vmodel.Var, described []project.Variable, values fun
 			}
 		}
 		seen[h.Name] = true
-		out = append(out, c.varView(x, h, values))
+		out = append(out, c.varView(x, h, values, rs))
 	}
 	rest := []*vmodel.Var{}
 	for _, v := range have {
@@ -153,12 +170,12 @@ func (c *Core) vars(have []*vmodel.Var, described []project.Variable, values fun
 	}
 	sort.Slice(rest, func(i, j int) bool { return rest[i].Key < rest[j].Key })
 	for _, v := range rest {
-		out = append(out, c.varView(v, nil, values))
+		out = append(out, c.varView(v, nil, values, rs))
 	}
 	return out
 }
 
-func (c *Core) connView(x *vmodel.Connection) map[string]any {
+func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string]any {
 	k, _ := kinds.ConnectionKind(x.Kind)
 	fields := []map[string]any{}
 	names := map[string]bool{}
@@ -174,6 +191,9 @@ func (c *Core) connView(x *vmodel.Connection) map[string]any {
 		row := map[string]any{jName: name, jTitle: title, "secret": secret, jState: state, "present": f != nil}
 		if f != nil && !secret {
 			row["value"] = f.Value
+		}
+		if f != nil && rs != nil && rs.Fields[f] != nil {
+			row["resolved"] = resolvedView(rs.Fields[f])
 		}
 		used := []string{}
 		if c.d != nil {
@@ -262,13 +282,17 @@ func (c *Core) values(e *vmodel.Environment) func(string) string {
 	return get
 }
 
-func (c *Core) envView(e *vmodel.Environment) map[string]any {
+func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[string]any {
+	var rs map[*vmodel.Var]*vmodel.Resolved
+	if all != nil {
+		rs = all.Env[e]
+	}
 	vals := c.values(e)
 	var gdesc []project.Variable
 	if c.d != nil {
 		gdesc = c.d.General.Variables
 	}
-	general := c.vars(e.GeneralValues(), gdesc, vals)
+	general := c.vars(e.GeneralValues(), gdesc, vals, rs)
 	imported := map[string]bool{}
 	for _, x := range e.Imports {
 		imported[x.Key] = true
@@ -298,11 +322,11 @@ func (c *Core) envView(e *vmodel.Environment) map[string]any {
 		}
 		sk, _ := kinds.SiteKind(s.Kind)
 		sites = append(sites, map[string]any{"uuid": s.UUID, jName: s.Name, jKind: s.Kind, "kind_title": sk.Title, "needs_connection": sk.Connection, "state_kind": sk.State,
-			"connection": connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals), "files": len(s.Files), "users": users})
+			"connection": connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals, rs), "files": len(s.Files), "users": users})
 	}
 	products := []map[string]any{}
 	for _, p := range e.Products {
-		products = append(products, c.productView(e, p, vals))
+		products = append(products, c.productView(e, p, vals, rs))
 	}
 	avail := []string{}
 	for _, s := range c.m.Shared {
@@ -354,7 +378,7 @@ func keysOf(vs []*vmodel.Var) []string {
 	return out
 }
 
-func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(string) string) map[string]any {
+func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(string) string, rs map[*vmodel.Var]*vmodel.Resolved) map[string]any {
 	var dp *project.Product
 	if c.d != nil {
 		dp = c.d.Product(p.Name)
@@ -378,7 +402,7 @@ func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(s
 		}
 	}
 	out := map[string]any{"uuid": p.UUID, jName: p.Name, jTitle: text(title), "help": text(help), "enabled": p.Enabled, "place": p.Place, jSite: "", "connections": []string{},
-		"vars": c.vars(p.Vars, desc, vals), "needs": needs, "site_kind": siteKind}
+		"vars": c.vars(p.Vars, desc, vals, rs), "needs": needs, "site_kind": siteKind}
 	if p.Site != nil {
 		out[jSite] = p.Site.UUID
 	}
@@ -394,7 +418,7 @@ func (c *Core) productView(e *vmodel.Environment, p *vmodel.Product, vals func(s
 			sdesc = dp.OnSiteKind[siteKind]
 		}
 		if len(sdesc) > 0 || len(p.Sub[siteKind]) > 0 {
-			out["sub"] = map[string]any{jKind: siteKind, "vars": c.vars(p.Sub[siteKind], sdesc, vals)}
+			out["sub"] = map[string]any{jKind: siteKind, "vars": c.vars(p.Sub[siteKind], sdesc, vals, rs)}
 		}
 	}
 	out["missing"] = c.missing(e, p, out, vals)
@@ -419,11 +443,11 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 	if sub, ok := view["sub"].(map[string]any); ok {
 		scan(jProduct, "", sub["vars"].([]map[string]any))
 	}
-	scan("general", "", c.vars(e.GeneralValues(), c.d.General.Variables, vals))
+	scan("general", "", c.vars(e.GeneralValues(), c.d.General.Variables, vals, nil))
 	if p.Site == nil {
 		out = append(out, map[string]any{jWhere: jSite, jKey: ""})
 	} else {
-		scan(jSite, p.Site.Name, c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals))
+		scan(jSite, p.Site.Name, c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals, nil))
 		if sk, _ := kinds.SiteKind(p.Site.Kind); sk.Connection != "" && p.Site.Connection == nil {
 			out = append(out, map[string]any{jWhere: "site_connection", jKey: sk.Connection, jSite: p.Site.Name})
 		}
@@ -476,7 +500,8 @@ func (c *Core) Nav() map[string]any {
 		sk = append(sk, map[string]any{"id": s.ID, jTitle: s.Title, "connection": s.Connection, jState: s.State, "supported": supported})
 	}
 	var shared []project.Variable
-	sharedRows := c.vars(c.m.Shared, shared, nil)
+	all := c.m.ResolveAll(c.d) // one resolution for the whole page, not one per row
+	sharedRows := c.vars(c.m.Shared, shared, nil, all.Shared)
 	for _, r := range sharedRows {
 		k, _ := r[jKey].(string)
 		users := []string{}
@@ -494,7 +519,7 @@ func (c *Core) Nav() map[string]any {
 	}
 	conns := []map[string]any{}
 	for _, x := range c.m.Connections {
-		conns = append(conns, c.connView(x))
+		conns = append(conns, c.connView(x, all))
 	}
 	other := []map[string]any{}
 	for _, o := range c.m.Other {
@@ -506,7 +531,7 @@ func (c *Core) Nav() map[string]any {
 	}
 	envs := []map[string]any{}
 	for _, e := range c.m.Envs {
-		envs = append(envs, c.envView(e))
+		envs = append(envs, c.envView(e, all))
 	}
 	products := []map[string]any{}
 	if c.d != nil {
@@ -608,17 +633,29 @@ func (c *Core) previewValue(a map[string]any) (any, error) {
 
 // Reveal returns one secret value: section "m", name the scope (shared, conn/<uuid>, other/<uuid>, env/<e>/general, env/<e>/site/<s>,
 // env/<e>/product/<p>[/<kind>]), key the variable or the field.
-func (c *Core) Reveal(section, name, _, key string) (string, error) {
+//
+// With group "resolved" a value that holds references comes back as it resolves (what the table shows in place of the reference); a broken one, one
+// that differs between sites, or a sealed result is refused.
+func (c *Core) Reveal(section, name, group, key string) (string, error) {
 	if section != "m" {
 		return "", bad("bad_request")
 	}
+	resolved := group == "resolved"
 	switch {
 	case strings.HasPrefix(name, "conn/"):
 		x := c.connByUUID(strings.TrimPrefix(name, "conn/"))
 		if x == nil || x.Field(key) == nil {
 			return "", refuse("not_found", nil)
 		}
-		return x.Field(key).Value, nil
+		f := x.Field(key)
+		if resolved && strings.Contains(f.Value, "${{") {
+			vis := vmodel.VisPlain
+			if f.Secret {
+				vis = vmodel.VisSecret
+			}
+			return c.resolvedText(vmodel.Place{}, key, f.Value, vis)
+		}
+		return f.Value, nil
 	case strings.HasPrefix(name, "other/"):
 		for _, o := range c.m.Other {
 			if o.UUID == strings.TrimPrefix(name, "other/") {
@@ -631,19 +668,29 @@ func (c *Core) Reveal(section, name, _, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	text := func(x *vmodel.Var) (string, error) {
+		if x.Vis == vmodel.VisSealed {
+			return "", refuse("sealed", nil)
+		}
+		if !resolved || !strings.Contains(x.Value, "${{") {
+			return x.Value, nil
+		}
+		pl, err := c.place(name)
+		if err != nil {
+			return "", err
+		}
+		return c.resolvedText(pl, x.Key, x.Value, x.Vis)
+	}
 	for _, x := range list.get() {
 		if x.Key == key {
-			if x.Vis == vmodel.VisSealed {
-				return "", refuse("sealed", nil)
-			}
-			return x.Value, nil
+			return text(x)
 		}
 	}
 	if strings.HasSuffix(name, "/general") {
 		e := c.m.Env(strings.Split(name, "/")[1])
 		for _, x := range e.Imports {
 			if x.Key == key && x.Vis != vmodel.VisSealed {
-				return x.Value, nil
+				return text(x)
 			}
 		}
 	}
@@ -731,4 +778,18 @@ func (c *Core) defaultVis(key string) string {
 		return vmodel.VisSecret
 	}
 	return vmodel.VisPlain
+}
+
+// resolvedText is the text a value with references comes to, for the one value a person asks to see. Never a broken or a sealed one.
+func (c *Core) resolvedText(pl vmodel.Place, key, value, vis string) (string, error) {
+	pv := c.m.ResolveValue(c.d, pl, key, value, vis)
+	switch {
+	case len(pv.Errors) > 0:
+		return "", refuse("ref_broken", nil)
+	case pv.Vis == vmodel.VisSealed:
+		return "", refuse("sealed", nil)
+	case len(pv.Sites) > 0:
+		return "", refuse("ref_varies", nil)
+	}
+	return pv.Text, nil
 }

@@ -346,3 +346,33 @@ func TestKeyTextAsTypedAndListInsideDialog(t *testing.T) {
 		t.Error("a JSON key is re-serialised even when it is one line")
 	}
 }
+
+// The tables of the model page show what a value with references resolves to, with its source under it; the eye asks for the resolved text, and
+// a broken reference shows the state, never a value.
+func TestModelTablesShowResolvedValues(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+	for _, want := range []string{"function mvaluecell(", `"← " + rv.refs.join(", ")`, `t("state.broken")`, `t("m.var.varies")`, `"resolved" : ""`, "mvaluecell(vc, w, r, k)"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the page lacks %s", want)
+		}
+	}
+	if n := strings.Count(s, "mvaluecell(vc, w, r, k)"); n < 2 {
+		t.Errorf("variables and connection fields must both use mvaluecell, found %d", n)
+	}
+	raw, _ := fs.ReadFile(frontend(t), "messages.json")
+	var tables map[string]map[string]string
+	if err := json.Unmarshal(raw, &tables); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"en", "uk", "ru"} {
+		for _, k := range []string{"m.var.varies", "srv.ref_broken", "srv.ref_varies", "state.broken"} {
+			if strings.TrimSpace(tables[lang][k]) == "" {
+				t.Errorf("no %s in %s", k, lang)
+			}
+		}
+	}
+}
