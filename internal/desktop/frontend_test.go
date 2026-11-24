@@ -23,7 +23,7 @@ func TestPageEndpointsAreBound(t *testing.T) {
 	}
 	lifecycle := map[string]bool{"status": true, "ping": true, "close": true, "lock": true, "mode": true, "unlock": true, "reveal": true, "cli": true, "cli-install": true, "refresh": true,
 		"vaults": true, "vault-select": true, "vault-open": true, "vault-root": true, "vault-forget": true, "project-choose": true,
-		"vault-new-project": true, "vault-new-noproject": true, "vault-no-project": true, "vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "vault-change-info": true, "vault-change": true, "kit-save": true, "kit-discard": true,
+		"vault-new-project": true, "vault-new-noproject": true, "vault-no-project": true, "vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "vault-change-info": true, "vault-change": true, "kit-save": true, "kit-discard": true, "kit-held": true,
 		"update": true, "update-check": true, "update-fetch": true, "update-apply": true, "update-auto": true, "update-release": true}
 	reads := map[string]bool{"nav": true, "item": true, "compare": true, "references": true, "pull-candidates": true, "shared": true, "visibility": true, "preview-value": true, "migrate-plan": true}
 	found := map[string]bool{}
@@ -210,7 +210,7 @@ func TestModelDialogsHideSecretsAndGuardTheKit(t *testing.T) {
 	}
 	page := string(src)
 	for _, want := range []string{
-		"maskIf: fresh ?", `classList.add("masked")`, "fromFile: multi", "textarea.masked {", `bad_key: "key"`, `check: (v) => (v.trim() && !/^[A-Za-z_]`,
+		"maskIf: fresh ?", `classList.add("masked")`, "fromFile: !!r && secret", "textarea.masked {", `bad_key: "key"`, `check: (v) => (v.trim() && !/^[A-Za-z_]`,
 		"function leaveKit(", `kit.dataset.saved = "1"`, "leaveKit(() => kitEl, finish)", `if (!editing() && !(await setMode("edit"))) return; menvDialog(null);`,
 	} {
 		if !strings.Contains(page, want) {
@@ -233,6 +233,25 @@ func TestTypedFieldsTakeReferences(t *testing.T) {
 	for _, want := range []string{
 		"function withRefAlt(", "f.refAlt = { scope, start: true, value: stored }", "const isRef = (v) => /(^|[^$])\\$\\{\\{/.test(v || \"\")", "const described = (inp) =>", "fields[0].recheck = [\"value\"]",
 		"function mrowsOf(scope)", ".sel[hidden]",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+}
+
+// A key file read from a page: at most 64 KiB, checked before it is read, a JSON key compacted to one line, text with line breaks refused with a
+// sentence; a secret that is switched to secret is masked again; the kit warning asks the program whether a kit is still held; a product keeps the
+// connection it already has in its list.
+func TestKeyFilesAndKitGuardsOfTheDialogs(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		"file.size > 65536", "JSON.stringify(JSON.parse(text))", `t("val.file_lines")`, `t("val.file_big")`, `setAttribute("autocapitalize", "off")`, `setAttribute("autocorrect", "off")`,
+		`i.dataset.shown = ""`, `api("/api/kit-held")`, `"kit-held"`, "wanted(c) || chosen.has(c.uuid)",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("index.html lacks %s", want)

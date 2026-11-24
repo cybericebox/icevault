@@ -392,6 +392,14 @@ func writeKitWith(p string, b []byte, beforeWrite func(f *os.File)) (err error) 
 	return err
 }
 
+// KitHeld says whether a recovery kit is still held for the person to save: false once it was discarded or dropped after kitKeep. The page asks before
+// it warns about leaving a step with no kit saved.
+func (a *App) KitHeld() Response {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return ok(map[string]any{"held": a.kit != nil})
+}
+
 // DiscardRecoveryKit drops the pending kit: the person does not want one.
 func (a *App) DiscardRecoveryKit() Response {
 	a.dropKit()

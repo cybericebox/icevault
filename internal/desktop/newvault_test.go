@@ -345,6 +345,13 @@ func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	if r.Status != 200 || d["ok"] != true || d["touchid"] != "on" || d["kit"] != true || d["file"] != "v.kdbx" {
 		t.Fatalf("%+v", r)
 	}
+	if held := dataOf(h.app.KitHeld())["held"]; held != true {
+		t.Fatalf("the kit is not held after the vault was made: %v", held)
+	}
+	h.app.DiscardRecoveryKit()
+	if held := dataOf(h.app.KitHeld())["held"]; held != false {
+		t.Fatalf("the kit is still held after it was discarded: %v", held)
+	}
 	if h.maker.made[p] != strongPW || h.maker.bound[p] != strongPW {
 		t.Fatal("the vault or the binding was not made with the typed password")
 	}

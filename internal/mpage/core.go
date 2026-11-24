@@ -6,6 +6,7 @@
 package mpage
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -309,12 +310,40 @@ func (c *Core) envView(e *vmodel.Environment) map[string]any {
 			avail = append(avail, s.Key)
 		}
 	}
-	missing := 0
+	// what the environment lacks: a thing every product of it needs (a General value, a site's value or connection) counts once, not once per product
+	missing, seen := 0, map[string]bool{}
 	for _, p := range products {
-		missing += len(p["missing"].([]map[string]any))
+		for _, r := range p["missing"].([]map[string]any) {
+			if id := missingID(p[jName].(string), r); !seen[id] {
+				seen[id] = true
+				missing++
+			}
+		}
 	}
 	return map[string]any{jName: e.Name, jTitle: e.Title, "general": general, "imports": keysOf(e.Imports), "shared_available": avail, "sites": sites, "products": products,
 		"files": len(e.Files), "missing": missing}
+}
+
+// missingID names what a row of "missing" is about, so that the rows of several products that say the same thing are one.
+func missingID(product string, r map[string]any) string {
+	key, _ := r[jKey].(string)
+	site, _ := r[jSite].(string)
+	switch r[jWhere] {
+	case "general":
+		return "general|" + key
+	case jSite, "site_connection":
+		if site != "" {
+			return fmt.Sprint(r[jWhere], "|", site, "|", key)
+		}
+	case "reference":
+		scope, _ := r["ref_scope"].(string)
+		name, _ := r["ref_name"].(string)
+		why, _ := r["why"].(string)
+		if scope != jProduct {
+			return fmt.Sprint("ref|", scope, "|", name, "|", key, "|", why)
+		}
+	}
+	return fmt.Sprint(product, "|", r[jWhere], "|", key)
 }
 
 func keysOf(vs []*vmodel.Var) []string {
@@ -379,29 +408,29 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 	if !p.Enabled || c.d == nil {
 		return out
 	}
-	scan := func(where string, rows []map[string]any) {
+	scan := func(where, site string, rows []map[string]any) {
 		for _, r := range rows {
 			if req, _ := r["required"].(bool); req && r[jState] == "empty" && r["active"] != false {
-				out = append(out, map[string]any{jWhere: where, jKey: r[jKey], "label": r["label"]})
+				out = append(out, map[string]any{jWhere: where, jKey: r[jKey], "label": r["label"], jSite: site})
 			}
 		}
 	}
-	scan(jProduct, view["vars"].([]map[string]any))
+	scan(jProduct, "", view["vars"].([]map[string]any))
 	if sub, ok := view["sub"].(map[string]any); ok {
-		scan(jProduct, sub["vars"].([]map[string]any))
+		scan(jProduct, "", sub["vars"].([]map[string]any))
 	}
-	scan("general", c.vars(e.GeneralValues(), c.d.General.Variables, vals))
+	scan("general", "", c.vars(e.GeneralValues(), c.d.General.Variables, vals))
 	if p.Site == nil {
 		out = append(out, map[string]any{jWhere: jSite, jKey: ""})
 	} else {
-		scan(jSite, c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals))
+		scan(jSite, p.Site.Name, c.vars(p.Site.Vars, c.d.SiteKinds[p.Site.Kind].Variables, vals))
 		if sk, _ := kinds.SiteKind(p.Site.Kind); sk.Connection != "" && p.Site.Connection == nil {
-			out = append(out, map[string]any{jWhere: "site_connection", jKey: sk.Connection})
+			out = append(out, map[string]any{jWhere: "site_connection", jKey: sk.Connection, jSite: p.Site.Name})
 		}
 	}
 	for _, b := range c.m.BrokenRefs(c.d, e) {
 		if b.Where == "general" || (b.Where == jSite && p.Site != nil && b.Name == p.Site.Name) || (b.Where == jProduct && b.Name == p.Name) {
-			out = append(out, map[string]any{jWhere: "reference", jKey: b.Key, "why": b.Msg})
+			out = append(out, map[string]any{jWhere: "reference", jKey: b.Key, "why": b.Msg, "ref_scope": b.Where, "ref_name": b.Name})
 		}
 	}
 	if dp := c.d.Product(p.Name); dp != nil {

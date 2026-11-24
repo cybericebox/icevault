@@ -1004,7 +1004,13 @@ function dialog(title, fields, submitText, onSubmit, note) {
   if (note) box.append(el("div", "note", note));
   const inputs = {}, errs = {}; let genSeal = null, changed = false;
   // a value field that follows the visibility chosen in the same dialog (maskIf): masked unless the value is plain, and not flipped back while the owner looks at it
-  const syncMask = () => fields.forEach((f) => { const i = inputs[f.name]; if (f.maskIf && i && i.type !== undefined && i.dataset && i.dataset.shown !== "1") i.type = f.maskIf(inputs) ? "password" : "text"; });
+  const syncMask = () => fields.forEach((f) => {
+    const i = inputs[f.name]; if (!f.maskIf || !i || i.type === undefined || !i.dataset) return;
+    const m = f.maskIf(inputs), was = i.dataset.masked;
+    if (m && was !== "1") i.dataset.shown = "";    // switched to secret: masked again, even if the eye was open
+    i.dataset.masked = m ? "1" : "0";
+    if (i.dataset.shown !== "1") i.type = m ? "password" : "text";
+  });
   panel.isDirty = () => changed; box.oninput = () => { changed = true; };
   const clearErr = (name) => { const fe = errs[name]; if (!fe) return; fe.textContent = ""; const c = inputs[name]; const node = c && (c.trig || c); if (node && node.removeAttribute) node.removeAttribute("aria-invalid"); };
   const fieldErr = (name, text) => { const fe = errs[name]; fe.textContent = ""; fe.append(icon("alert"), document.createTextNode(text)); const c = inputs[name]; const node = c && (c.trig || c); if (node && node.setAttribute) node.setAttribute("aria-invalid", "true"); };
@@ -1034,7 +1040,8 @@ function dialog(title, fields, submitText, onSubmit, note) {
       else { inp = el("input", "input lg"); inp.type = f.type || "text"; if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
       inp.id = id; inputs[f.name] = inp; focusNode = inp;
       const area = inp.tagName === "TEXTAREA";
-      if (area && f.mask) inp.classList.add("masked");   // a key file or another multi-line secret: dots until the eye is pressed
+      inp.setAttribute("autocapitalize", "off"); inp.setAttribute("autocorrect", "off");
+      if (area && f.mask) { inp.classList.add("masked"); for (const ev of ["copy", "cut"]) inp.addEventListener(ev, (e) => { if (inp.classList.contains("masked")) e.preventDefault(); }); }   // a key file or another multi-line secret: dots until the eye is pressed
       const maskable = inp.type === "password" || !!f.maskIf || (area && !!f.mask);   // a secret value is typed masked, with a toggle to look at it
       const hasRef = !!(f.ref && f.ref.scope);
       if (hasRef || maskable || f.fromFile) {
@@ -1044,7 +1051,13 @@ function dialog(title, fields, submitText, onSubmit, note) {
           else { const hide = inp.type === "text"; inp.dataset.shown = hide ? "" : "1"; inp.type = hide ? "password" : "text"; }
         }));
         if (f.fromFile) {   // read a key file in the page: its text goes into the field, nothing is kept elsewhere
-          const pick = el("input"); pick.type = "file"; pick.hidden = true; pick.addEventListener("change", async () => { const file = pick.files && pick.files[0]; if (!file) return; inp.value = await file.text(); pick.value = ""; inp.dispatchEvent(new Event("input", { bubbles: true })); });
+          const pick = el("input"); pick.type = "file"; pick.hidden = true; pick.addEventListener("change", async () => {
+            const file = pick.files && pick.files[0]; pick.value = ""; if (!file) return;
+            if (file.size > 65536) { fieldErr(f.name, t("val.file_big")); return; }   // checked before the file is read
+            let text = await file.text(); try { text = JSON.stringify(JSON.parse(text)); } catch (e) { text = text.trim(); }   // a JSON key goes in as one line
+            if (/[\r\n]/.test(text)) { fieldErr(f.name, t("val.file_lines")); return; }   // a PEM or other text with line breaks cannot be one value
+            clearErr(f.name); inp.value = text; inp.dispatchEvent(new Event("input", { bubbles: true }));
+          });
           wrap.append(pick, btn(t("val.from_file"), "folder-open", () => pick.click(), "ghost"));
         }
         if (hasRef) refControls(inp, wrap, f.ref.scope);
@@ -1092,7 +1105,7 @@ async function write(path, body, after, before) {
   return srv(r.data);
 }
 // the calls that change nothing: everything else is a write on its way (the page never redraws under it when the vault changes on disk)
-const QUIET_OPS = new Set(["vault-new-strength", "status", "ping", "refresh", "cli", "vaults", "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value"]);
+const QUIET_OPS = new Set(["kit-held", "vault-new-strength", "status", "ping", "refresh", "cli", "vaults", "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value"]);
 async function api(path, body) {
   const w = !QUIET_OPS.has(path.replace(/^\/api\//, "").split("?")[0]); if (w) writing++;
   try { return await window.icevaultApi(path, body); } finally { if (w) writing--; }          // adapter.js: the bound methods of the window instead of HTTP
@@ -1404,7 +1417,8 @@ function kitSection() {
 }
 // leaving the step without a saved recovery kit asks first: the kit is the only way back in when the password is lost
 function leaveKit(getKit, finish) {
-  return () => { const k = getKit(); if (!k || k.dataset.saved === "1") return finish(); confirmBox(t("nv.kit_unsaved_title"), t("nv.kit_unsaved_note"), t("nv.kit_leave"), { danger: true, cancelText: t("nv.kit_back"), onOk: async () => { await finish(); return true; } }); };
+  return async () => { const k = getKit(); if (!k || k.dataset.saved === "1") return finish(); const h = await api("/api/kit-held"); if (h.status === 200 && h.data && h.data.held === false) return finish();   // the program no longer holds a kit: nothing to lose
+    confirmBox(t("nv.kit_unsaved_title"), t("nv.kit_unsaved_note"), t("nv.kit_leave"), { danger: true, cancelText: t("nv.kit_back"), onOk: async () => { await finish(); return true; } }); };
 }
 // the vault is made: what happened to Touch ID, and the recovery kit (the only time the window saves the password, to a place the person chooses)
 function newVaultDone(d) {
@@ -2893,8 +2907,7 @@ function mconnDialog(c) {
 function mfieldDialog(c, r) {
   const fields = []; if (!r) fields.push({ name: "field", label: t("m.f.field"), required: true, help: t("m.field.help"), check: (v) => (v.trim() && !/^[A-Za-z_][A-Za-z0-9_.-]{0,99}$/.test(v.trim()) ? t("srv.key_form") : "") });
   const secret = r ? r.visibility !== "plain" : false;
-  const multi = !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key);   // a key file: several lines, masked, can be read from a file
-  fields.push({ name: "value", label: t("m.var.value"), type: multi ? "textarea" : secret ? "password" : "text", mask: multi, fromFile: multi, maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
+  fields.push({ name: "value", label: t("m.var.value"), type: secret ? "password" : "text", fromFile: !!r && secret && /credential|key_?file|json|pem|cert|private/i.test(r.key), maskIf: r ? null : (inp) => !(inp.secret && inp.secret.value === "plain"), value: r && !secret ? (r.value || "") : "", help: r && secret && r.state !== "empty" ? t("m.var.keep_help") : "" });
   if (!r) fields.push({ name: "secret", label: t("m.var.vis"), type: "select", value: "secret", options: [["plain", t("vis.word.plain")], ["secret", t("vis.word.secret")]] });
   dialog(r ? t("m.var.edit", { name: mlabel(r) }) : t("m.field.new_title", { name: c.name }), fields, t("btn.save"), (v) => {
     const body = { uuid: c.uuid, field: r ? r.key : v.field.trim(), secret: r ? secret : v.secret === "secret" };
@@ -3028,7 +3041,7 @@ function mproduct(parent, e, p) {
   if (!p.connections.length && !editing()) chips.append(el("span", "dim", t("m.product.no_connections")));
   if (editing()) {
     const wanted = (c) => !p.needs.length || p.needs.some((n) => n.kind === c.kind);   // only the kinds the product can use
-    const toggles = (nav.connections || []).filter(wanted).map((c) => ({ label: connLabel(c), checked: chosen.has(c.uuid), onChange: (on) => { if (on) chosen.add(c.uuid); else chosen.delete(c.uuid); mwrite("m-product", { env: e.name, action: "update", name: p.name, connections: [...chosen] }); } }));
+    const toggles = (nav.connections || []).filter((c) => wanted(c) || chosen.has(c.uuid)).map((c) => ({ label: connLabel(c), checked: chosen.has(c.uuid), onChange: (on) => { if (on) chosen.add(c.uuid); else chosen.delete(c.uuid); mwrite("m-product", { env: e.name, action: "update", name: p.name, connections: [...chosen] }); } }));
     if (toggles.length) chips.append(selectBox({ value: "", options: [], toggles, label: t("m.product.connections"), placeholder: t("m.product.choose") }).el);
   }
   mselectRow(ctl, t("m.product.connections"), chips);
@@ -3050,7 +3063,7 @@ function mproduct(parent, e, p) {
 function mmissText(x) {
   switch (x.where) {
     case "site": return t("m.miss.site");
-    case "site_connection": return t("m.miss.site_connection", { kind: ckTitle(x.key) });
+    case "site_connection": return t("m.miss.site_connection", { kind: ckTitle(x.key), site: x.site || "" });
     case "connection": return t("m.miss.connection", { kind: ckTitle(x.key) });
     case "connection_field": return t("m.miss.field", { name: mtext(x.label) || x.key, connection: x.connection });
     default: return t("m.miss." + x.where, { name: mtext(x.label) || x.key });
