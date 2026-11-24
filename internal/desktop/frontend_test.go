@@ -258,3 +258,25 @@ func TestKeyFilesAndKitGuardsOfTheDialogs(t *testing.T) {
 		}
 	}
 }
+
+// The audit's last items: the open vault's file name under the sidebar title, an imported value can be taken out from its row, the lock screen heading
+// does not wrap against its buttons, the New vault dialog keeps its layout (the Touch ID row keeps its place, the no-project button goes after a
+// choice, the passwords have a show toggle), and the Touch ID labels read alike.
+func TestAuditLastItems(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(src)
+	for _, want := range []string{
+		`document.querySelector(".side-head small")`, "onUnimport: (k) =>", `t("m.env.unimport"`, ".vlist-head { display:flex; flex-wrap:wrap;", ".nvtouch.off { visibility:hidden; }",
+		"nbtn.hidden = true;", `const cfw = el("div", "valbox")`, `const curw = el("div", "valbox")`, `(nav.envs || []).length ? t("m.env.copy_note") : ""`, "c.title = countTip",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("index.html lacks %s", want)
+		}
+	}
+	if strings.Contains(page, "trow.hidden = ") {
+		t.Error("the Touch ID row is hidden again instead of kept in place")
+	}
+}
