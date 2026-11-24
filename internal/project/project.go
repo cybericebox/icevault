@@ -62,6 +62,15 @@ type Variable struct {
 	Temporary bool `yaml:"temporary,omitempty"`
 	// Field is the field of the connection kind this variable carries (connection uses only).
 	Field string `yaml:"field,omitempty"`
+	// Type is what a filled value must be: string (the default, free text), bool (true or false), int, email, url, domain or enum (one of Choices).
+	// A value that is a reference (${{ ... }}) is checked after it resolves.
+	Type    string   `yaml:"type,omitempty"`
+	Choices []string `yaml:"choices,omitempty"`
+	// Pattern is a regular expression (Go syntax) the whole value must match; for a string variable only.
+	Pattern string `yaml:"pattern,omitempty"`
+	// Min and Max bound an int (inclusive); either may be left out.
+	Min *int64 `yaml:"min,omitempty"`
+	Max *int64 `yaml:"max,omitempty"`
 }
 
 // System reports whether the variable is managed by the system.
@@ -457,6 +466,7 @@ func (d *Description) Validate() []string {
 			if v.Managed != "" && v.Managed != "owner" && v.Managed != "system" {
 				add("%s: managed is owner or system", w)
 			}
+			v.validateType(w, add)
 			if conn != nil {
 				if v.Field == "" || !kinds.FieldRE.MatchString(v.Field) {
 					add("%s: a variable of a connection names its field (field:)", w)
@@ -577,6 +587,18 @@ func (d *Description) Validate() []string {
 		}
 		if !sameMeaning(prev, h) {
 			add("%s of %s in %s: also in %s", h.Var.Name, h.File, h.Scope(), prev.Scope())
+		}
+	})
+	// one name has one type wherever it appears (the window and the checks look a variable up by its name)
+	first := map[string]Home{}
+	d.Walk(func(h Home) {
+		prev, ok := first[h.Var.Name]
+		if !ok {
+			first[h.Var.Name] = h
+			return
+		}
+		if !prev.Var.sameType(h.Var) {
+			add("%s in %s: its type, choices or pattern differ from %s", h.Var.Name, h.Scope(), prev.Scope())
 		}
 	})
 	return errs

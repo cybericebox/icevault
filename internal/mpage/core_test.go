@@ -191,6 +191,70 @@ func TestEnvFill(t *testing.T) {
 	}
 }
 
+// A value that does not fit the declared type is refused with the variable and the rule (never the value); an empty value and a reference
+// are accepted; the answer carries the type and the choices so the page draws a drop-down.
+func TestTypedVariables(t *testing.T) {
+	c, _ := newCore(t)
+	scope := "env/prod/product/portal"
+	for _, tc := range []struct{ key, value, rule string }{
+		{"SIGNUP_MODE", "closed", "enum"}, {"CONTACT_ADDRESS", "not an address", "email"}, {"ENGINE_THREADS", "x", "int"}, {"ENGINE_THREADS", "100", "range"}, {"ENGINE_THREADS", "0", "range"},
+	} {
+		_, err := c.Write("m-var", map[string]any{"scope": scope, "key": tc.key, "value": tc.value})
+		var de *desktop.Error
+		if !errors.As(err, &de) || de.Code != "bad_value" || de.Params["rule"] != tc.rule || de.Params["key"] != tc.key {
+			t.Fatalf("%s: %v", tc.key, err)
+		}
+		if strings.Contains(err.Error(), tc.value) {
+			t.Fatal("the value is in the error")
+		}
+	}
+	for _, v := range []string{"invite", "", "${{ shared.MODE }}"} {
+		if _, err := c.Write("m-var", map[string]any{"scope": scope, "key": "SIGNUP_MODE", "value": v}); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+	}
+	b, _ := json.Marshal(c.Nav())
+	if !strings.Contains(string(b), `"choices":["open","invite"]`) || !strings.Contains(string(b), `"type":"enum"`) {
+		t.Fatalf("the page is not told the type: %s", b)
+	}
+}
+
+// "Needed for deploy" follows required-when over the place of the product (BRAIN=cluster needs its tag and keys, BRAIN=none does not) and the
+// defaults of the description; a product that is off needs nothing.
+func TestRequiredWhenFollowsThePlaceOfTheProduct(t *testing.T) {
+	c, _ := newCore(t)
+	e := c.Model().Env("prod")
+	e.Products = append(e.Products, &vmodel.Product{Name: "indexer", Enabled: true, Place: "cluster", Site: e.Sites[0], Sub: map[string][]*vmodel.Var{}})
+	missing := func() []string {
+		var keys []string
+		for _, p := range c.envView(e)["products"].([]map[string]any) {
+			if p["name"] == "indexer" {
+				for _, m := range p["missing"].([]map[string]any) {
+					keys = append(keys, m["key"].(string))
+				}
+			}
+		}
+		return keys
+	}
+	has := func(keys []string, k string) bool { return contains(keys, k) }
+	if m := missing(); !has(m, "BROKER_URL") || !has(m, "BROKER_PASSWORD") {
+		t.Fatalf("on the cluster both are needed: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "host"
+	if m := missing(); has(m, "BROKER_URL") || !has(m, "BROKER_PASSWORD") {
+		t.Fatalf("on a host only the password: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "none"
+	if m := missing(); has(m, "BROKER_URL") || has(m, "BROKER_PASSWORD") {
+		t.Fatalf("not run: nothing: %v", m)
+	}
+	e.Products[len(e.Products)-1].Place = "cluster"
+	e.Products[len(e.Products)-1].Enabled = false
+	if m := missing(); len(m) != 0 {
+		t.Fatalf("a product that is off needs nothing: %v", m)
+	}
+}
+
 // A vault without a project says so in its navigation, so that the page does not offer the missing description as a problem.
 func TestNavSaysTheVaultHasNoProject(t *testing.T) {
 	c, v := newCore(t)

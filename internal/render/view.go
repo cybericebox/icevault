@@ -216,6 +216,74 @@ func RequireResolved(v *View) error {
 	return &model.StoreError{Msg: "a reference cannot be resolved, nothing is written: " + strings.Join(parts, "; ") + more}
 }
 
+// TypeProblem is a filled variable whose value does not fit the type the description declares for it. It names the variable and the rule, never
+// the value.
+type TypeProblem struct{ File, Name, Rule string }
+
+// Words says the problem in words for a report.
+func (t TypeProblem) Words() string {
+	switch t.Rule {
+	case project.RuleBool:
+		return "must be true or false"
+	case project.RuleInt:
+		return "must be a whole number"
+	case project.RuleEmail:
+		return "must be an email address"
+	case project.RuleURL:
+		return "must be a URL with a scheme and a host"
+	case project.RuleDomain:
+		return "must be a domain name"
+	case project.RuleEnum:
+		return "must be one of its choices"
+	case project.RuleRange:
+		return "is outside the allowed range"
+	case project.RuleLength:
+		return "is too long"
+	}
+	return "does not match its pattern"
+}
+
+func (t TypeProblem) String() string { return t.File + "/" + t.Name + " " + t.Words() }
+
+// TypeProblems lists, in file order, the filled variables of the (resolved) view that break the type the description declares. An empty value is
+// not set and fits; a reference was resolved by View, so the text it came to is checked.
+func (p *Project) TypeProblems(v *View) []TypeProblem {
+	var out []TypeProblem
+	var settings map[string]string // the general file: what the conditions of the variables read
+	if g := v.Env[p.Conf()]; g != nil {
+		settings = g.Variables.M
+	}
+	get := func(k string) string { return settings[k] }
+	for _, rel := range v.Rels() {
+		ef := v.Env[rel]
+		for _, name := range ef.Variables.Order {
+			if !p.D.Active(name, get) {
+				continue // its when condition is false: it is not used, so nothing is checked
+			}
+			if rule := p.D.ValueProblem(name, ef.Variables.M[name]); rule != "" {
+				out = append(out, TypeProblem{rel, name, rule})
+			}
+		}
+	}
+	return out
+}
+
+// RequireTyped stops (StoreError) when a value does not fit its type: nothing is rendered. The message names the variables and the rules, never a value.
+func RequireTyped(problems []TypeProblem) error {
+	if len(problems) == 0 {
+		return nil
+	}
+	var parts []string
+	for i, t := range problems {
+		if i == 10 {
+			parts = append(parts, fmt.Sprintf("and %d more", len(problems)-10))
+			break
+		}
+		parts = append(parts, t.String())
+	}
+	return &model.StoreError{Msg: "a value does not fit its type, nothing is written: " + strings.Join(parts, "; ")}
+}
+
 // Positioned is the layout with a line for every manifest key of values that
 // the stored layout lacks (a key a linked item brought): it goes right after
 // the nearest preceding manifest key that has a line, else before the nearest
@@ -369,6 +437,9 @@ func (p *Project) Render(snap *model.Snapshot, env, site string, withConf bool) 
 		return nil, err
 	}
 	if err := RequireResolved(d); err != nil {
+		return nil, err
+	}
+	if err := RequireTyped(p.TypeProblems(d)); err != nil {
 		return nil, err
 	}
 	var out []RenderedFile
@@ -567,6 +638,9 @@ func (p *Project) AppFileText(snap *model.Snapshot, env string, a *project.App, 
 	if err := RequireResolved(v); err != nil {
 		return "", nil, err
 	}
+	if err := RequireTyped(p.TypeProblems(v)); err != nil {
+		return "", nil, err
+	}
 	values, _, err := p.Effective(snap, env, a.From, site)
 	if err != nil {
 		return "", nil, err
@@ -750,6 +824,7 @@ type Status struct {
 	Uses                                     []string
 	BrokenLinks                              []string
 	Shadowed                                 []string
+	TypeProblems                             []TypeProblem
 	Files                                    []StatusFile
 }
 
@@ -772,7 +847,7 @@ func (p *Project) StatusOf(snap *model.Snapshot, env, site string) (*Status, err
 	if err != nil {
 		return nil, err
 	}
-	st := &Status{Settings: len(d.Env), OtherFiles: len(d.Files)}
+	st := &Status{Settings: len(d.Env), OtherFiles: len(d.Files), TypeProblems: p.TypeProblems(d)}
 	if it := snap.Item(model.SecEnvs, env); it != nil {
 		st.Retired = len(it.Retired)
 	}

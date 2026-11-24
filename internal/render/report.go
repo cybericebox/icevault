@@ -132,6 +132,9 @@ func StatusLines(st *Status, env string) []string {
 	for _, s := range st.Shadowed {
 		lines = append(lines, "  shadowed: "+s)
 	}
+	for _, t := range st.TypeProblems {
+		lines = append(lines, "  TYPE PROBLEM: "+t.String())
+	}
 	for _, f := range st.Files {
 		l := fmt.Sprintf("  %s: %d variable(s)", f.Rel, f.Variables)
 		if f.FromLinks > 0 {

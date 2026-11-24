@@ -387,6 +387,9 @@ func runStatus(e *Env, args []string, out io.Writer, plat *render.Project, snap 
 	for _, sh := range st.Shadowed {
 		fmt.Fprintf(out, "  %s\n", sh)
 	}
+	for _, t := range st.TypeProblems {
+		fmt.Fprintf(out, "  TYPE PROBLEM: %s\n", t)
+	}
 	for _, f := range st.Files {
 		extra := ""
 		if f.FromLinks > 0 {
