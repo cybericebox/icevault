@@ -58,7 +58,9 @@ In the window, **New vault** (on the lock screen, beside Open vault) asks for th
 - the Touch ID binding holds the old password and is removed; `touchid enable` stores the new one (the window offers it in the same dialog);
 - the info file records `password_changed` (a date, never a secret);
 - copies made before (`copies add` destinations, `copy --to` outputs) still open with the **old** password: they are listed and never deleted, and `--refresh-copies` (a check box in the window) writes the new file to the standing destinations now. A refresh keeps the copy it replaces as `.prev`, which also still opens with the old password and is listed;
-- the vault's own previous copy (`<vault>.prev`) opens with the old password too and is removed;
+- the vault's own previous copy (`<vault>.prev`) opens with the old password too and is removed; if it cannot be removed, it is listed with the copies;
+- **after `--refresh-copies`, `<destination>/<file>.prev` stays**: the refresh keeps the copy it replaces under that name, and it opens with the **old** password. It is listed in the output. Delete it yourself when the old password must stop working everywhere (`rm <destination>/<file>.prev`); nothing deletes a file in a destination for you;
+- a Touch ID binding that cannot be removed is reported with its file names (it holds the old password): delete the files or run `icevault touchid disable`;
 - the window can save a new recovery kit from the new password.
 
 ## Development

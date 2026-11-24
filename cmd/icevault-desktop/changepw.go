@@ -38,7 +38,7 @@ func (m *modelCore) ChangePassword(current, next []byte, refresh bool) (desktop.
 	if err != nil {
 		return desktop.ChangeOutcome{}, changeError(err)
 	}
-	return desktop.ChangeOutcome{TouchIDWasOn: rep.TouchIDWasOn, Refreshed: rep.Refreshed, Stale: rep.Stale}, nil
+	return desktop.ChangeOutcome{TouchIDWasOn: rep.TouchIDWasOn, TouchIDRemoveFailed: rep.TouchIDRemoveFailed, Refreshed: rep.Refreshed, Stale: rep.Stale}, nil
 }
 
 // changeError keeps a vault error (the file changed under the window, a save in progress) so that the page gets its code; the text of a command line

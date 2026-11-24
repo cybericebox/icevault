@@ -230,6 +230,19 @@ func TestChangePasswordWithoutRebindingDropsTheBindingOfTheLockScreen(t *testing
 	}
 }
 
+func TestChangePasswordTellsWhenTheBindingCouldNotBeRemoved(t *testing.T) {
+	h := newChangeApp(t)
+	h.core.outcome = ChangeOutcome{TouchIDWasOn: true, TouchIDRemoveFailed: true}
+	r := h.app.ChangePassword(oldPW, newPW, newPW, false, false)
+	if d := dataOf(r); r.Status != 200 || d["touchid_remove_failed"] != true {
+		t.Fatalf("%+v", r)
+	}
+	h2 := newChangeApp(t)
+	if d := dataOf(h2.app.ChangePassword(oldPW, newPW, newPW, false, false)); d["touchid_remove_failed"] != false {
+		t.Fatalf("%+v", d)
+	}
+}
+
 func TestChangePasswordTouchIDStates(t *testing.T) {
 	for _, c := range []struct {
 		name  string

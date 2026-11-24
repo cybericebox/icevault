@@ -1386,6 +1386,7 @@ function changePasswordDone(d) {
   const finish = async () => { await api("/api/kit-discard", {}); panel.close(); };
   panel.open(t("cp.done_title"), finish); const box = panel.box;
   box.append(el("div", "note", t("cp.done_note", { file: d.file })));
+  if (d.touchid_remove_failed) box.append(el("p", "note err", t("cp.touch_remove_failed")));
   if (d.touchid === "on") box.append(el("p", "note", t("cp.touch_on")));
   else if (d.was_touchid || d.touchid !== "off") box.append(el("p", "note", t("cp.touch_" + (d.touchid === "off" ? "off" : d.touchid))));
   if (d.refreshed && d.refreshed.length) box.append(el("p", "note", t("cp.refreshed", { n: d.refreshed.length })));

@@ -25,9 +25,11 @@ type ChangeInfo struct {
 
 // ChangeOutcome is what a change left to say.
 type ChangeOutcome struct {
-	TouchIDWasOn bool     // the binding of the old password was removed
-	Refreshed    []string // the standing destinations that got the new file
-	Stale        []string // the files that still open with the OLD password (never deleted)
+	TouchIDWasOn bool // the binding of the old password was removed
+	// TouchIDRemoveFailed: the binding existed and could not be removed: it holds the OLD password, and the page says so.
+	TouchIDRemoveFailed bool
+	Refreshed           []string // the standing destinations that got the new file
+	Stale               []string // the files that still open with the OLD password (never deleted)
 }
 
 // PasswordChanger is a Core that can replace the master password of its vault. The demo core cannot.
@@ -118,7 +120,7 @@ func (a *App) ChangePassword(current, pw, confirm string, touchID, refresh bool)
 	a.mu.Lock()
 	a.kit = k
 	a.mu.Unlock()
-	return ok(map[string]any{"ok": true, "file": k.label, keyTouchID: bound, "was_touchid": out.TouchIDWasOn, "kit": true,
+	return ok(map[string]any{"ok": true, "file": k.label, keyTouchID: bound, "was_touchid": out.TouchIDWasOn, "touchid_remove_failed": out.TouchIDRemoveFailed, "kit": true,
 		"refreshed": nonNil(out.Refreshed), "stale": nonNil(out.Stale)})
 }
 

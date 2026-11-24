@@ -22,6 +22,9 @@ import (
 type ChangeReport struct {
 	// TouchIDWasOn: a Touch ID binding of this vault existed and was removed.
 	TouchIDWasOn bool
+	// TouchIDRemoveFailed: the binding existed and could not be removed completely. It holds the OLD password: TouchIDLeft are its files.
+	TouchIDRemoveFailed bool
+	TouchIDLeft         []string
 	// Refreshed are the standing destinations that got the new file.
 	Refreshed []string
 	// Stale are the files that still open with the OLD password: copies in the destinations and in the folders of `copy --to`, and the previous copy
@@ -82,7 +85,12 @@ func cmdChangePassword(args []string, e *Env) error {
 		return err
 	}
 	fmt.Fprintf(e.Out, "the master password of %s was changed (the vault file was saved with the new one; the old one no longer opens it)\n", path)
-	if rep.TouchIDWasOn {
+	if rep.TouchIDRemoveFailed {
+		fmt.Fprintf(e.Out, "WARNING: the Touch ID binding of the old password could not be removed; it no longer opens the vault. Delete these files, or run `touchid disable`:\n")
+		for _, f := range rep.TouchIDLeft {
+			fmt.Fprintf(e.Out, "  %s\n", f)
+		}
+	} else if rep.TouchIDWasOn {
 		fmt.Fprintln(e.Out, "Touch ID is off; `touchid enable` stores the new password")
 	}
 	e.printStale(rep, path, refresh)
@@ -143,11 +151,13 @@ func (e *Env) ChangePassword(v *vault.Vault, next []byte, keyFile string, refres
 		return nil, changedMessage(err)
 	}
 	path := v.Path()
-	if err := v.SetPassword(next); err != nil {
+	prevLeft, err := v.SetPassword(next)
+	if err != nil {
 		return nil, fmt.Errorf("the password was not changed (the vault file is as it was): %w", err)
 	}
 	rep := &ChangeReport{}
-	rep.TouchIDWasOn = e.touchIDRemove(path)
+	rep.TouchIDWasOn, rep.TouchIDLeft = e.touchIDRemove(path)
+	rep.TouchIDRemoveFailed = len(rep.TouchIDLeft) > 0
 	m := readInfo(path)
 	if m == nil {
 		m = freshInfo()
@@ -158,20 +168,27 @@ func (e *Env) ChangePassword(v *vault.Vault, next []byte, keyFile string, refres
 		rep.Refreshed = makeCopies(path, out)
 	}
 	rep.Stale = staleCopies(path)
+	if prevLeft != "" { // the tool's own previous copy could not be removed: it opens with the old password like the copies
+		rep.Stale = append([]string{prevLeft}, rep.Stale...)
+	}
 	return rep, nil
 }
 
-// touchIDRemove deletes the Touch ID binding of the vault (it stores the old password) and says whether there was one.
-func (e *Env) touchIDRemove(vaultFile string) bool {
+// touchIDRemove deletes the Touch ID binding of the vault (it stores the old password). wasOn says there was one; left are its files that could not be
+// removed (the binding still holds the old password).
+func (e *Env) touchIDRemove(vaultFile string) (wasOn bool, left []string) {
 	e.touchIDMigrate(vaultFile)
 	k, b := e.touchIDFiles(vaultFile)
-	n := 0
 	for _, f := range []string{k, b} {
-		if _, err := os.Lstat(f); err == nil && os.Remove(f) == nil {
-			n++
+		if _, err := os.Lstat(f); err != nil {
+			continue
+		}
+		wasOn = true
+		if os.Remove(f) != nil {
+			left = append(left, f)
 		}
 	}
-	return n > 0
+	return wasOn, left
 }
 
 // staleCopies names the files of the copies of the vault that do not hold the current vault file: in the standing destinations and in the folders

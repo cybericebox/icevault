@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// setPw is SetPassword for the tests that look at the error only.
+func setPw(v *Vault, pw []byte) error { _, err := v.SetPassword(pw); return err }
+
 const newPw = "another-throwaway-2"
 
 // The password of an open vault is replaced and the file re-encrypted: only the new one opens it, the entries and the key derivation settings stay.
@@ -16,7 +19,7 @@ func TestSetPasswordReplacesThePassword(t *testing.T) {
 	must(t, v.Put(Entry{Group: "G", Title: "T", Password: []byte("secret")}))
 	must(t, v.Save())
 	before := mustOpen(t, p, creds()).db.Header.FileHeaders.KdfParameters.Iterations
-	must(t, v.SetPassword([]byte(newPw)))
+	must(t, setPw(v, []byte(newPw)))
 	if _, err := Open(p, creds()); !errors.Is(err, ErrBadCredentials) {
 		t.Fatalf("the old password still opens the vault: %v", err)
 	}
@@ -47,12 +50,12 @@ func TestSetPasswordRemovesThePreviousCopy(t *testing.T) {
 	}
 	real := writeFile
 	writeFile = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
-	_ = v.SetPassword([]byte(newPw))
+	_ = setPw(v, []byte(newPw))
 	writeFile = real
 	if _, err := os.Stat(p + ".prev"); err != nil {
 		t.Fatal("a failed change removed the previous copy")
 	}
-	must(t, v.SetPassword([]byte(newPw)))
+	must(t, setPw(v, []byte(newPw)))
 	if _, err := os.Stat(p + ".prev"); err == nil {
 		t.Fatal("the previous copy still opens with the old password")
 	}
@@ -64,16 +67,16 @@ func TestSetPasswordKeepsTheKeyFile(t *testing.T) {
 	must(t, NewKeyFile(kf))
 	c := Credentials{Password: []byte(pw), KeyFile: kf}
 	v, p := newVault(t, c)
-	must(t, v.SetPassword([]byte(newPw)))
+	must(t, setPw(v, []byte(newPw)))
 	if _, err := Open(p, Credentials{Password: []byte(newPw)}); !errors.Is(err, ErrBadCredentials) {
 		t.Fatalf("without the key file: %v", err)
 	}
 	mustOpen(t, p, Credentials{Password: []byte(newPw), KeyFile: kf})
 	// an empty password is fine when a key file holds the key, and refused when none does
-	must(t, v.SetPassword(nil))
+	must(t, setPw(v, nil))
 	mustOpen(t, p, Credentials{KeyFile: kf})
 	w, _ := newVault(t, creds())
-	if err := w.SetPassword(nil); !errors.Is(err, ErrNoCredentials) {
+	if err := setPw(w, nil); !errors.Is(err, ErrNoCredentials) {
 		t.Fatalf("an empty password with no key file: %v", err)
 	}
 }
@@ -85,7 +88,7 @@ func TestSetPasswordFailureLeavesTheOldFile(t *testing.T) {
 	must(t, err)
 	real := writeFile
 	writeFile = func(string, []byte, os.FileMode) error { return errors.New("disk full") }
-	err = v.SetPassword([]byte(newPw))
+	err = setPw(v, []byte(newPw))
 	writeFile = real
 	if err == nil {
 		t.Fatal("the failure was swallowed")
@@ -112,7 +115,7 @@ func TestSetPasswordRefusesAChangedFile(t *testing.T) {
 	must(t, other.Put(Entry{Group: "G", Title: "T", Password: []byte("x")}))
 	must(t, other.Save())
 	time.Sleep(10 * time.Millisecond)
-	if err := v.SetPassword([]byte(newPw)); !errors.Is(err, ErrChangedOnDisk) {
+	if err := setPw(v, []byte(newPw)); !errors.Is(err, ErrChangedOnDisk) {
 		t.Fatalf("got %v", err)
 	}
 	mustOpen(t, p, creds())
@@ -121,7 +124,28 @@ func TestSetPasswordRefusesAChangedFile(t *testing.T) {
 func TestSetPasswordOnAClosedVault(t *testing.T) {
 	v, _ := newVault(t, creds())
 	v.Close()
-	if err := v.SetPassword([]byte(newPw)); err == nil {
+	if err := setPw(v, []byte(newPw)); err == nil {
 		t.Fatal("a closed vault took a password")
+	}
+}
+
+// A previous copy that cannot be removed is reported (the change stands, the file still opens with the old password).
+func TestSetPasswordReportsAPreviousCopyItCannotRemove(t *testing.T) {
+	v, p := newVault(t, creds())
+	must(t, v.Put(Entry{Group: "G", Title: "T", Password: []byte("x")}))
+	must(t, v.Save())
+	real := removeFile
+	removeFile = func(string) error { return errors.New("permission denied") }
+	left, err := v.SetPassword([]byte(newPw))
+	removeFile = real
+	if err != nil {
+		t.Fatalf("the change itself failed: %v", err)
+	}
+	if realP, _ := filepath.EvalSymlinks(p); left != realP+".prev" { // the real path: the temp folder may be a link
+		t.Fatalf("prevLeft %q", left)
+	}
+	mustOpen(t, p, Credentials{Password: []byte(newPw)})
+	if left, err := v.SetPassword([]byte(newPw + "2")); err != nil || left != "" {
+		t.Fatalf("a removable copy was reported: %q %v", left, err)
 	}
 }

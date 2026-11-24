@@ -363,3 +363,41 @@ func TestChangePasswordWithoutCopiesSaysNothingAboutThem(t *testing.T) {
 		t.Fatalf("a warning without a copy: %s", h.out.String())
 	}
 }
+
+// A binding that cannot be removed is reported, not called "off": it holds the old password.
+func TestChangePasswordReportsABindingItCannotRemove(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only folder does not stop root")
+	}
+	h, _ := tidHarness(t)
+	if rc := h.run("touchid", "enable"); rc != 0 {
+		t.Fatal(h.errb.String())
+	}
+	tdir := h.env["ICEVAULT_TOUCHID_DIR"]
+	if err := os.Chmod(tdir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(tdir, 0o700) }()
+	h.pw = []string{pw, newPw, newPw}
+	rc := h.run("change-password")
+	_ = os.Chmod(tdir, 0o700)
+	if rc != 0 {
+		t.Fatalf("the change itself must stand: rc=%d %s", rc, h.errb.String())
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "WARNING: the Touch ID binding") || strings.Contains(out, "Touch ID is off;") {
+		t.Fatalf("the failed removal is not reported:\n%s", out)
+	}
+	ents, _ := os.ReadDir(tdir)
+	if len(ents) != 2 {
+		t.Fatalf("%d files", len(ents))
+	}
+	for _, en := range ents {
+		if !strings.Contains(out, filepath.Join(tdir, en.Name())) {
+			t.Errorf("the output does not name %s", en.Name())
+		}
+	}
+	if !opensWith(t, h.env["ICEVAULT_VAULT"], newPw, "") {
+		t.Fatal("the password was not changed")
+	}
+}
