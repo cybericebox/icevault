@@ -173,9 +173,7 @@ func (a *App) CreateVault(pw, confirm string, touchID bool) Response {
 	a.mu.Unlock()
 	// the new vault is the chosen one on the lock screen (a file it cannot prepare yet, for want of a checkout, shows what to do there)
 	a.selectVault(path)
-	if err := a.o.Vaults.Opened(path); err != nil {
-		a.say("the list of vaults was not saved")
-	}
+	// not recorded as opened: the vault joins the recent list at its first unlock (it is shown as the chosen one until then)
 	k := &recoveryKit{path: path, label: filepath.Base(path), created: a.o.Clock(), password: append([]byte(nil), pwb...)}
 	k.stop = a.o.AfterFunc(kitKeep, func() { a.dropKitIf(k) })
 	a.mu.Lock()

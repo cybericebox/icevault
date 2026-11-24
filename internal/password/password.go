@@ -24,7 +24,9 @@ const (
 	// MinLength is the least number of characters (runes) of a new master password.
 	MinLength = 12
 	// MinGuessesLog10 is the least estimate, as a power of ten: 1e10 guesses is the top score (4) of zxcvbn. Characters no pattern explains count 10 each
-	// in that estimate, so 12 random characters reach 1e12 and a pattern with a few changes stays far below the line.
+	// in that estimate, so 12 random characters reach 1e12 and a pattern with a few changes stays far below the line. The line is not higher on purpose:
+	// the vault key derivation (Argon2d, 64 MiB, about a second) makes every guess of an offline attacker expensive, so 1e10 guesses is out of reach, and
+	// a higher line would refuse good 12-character random passwords. A phrase of a few common words passes by design: it is long and random enough.
 	MinGuessesLog10 = 10
 	// Words is the length of a generated passphrase.
 	Words = 6

@@ -216,7 +216,7 @@ func TestCreateVaultRefusesBeforeAnythingIsWritten(t *testing.T) {
 	}
 }
 
-func TestCreateVaultMakesChoosesAndListsIt(t *testing.T) {
+func TestCreateVaultMakesAndChoosesIt(t *testing.T) {
 	h := newVaultApp(t)
 	p := h.place("v") + ".kdbx"
 	r := h.app.CreateVault(strongPW, strongPW, true)
@@ -230,8 +230,8 @@ func TestCreateVaultMakesChoosesAndListsIt(t *testing.T) {
 	if strings.Contains(toJSON(r), strongPW) || strings.Contains(toJSON(r), p) {
 		t.Fatal("the answer holds the password or the path")
 	}
-	if len(h.vault.opened) != 1 || h.vault.opened[0] != p {
-		t.Fatalf("opened %v", h.vault.opened)
+	if len(h.vault.opened) != 0 {
+		t.Fatalf("a vault never unlocked was recorded as opened: %v", h.vault.opened)
 	}
 	cur, _ := dataOf(h.app.ListVaults())["current"].(VaultInfo)
 	if cur.Path != p {
