@@ -31,10 +31,20 @@ func (p Peer) Describe() string {
 func (p Peer) SameUser() bool { return p.UID == os.Getuid() }
 
 // programOf asks ps for the parent and the program name of a process; empty when ps is not there.
+// psPath is the absolute path of ps (never looked up in the PATH).
+func psPath() string {
+	for _, p := range []string{"/bin/ps", "/usr/bin/ps"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return "/bin/ps"
+}
+
 func programOf(pid int) (ppid int, name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "ppid=,comm=").Output() // #nosec G204 -- fixed program, numeric argument
+	out, err := exec.CommandContext(ctx, psPath(), "-p", strconv.Itoa(pid), "-o", "ppid=,comm=").Output() // #nosec G204 -- fixed program, numeric argument
 	if err != nil {
 		return 0, ""
 	}

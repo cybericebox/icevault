@@ -1639,9 +1639,9 @@ async function agentCheck() {
   if (r.status !== 200 || !r.data.list.length) { agentAsking = false; return; }
   const p = r.data.list[0], v = { who: p.who, what: p.what, where: p.where, from: p.from };
   v.peer = p.peer || "";
-  const del = /-delete$/.test(p.op), secretWrite = !del && p.kind !== "envcopy";
-  const note = [t("agent.ask.what." + p.kind, v), p.op === "copy-value" ? t("agent.ask.copy", v) : p.op === "move-value" ? t("agent.ask.move", v) : "", secretWrite ? t("agent.ask.value") : "", del ? t("agent.ask.recycle") : "", t("agent.ask.who", v), v.peer ? t("agent.ask.peer", v) : ""].filter(Boolean).join(" ");
-  const title = del ? t("agent.ask.title.delete", v) : p.kind === "envcopy" ? t("agent.ask.title.envcopy", v) : t("agent.ask.title", v);
+  const del = /-delete$/.test(p.op), write = ["set-value", "copy-value", "move-value"].includes(p.op), copy = p.op === "env-create", secretWrite = write;
+  const note = [t(del ? "agent.ask.del." + p.kind : write || copy ? "agent.ask.what." + p.kind : "agent.ask.what.change", v), p.op === "copy-value" ? t("agent.ask.copy", v) : p.op === "move-value" ? t("agent.ask.move", v) : "", secretWrite ? t("agent.ask.value") : "", del ? t("agent.ask.recycle") : "", t("agent.ask.who", v), v.peer ? t("agent.ask.peer", v) : ""].filter(Boolean).join(" ");
+  const title = del ? t("agent.ask.title.delete", v) : copy ? t("agent.ask.title.envcopy", v) : write ? t("agent.ask.title", v) : t("agent.ask.title.change", v);
   let decided = false;
   confirmBox(title, note, t("agent.ask.allow"), { cancelText: t("agent.ask.deny"),
     onOk: async () => { const x = await api("/api/agent-decide", { id: p.id, allow: true }); if (x.status === 200) { decided = true; return true; } if (x.data && x.data.code === "agent_gone") decided = true; return srv(x.data); },

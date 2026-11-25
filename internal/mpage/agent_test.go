@@ -652,3 +652,127 @@ func TestAgentLockDropsConnectionsAndPending(t *testing.T) {
 		t.Fatal("an open connection survived the lock")
 	}
 }
+
+func TestAgentDeletesOfFilledSecretsWaitAndConfirmIsNeverForwarded(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	pending := func(op string, args map[string]any) agentapi.Response {
+		t.Helper()
+		p := r.call(op, args)
+		if p.State != agentapi.StatePending {
+			t.Fatalf("%s %v did not wait: %+v", op, args, p)
+		}
+		return p
+	}
+	// a filled secret: variable, field, other secret, a connection that holds one
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "visibility": "secret"})
+	r.allow("set-value", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "value": "new-secret-value-77"})
+	r.app.AgentDecide(pending("var-delete", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "confirm": true}).ID, false)
+	if r.reveal("env/prod/general", "KEEP_SECRET") != "new-secret-value-77" {
+		t.Fatal("a filled secret variable was deleted without Allow")
+	}
+	r.app.AgentDecide(pending("field-delete", map[string]any{"connection": "GCP", "field": "credentials"}).ID, false)
+	r.app.AgentDecide(pending("other-delete", map[string]any{"other": "wifi"}).ID, false)
+	r.ok("connection-create", map[string]any{"name": "Holds one", "kind": "s3"})
+	r.ok("field-create", map[string]any{"connection": "Holds one", "field": "secret_access_key", "secret": true})
+	r.allow("set-value", map[string]any{"connection": "Holds one", "field": "secret_access_key", "value": "other-secret-value-88"})
+	r.app.AgentDecide(pending("connection-delete", map[string]any{"connection": "Holds one"}).ID, false)
+	if r.core.Model().Connection("GCP").Field("credentials") == nil || len(r.core.Model().Other) == 0 || r.core.Model().Connection("Holds one") == nil {
+		t.Fatal("something was deleted without Allow")
+	}
+	// the agent's "confirm" opens nothing: what something uses waits for the window
+	r.app.AgentDecide(pending("var-delete", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "confirm": true}).ID, false)
+	r.app.AgentDecide(pending("connection-update", map[string]any{"connection": "GCP", "new_name": "GCP 2", "confirm": true}).ID, false)
+	if r.core.Model().Connection("GCP") == nil || len(r.core.Model().Shared) != 1 {
+		t.Fatal("a used thing changed on the agent's own confirm")
+	}
+	r.allow("var-delete", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"})
+	if len(r.core.Model().Shared) != 0 {
+		t.Fatal("Allow did not delete the used shared value")
+	}
+	// plain and unused: at once
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_GONE", "visibility": "plain"})
+	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "PLAIN_GONE"})
+	r.noSecrets()
+}
+
+func TestAgentRelinkAndKindChangesWait(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	for _, c := range []struct {
+		op   string
+		args map[string]any
+	}{
+		{"site-update", map[string]any{"env": "prod", "name": "main", "connection": ""}},
+		{"site-update", map[string]any{"env": "prod", "name": "main", "kind": "compose"}},
+		{"product-update", map[string]any{"env": "prod", "name": "portal", "connections": []any{}}},
+		{"product-update", map[string]any{"env": "prod", "name": "portal", "site": ""}},
+	} {
+		p := r.call(c.op, c.args)
+		if p.State != agentapi.StatePending {
+			t.Fatalf("%s %v did not wait: %+v", c.op, c.args, p)
+		}
+		r.app.AgentDecide(p.ID, false)
+	}
+	m := r.core.Model().Env("prod")
+	if m.Site("main").Connection == nil || m.Product("portal").Site == nil || len(m.Product("portal").Connections) != 1 || m.Site("main").Kind != "google-cluster" {
+		t.Fatal("a relink went through without Allow")
+	}
+	r.ok("site-update", map[string]any{"env": "prod", "name": "main", "new_name": "main2", "connection": "GCP"}) // the same connection: a rename only (core may ask: then it waits)
+}
+
+func TestAgentPlainVariableNeverShadowsASecretOne(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "visibility": "plain"}, "shadows_secret")
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"})
+	var vis string
+	for _, v := range r.core.Model().Env("prod").General {
+		if v.Key == "COOKIE_KEY" {
+			vis = v.Vis
+		}
+	}
+	if vis == "" || vis == "plain" {
+		t.Fatalf("the new variable is %q: it must not be plain", vis)
+	}
+	p := r.call("set-value", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("the value of a variable that shares a secret name did not wait: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	r.noSecrets()
+}
+
+func TestAgentAllowFailsInViewMode(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	r.app.SetMode("view")
+	if d := r.app.AgentDecide(p.ID, true); d.Status == 200 {
+		t.Fatal("Allow wrote in view mode")
+	}
+	if st := r.status(p.ID); st.State != agentapi.StateFailed || st.Code != "view_mode" {
+		t.Fatalf("%+v", st)
+	}
+	if r.reveal("other/"+r.core.Model().Other[0].UUID, "") != "wifi-secret-1" {
+		t.Fatal("the secret changed")
+	}
+}
+
+func TestAgentJournalFileIsCleanedWhenRead(t *testing.T) {
+	r := newRig(t, 0)
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 5000)
+	line, _ := json.Marshal(map[string]string{"time": long, "op": "set-value\u001b[31m", "target": long, "who": "a\u202eb" + long, "result": long})
+	if err := os.WriteFile(filepath.Join(r.dir, agentapi.JournalName), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.unlock()
+	resp := r.app.AgentJournal()
+	raw, _ := json.Marshal(resp)
+	if len(raw) > 1500 || strings.Contains(string(raw), "\u001b") || strings.Contains(string(raw), "\u202e") {
+		t.Fatalf("the journal panel got the file as it was: %d bytes", len(raw))
+	}
+}

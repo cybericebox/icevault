@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/cybericebox/icevault/internal/agentapi"
 )
@@ -28,6 +29,8 @@ const (
 )
 
 const (
+	keyKey    = "key"
+	keyScope  = "scope"
 	opStatus  = "status"
 	modeEdit  = "edit"
 	keyEnv    = "env"
@@ -135,7 +138,7 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 func targetOf(args map[string]any) string {
 	out := ""
 	add := func(prefix string, m map[string]any) {
-		for _, k := range []string{keyEnv, "scope", keyName, "key", "new_key", "new_name", "title", "new_title", "connection", keyField, "other", keyKind, "site", "from", "state", "visibility"} {
+		for _, k := range []string{keyEnv, keyScope, keyName, keyKey, "new_key", "new_name", "title", "new_title", "connection", keyField, "other", keyKind, "site", "from", "state", "visibility"} {
 			if s, isStr := m[k].(string); isStr && s != "" {
 				if out != "" {
 					out += " "
@@ -195,19 +198,28 @@ func (x *agentCtx) run(op string) agentapi.Response {
 	a := x.args
 	switch op {
 	case "var-create":
-		if r := x.varRow(as(a, "scope"), as(a, "key")); r != nil && !ab(r, "missing") {
-			return agentRefused("name_exists", map[string]any{keyName: as(a, "key")})
+		if r := x.varRow(as(a, keyScope), as(a, keyKey)); r != nil && !ab(r, "missing") {
+			return agentRefused("name_exists", map[string]any{keyName: as(a, keyKey)})
 		}
-		return x.done(x.write("m-var", pick(a, "scope", "key", "visibility", "description", "expires")))
+		w := pick(a, keyScope, keyKey, "visibility", "description", "expires")
+		if x.secretKeyAnywhere(as(a, keyKey)) { // a plain variable of that name would shadow a secret one: it is made secret, and its value waits for Allow
+			if v := as(a, "visibility"); v != "" && rank(v) < 1 {
+				return agentRefused("shadows_secret", nil)
+			}
+			if as(a, "visibility") == "" {
+				w["visibility"] = "secret"
+			}
+		}
+		return x.done(x.write("m-var", w))
 	case "var-rename":
-		if r := x.varRow(as(a, "scope"), as(a, "key")); r == nil || ab(r, "missing") {
+		if r := x.varRow(as(a, keyScope), as(a, keyKey)); r == nil || ab(r, "missing") {
 			return agentRefused("not_found", nil)
 		}
-		return x.done(x.write("m-var", pick(a, "scope", "key", "new_key")))
+		return x.done(x.write("m-var", pick(a, keyScope, keyKey, "new_key")))
 	case "var-delete":
-		return x.done(x.write("m-var", withConfirm(pick(a, "scope", "key"), a, actDelete, true)))
+		return x.varDelete()
 	case "var-meta":
-		r := x.varRow(as(a, "scope"), as(a, "key"))
+		r := x.varRow(as(a, keyScope), as(a, keyKey))
 		if r == nil || ab(r, "missing") {
 			return agentRefused("not_found", nil)
 		}
@@ -219,7 +231,7 @@ func (x *agentCtx) run(op string) agentapi.Response {
 				return agentRefused("no_lowering", nil)
 			}
 		}
-		return x.done(x.write("m-var", pick(a, "scope", "key", "description", "visibility", "expires")))
+		return x.done(x.write("m-var", pick(a, keyScope, keyKey, "description", "visibility", "expires")))
 	case "set-value":
 		return x.setValue()
 	case "copy-value":
@@ -235,7 +247,7 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		}
 		w := map[string]any{keyUUID: as(cn, keyUUID), keyAction: actUpd, keyName: as(a, "new_name")}
 		copyIf(w, a, "description")
-		return x.done(x.write("m-connection", withConfirm(w, a)))
+		return x.writeAsk("m-connection", w, "connection-update", "connection", as(a, "connection"), "")
 	case "connection-delete":
 		return x.connectionDelete()
 	case "field-create", "field-update", "field-delete":
@@ -260,6 +272,15 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		w := map[string]any{keyUUID: as(o, keyUUID), keyAction: actUpd}
 		if op == "other-delete" {
 			w[keyAction] = actDelete
+			if as(o, "state") == stSet { // a secret that is filled goes only after Allow
+				uuid, title := as(o, keyUUID), as(a, "other")
+				return x.queue(op, "other", title, "", "", func(nx *agentCtx) error {
+					if o2 := nx.other(title); o2 == nil || as(o2, keyUUID) != uuid {
+						return errGone
+					}
+					return nx.write("m-other", w)
+				})
+			}
 		} else {
 			w["title"] = as(a, "new_title")
 			copyIf(w, a, "expires")
@@ -294,16 +315,86 @@ func copyIf(w, a map[string]any, keys ...string) {
 
 func withAction(w map[string]any, action string) map[string]any { w[keyAction] = action; return w }
 
-// withConfirm passes "confirm" on: the refusals "confirm_*" name what uses the thing, and the agent says again, on purpose, that it goes on. Removed
-// things go to the recycle bin.
-func withConfirm(w, a map[string]any, kv ...any) map[string]any {
-	if ab(a, "confirm") {
-		w["confirm"] = true
+func copyMap(w map[string]any) map[string]any {
+	c := make(map[string]any, len(w)+1)
+	for k, v := range w {
+		c[k] = v
 	}
-	for i := 0; i+1 < len(kv); i += 2 {
-		w[kv[i].(string)] = kv[i+1]
+	return c
+}
+
+// writeAsk writes at once; when the core says that something uses the thing (a refusal "confirm_*"), the person is asked, and only Allow writes it with the
+// confirmation. The agent's own "confirm" is never passed on.
+func (x *agentCtx) writeAsk(coreOp string, w map[string]any, op, kind, what, where string) agentapi.Response {
+	err := x.write(coreOp, w)
+	if err == nil {
+		return okData(map[string]any{"ok": true})
 	}
-	return w
+	code, _ := agentCode(err)
+	if !strings.HasPrefix(code, "confirm_") {
+		return refusedErr(err)
+	}
+	return x.queue(op, kind, what, where, "", func(nx *agentCtx) error {
+		c := copyMap(w)
+		c["confirm"] = true
+		return nx.write(coreOp, c)
+	})
+}
+
+func isSecretRow(r map[string]any) bool { return as(r, "visibility") != "plain" || ab(r, "secret") }
+
+func filledRow(r map[string]any) bool { return as(r, "state") == stSet }
+
+// secretKeyAnywhere says whether a variable of that name is secret anywhere in the vault (shared, General, a site, a product, or by the description of the
+// project): a plain variable of the same name must not shadow it.
+func (x *agentCtx) secretKeyAnywhere(key string) bool {
+	has := func(rows []map[string]any) bool {
+		for _, r := range rows {
+			if as(r, keyKey) == key && isSecretRow(r) {
+				return true
+			}
+		}
+		return false
+	}
+	if has(alist(x.nav, "shared")) {
+		return true
+	}
+	for _, e := range alist(x.nav, "envs") {
+		if has(alist(e, "general")) {
+			return true
+		}
+		for _, s := range alist(e, "sites") {
+			if has(alist(s, "vars")) {
+				return true
+			}
+		}
+		for _, p := range alist(e, "products") {
+			if has(alist(p, "vars")) || (asub(p, "sub") != nil && has(alist(asub(p, "sub"), "vars"))) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (x *agentCtx) varDelete() agentapi.Response {
+	scope, key := as(x.args, keyScope), as(x.args, keyKey)
+	r := x.varRow(scope, key)
+	if r == nil {
+		return agentRefused("not_found", nil)
+	}
+	w := map[string]any{keyScope: scope, keyKey: key, actDelete: true}
+	if filledRow(r) && isSecretRow(r) { // a filled secret goes to the recycle bin only after Allow
+		return x.queue("var-delete", kindVar, key, scope, "", func(nx *agentCtx) error {
+			if r2 := nx.varRow(scope, key); r2 == nil || !isSecretRow(r2) {
+				return errGone
+			}
+			c := copyMap(w)
+			c["confirm"] = true
+			return nx.write("m-var", c)
+		})
+	}
+	return x.writeAsk("m-var", w, "var-delete", kindVar, key, scope)
 }
 
 func rank(vis string) int {
@@ -396,7 +487,7 @@ func (x *agentCtx) varRow(scope, key string) map[string]any {
 		}
 	}
 	for _, r := range rows {
-		if as(r, "key") == key && key != "" {
+		if as(r, keyKey) == key && key != "" {
 			return r
 		}
 	}
@@ -466,11 +557,11 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 		}
 		return nil, &Error{Status: 404, Code: "not_found"}
 	default:
-		r := x.varRow(as(m, "scope"), as(m, "key"))
+		r := x.varRow(as(m, keyScope), as(m, keyKey))
 		if r == nil {
 			return nil, &Error{Status: 404, Code: "not_found"}
 		}
-		return &agentTarget{kind: kindVar, scope: as(m, "scope"), key: as(m, "key"), secret: as(r, "visibility") != "plain" || ab(r, "secret"), filled: as(r, "state") == stSet,
+		return &agentTarget{kind: kindVar, scope: as(m, keyScope), key: as(m, keyKey), secret: isSecretRow(r) || x.secretKeyAnywhere(as(m, keyKey)), filled: as(r, "state") == stSet,
 			system: ab(r, "system") || as(r, "managed") == "system"}, nil
 	}
 }
@@ -478,7 +569,7 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 func (t *agentTarget) put(x *agentCtx, value string) error {
 	switch t.kind {
 	case kindVar:
-		return x.write("m-var", map[string]any{"scope": t.scope, "key": t.key, "value": value})
+		return x.write("m-var", map[string]any{keyScope: t.scope, keyKey: t.key, "value": value})
 	case keyField:
 		return x.write("m-field", map[string]any{keyUUID: t.uuid, keyField: t.field, "value": value})
 	}
@@ -530,7 +621,7 @@ func (t agentTarget) id() agentTarget { t.filled = false; return t }
 
 // targetArgs keeps the names of a target: what the request is aimed at.
 func targetArgs(m map[string]any) map[string]any {
-	return pick(m, "scope", "key", "connection", "field", "other")
+	return pick(m, keyScope, keyKey, "connection", "field", "other")
 }
 
 // setValue sets a value: at once where the place is plain, after the person's Allow where it is secret. The value never comes back.
@@ -547,7 +638,7 @@ func (x *agentCtx) setValue() agentapi.Response {
 		return x.done(t.put(x, value))
 	}
 	if t.system {
-		return agentRefused("system_managed", map[string]any{"key": t.key})
+		return agentRefused("system_managed", map[string]any{keyKey: t.key})
 	}
 	saved, args := t.id(), targetArgs(x.args)
 	return x.queue("set-value", t.kind, t.what(), t.where(), "", func(nx *agentCtx) error {
@@ -636,18 +727,22 @@ func (x *agentCtx) connectionDelete() agentapi.Response {
 	if cn == nil {
 		return agentRefused("not_found", nil)
 	}
-	del := func(nx *agentCtx, confirm bool) error {
-		return nx.write("m-connection", withConfirm(map[string]any{keyUUID: as(cn, keyUUID), keyAction: actDelete}, map[string]any{"confirm": confirm}))
+	w := map[string]any{keyUUID: as(cn, keyUUID), keyAction: actDelete}
+	filledSecret := false
+	for _, f := range alist(cn, "fields") {
+		filledSecret = filledSecret || (ab(f, "secret") && as(f, "state") == stSet)
 	}
-	if len(alist(cn, "users")) == 0 {
-		return x.done(del(x, false))
+	if len(alist(cn, "users")) == 0 && !filledSecret {
+		return x.done(x.write("m-connection", w))
 	}
 	uuid := as(cn, keyUUID)
 	return x.queue("connection-delete", "connection", name, "", "", func(nx *agentCtx) error {
 		if c2 := nx.conn(name); c2 == nil || as(c2, keyUUID) != uuid {
 			return errGone
 		}
-		return del(nx, true)
+		c := copyMap(w)
+		c["confirm"] = true
+		return nx.write("m-connection", c)
 	})
 }
 
@@ -674,11 +769,11 @@ func hasSecrets(e map[string]any) bool {
 		}
 		return false
 	}
-	if secret(alist(e, "general")) {
+	if secret(alist(e, "general")) || len(alist(e, "file_list")) > 0 { // any kept file counts, sealed or not
 		return true
 	}
 	for _, s := range alist(e, "sites") {
-		if secret(alist(s, "vars")) {
+		if secret(alist(s, "vars")) || len(alist(s, "file_list")) > 0 {
 			return true
 		}
 	}
@@ -688,6 +783,19 @@ func hasSecrets(e map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// envPrint names an environment by what it holds (the ids of its sites and products): the same name over other contents is another source.
+func envPrint(e map[string]any) string {
+	var ids []string
+	for _, s := range alist(e, "sites") {
+		ids = append(ids, "s:"+as(s, keyUUID))
+	}
+	for _, p := range alist(e, "products") {
+		ids = append(ids, "p:"+as(p, keyUUID))
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 // envCreate makes an environment, empty or as a copy of another. A copy that carries secrets waits for the person.
@@ -706,8 +814,9 @@ func (x *agentCtx) envCreate() agentapi.Response {
 	if !hasSecrets(src) {
 		return x.done(x.write("m-env", w))
 	}
+	saved := envPrint(src)
 	return x.queue("env-create", "envcopy", as(a, keyName), "", from, func(nx *agentCtx) error {
-		if nx.env(from) == nil {
+		if e2 := nx.env(from); e2 == nil || envPrint(e2) != saved { // the source is the same one: the same sites and products
 			return errGone
 		}
 		return nx.write("m-env", w)
@@ -751,26 +860,31 @@ func (x *agentCtx) fieldOp(op string) agentapi.Response {
 		copyIf(w, a, "secret", "expires") // a field can become secret, never plain
 	case "field-delete":
 		w[actDelete] = true
+		if row != nil && ab(row, "secret") && as(row, "state") == stSet { // a filled secret field goes only after Allow
+			uuid, conn, field := as(cn, keyUUID), as(a, "connection"), as(a, keyField)
+			return x.queue(op, keyField, field, conn, "", func(nx *agentCtx) error {
+				if c2 := nx.conn(conn); c2 == nil || as(c2, keyUUID) != uuid {
+					return errGone
+				}
+				return nx.write("m-field", w)
+			})
+		}
 	}
 	return x.done(x.write("m-field", w))
 }
 
 func (x *agentCtx) siteOp(op string) agentapi.Response {
-	a := x.args
 	if op == "site-delete" {
 		return x.siteDelete()
 	}
+	a := x.args
 	w := pick(a, keyEnv, keyName, "new_name", keyKind)
-	switch op {
-	case "site-create":
+	w[keyAction] = actUpd
+	if op == "site-create" {
 		w[keyAction] = "create"
-	case "site-update":
-		w[keyAction] = actUpd
-	default:
-		w[keyAction] = actDelete
 	}
 	for _, k := range []string{"connection", "state"} {
-		if ahas(a, k) && op != "site-delete" {
+		if ahas(a, k) {
 			u, found := x.connUUID(as(a, k))
 			if !found {
 				return agentRefused("not_found", nil)
@@ -778,57 +892,113 @@ func (x *agentCtx) siteOp(op string) agentapi.Response {
 			w[k] = u
 		}
 	}
-	return x.done(x.write("m-site", withConfirm(w, a)))
+	if op == "site-create" {
+		return x.done(x.write("m-site", w))
+	}
+	cur := x.thing(as(a, keyEnv), "sites", as(a, keyName))
+	if cur == nil {
+		return agentRefused("not_found", nil)
+	}
+	// another connection, another state connection or another kind changes what the products on the site run with: the person decides
+	relink := (ahas(a, "connection") && as(w, "connection") != as(cur, "connection")) || (ahas(a, "state") && as(w, "state") != as(cur, "state")) ||
+		(as(a, keyKind) != "" && as(a, keyKind) != as(cur, keyKind))
+	if relink {
+		uuid, env, name := as(cur, keyUUID), as(a, keyEnv), as(a, keyName)
+		return x.queue("site-update", "site", name, env, "", func(nx *agentCtx) error {
+			if s2 := nx.thing(env, "sites", name); s2 == nil || as(s2, keyUUID) != uuid {
+				return errGone
+			}
+			c := copyMap(w)
+			c["confirm"] = true
+			return nx.write("m-site", c)
+		})
+	}
+	return x.writeAsk("m-site", w, "site-update", "site", as(a, keyName), as(a, keyEnv))
+}
+
+// thing finds a site or a product of an environment by name.
+func (x *agentCtx) thing(env, list, name string) map[string]any {
+	if e := x.env(env); e != nil {
+		for _, t := range alist(e, list) {
+			if as(t, keyName) == name {
+				return t
+			}
+		}
+	}
+	return nil
 }
 
 func (x *agentCtx) productOp(op string) agentapi.Response {
-	a := x.args
 	if op == "product-delete" {
 		return x.productDelete()
 	}
+	a := x.args
 	w := pick(a, keyEnv, keyName, "new_name", "enabled")
-	switch op {
-	case "product-create":
+	w[keyAction] = actUpd
+	if op == "product-create" {
 		w[keyAction] = "create"
-	case "product-update":
-		w[keyAction] = actUpd
-	default:
-		w[keyAction] = actDelete
 	}
-	if op != "product-delete" {
-		if ahas(a, "site") {
-			w["site"] = ""
-			if name := as(a, "site"); name != "" {
-				e := x.env(as(a, keyEnv))
-				if e == nil {
-					return agentRefused("no_env", map[string]any{keyEnv: as(a, keyEnv)})
-				}
-				found := false
-				for _, s := range alist(e, "sites") {
-					if as(s, keyName) == name {
-						w["site"], found = as(s, keyUUID), true
-					}
-				}
-				if !found {
-					return agentRefused("not_found", nil)
-				}
+	if ahas(a, "site") {
+		w["site"] = ""
+		if name := as(a, "site"); name != "" {
+			if x.env(as(a, keyEnv)) == nil {
+				return agentRefused("no_env", map[string]any{keyEnv: as(a, keyEnv)})
 			}
-		}
-		if ahas(a, "connections") {
-			names, _ := a["connections"].([]any)
-			ids := []any{}
-			for _, n := range names {
-				s, isStr := n.(string)
-				u, found := x.connUUID(s)
-				if !isStr || !found || s == "" {
-					return agentRefused("not_found", nil)
-				}
-				ids = append(ids, u)
+			s := x.thing(as(a, keyEnv), "sites", name)
+			if s == nil {
+				return agentRefused("not_found", nil)
 			}
-			w["connections"] = ids
+			w["site"] = as(s, keyUUID)
 		}
 	}
-	return x.done(x.write("m-product", withConfirm(w, a)))
+	if ahas(a, "connections") {
+		names, _ := a["connections"].([]any)
+		ids := []any{}
+		for _, n := range names {
+			s, isStr := n.(string)
+			u, found := x.connUUID(s)
+			if !isStr || !found || s == "" {
+				return agentRefused("not_found", nil)
+			}
+			ids = append(ids, u)
+		}
+		w["connections"] = ids
+	}
+	if op == "product-create" {
+		return x.done(x.write("m-product", w))
+	}
+	cur := x.thing(as(a, keyEnv), "products", as(a, keyName))
+	if cur == nil {
+		return agentRefused("not_found", nil)
+	}
+	relink := (ahas(a, "site") && as(w, "site") != as(cur, "site")) || (ahas(a, "connections") && !sameIDs(w["connections"], cur["connections"]))
+	if relink { // another site or other connections change what the product runs with: the person decides
+		uuid, env, name := as(cur, keyUUID), as(a, keyEnv), as(a, keyName)
+		return x.queue("product-update", "product", name, env, "", func(nx *agentCtx) error {
+			if p2 := nx.thing(env, "products", name); p2 == nil || as(p2, keyUUID) != uuid {
+				return errGone
+			}
+			c := copyMap(w)
+			c["confirm"] = true
+			return nx.write("m-product", c)
+		})
+	}
+	return x.writeAsk("m-product", w, "product-update", "product", as(a, keyName), as(a, keyEnv))
+}
+
+func sameIDs(a, b any) bool {
+	ids := func(v any) string {
+		var s []string
+		l, _ := v.([]any)
+		for _, x := range l {
+			if t, isStr := x.(string); isStr {
+				s = append(s, t)
+			}
+		}
+		sort.Strings(s)
+		return strings.Join(s, ",")
+	}
+	return ids(a) == ids(b)
 }
 
 // siteDelete and productDelete wait for the person: the things that run on a site, and a product with its variables, go to the recycle bin only after Allow.
@@ -883,7 +1053,7 @@ func (x *agentCtx) status() agentapi.Response {
 // ---- the structure: names, states, plain values; never a secret value
 
 func varOut(scope string, r map[string]any) map[string]any {
-	out := map[string]any{"scope": scope, "key": r["key"], "filled": as(r, "state") == stSet}
+	out := map[string]any{keyScope: scope, keyKey: r[keyKey], "filled": as(r, "state") == stSet}
 	for _, k := range []string{"visibility", "managed", "description", "changed", "expires", "expiry", "label", "required", "secret", "system", "missing", "imported", "overridden", "active"} {
 		if v, found := r[k]; found && v != nil {
 			out[k] = v

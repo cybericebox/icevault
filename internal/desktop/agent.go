@@ -96,6 +96,8 @@ func clean(s string, n int) string {
 		}
 		if unicode.IsControl(r) {
 			r = ' '
+		} else if unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) { // invisible characters make look-alike names
+			r = '?'
 		}
 		b.WriteRune(r)
 		i++
@@ -213,7 +215,8 @@ func (h *agentHub) accept(ln net.Listener) {
 
 func (h *agentHub) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
-	peer, err := agentapi.PeerOf(conn) // who is there, as the system says: another user is not answered
+	_ = conn.SetDeadline(time.Now().Add(agentReadWait)) // before anything that can take a while (the program name of the peer is asked of ps)
+	peer, err := agentapi.PeerOf(conn)                  // who is there, as the system says: another user is not answered
 	if err != nil || !peer.SameUser() {
 		return
 	}
@@ -229,7 +232,6 @@ func (h *agentHub) serve(conn net.Conn) {
 		delete(h.conns, conn)
 		h.mu.Unlock()
 	}()
-	_ = conn.SetDeadline(time.Now().Add(agentReadWait))
 	line, err := bufio.NewReader(io.LimitReader(conn, agentapi.MaxRequest)).ReadBytes('\n')
 	if err != nil && len(line) == 0 {
 		return
@@ -287,7 +289,8 @@ func (h *agentHub) readTail() []AgentEntry {
 	for _, l := range strings.Split(string(data), "\n") {
 		var e AgentEntry
 		if l != "" && json.Unmarshal([]byte(l), &e) == nil && e.Op != "" {
-			out = append(out, e)
+			// the file is the user's own, but not trusted for the panel: every field is cleaned and capped as when it was written
+			out = append(out, AgentEntry{Time: clean(e.Time, 40), Op: clean(e.Op, 40), Target: clean(e.Target, 200), Who: clean(e.Who, 80), Result: clean(e.Result, 80)})
 		}
 	}
 	if len(out) > agentRingSize {
@@ -419,6 +422,17 @@ func (a *App) AgentDecide(id string, allow bool) Response {
 		p.apply = nil
 		h.finish(id, agentapi.StateFailed, "locked")
 		return fail(404, "agent_gone")
+	}
+	a.mu.Lock()
+	mode := a.mode
+	a.mu.Unlock()
+	if mode != modeEdit { // as for the agent's own writes: nothing is written in view mode, whatever the person answered earlier
+		a.ops.Unlock()
+		p.apply = nil
+		h.finish(id, agentapi.StateFailed, "view_mode")
+		h.log(p.op, target, p.who, agentapi.StateFailed+": view_mode")
+		h.notifyPending()
+		return fail(403, "view_mode")
 	}
 	_, _ = a.syncDisk(false, true)
 	err := p.apply(c)
