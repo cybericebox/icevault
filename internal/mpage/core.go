@@ -412,7 +412,7 @@ func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[strin
 		}
 	}
 	return map[string]any{jName: e.Name, jTitle: e.Title, "general": general, "imports": keysOf(e.Imports), "shared_available": avail, "sites": sites, "products": products,
-		"files": len(e.Files), "file_list": envFileViews(e), "missing": missing, "adopt": c.adoptView(e.Name)}
+		"files": len(e.Files), "file_list": fileViews(e.Files, ""), "missing": missing, "adopt": c.adoptView(e.Name)}
 }
 
 // fileViews lists kept files for the page: the path, the site it belongs to, whether it is sealed and when it changed. Never the content, the size or
@@ -423,15 +423,6 @@ func fileViews(files []*vmodel.File, site string) []map[string]any {
 		out = append(out, map[string]any{"rel": f.Rel, jSite: site, "sealed": f.Vis == vmodel.VisSealed, "changed": f.Changed})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["rel"].(string) < out[j]["rel"].(string) })
-	return out
-}
-
-// envFileViews lists the files of the environment itself and then those of its sites (each with its site's name).
-func envFileViews(e *vmodel.Environment) []map[string]any {
-	out := fileViews(e.Files, "")
-	for _, s := range e.Sites {
-		out = append(out, fileViews(s.Files, s.Name)...)
-	}
 	return out
 }
 
