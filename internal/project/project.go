@@ -75,6 +75,10 @@ type Variable struct {
 	Choices []string `yaml:"choices,omitempty"`
 	// Pattern is a regular expression (Go syntax) the whole value must match; for a string variable only.
 	Pattern string `yaml:"pattern,omitempty"`
+	// FileDefault (connection fields only): a path pattern (path.Match, relative, no ..) of a file a site that uses the connection keeps. While the
+	// field is empty and such a file exists, the window says that the file is used instead of showing the field as not set. Names a file only, never
+	// reads it.
+	FileDefault string `yaml:"file-default,omitempty"`
 	// Min and Max bound an int (inclusive); either may be left out.
 	Min *int64 `yaml:"min,omitempty"`
 	Max *int64 `yaml:"max,omitempty"`
@@ -483,6 +487,13 @@ func (d *Description) Validate() []string {
 				add("%s: managed is owner or system", w)
 			}
 			v.validateType(w, add)
+			if v.FileDefault != "" {
+				if conn == nil {
+					add("%s: file-default: only in a connection", w)
+				} else if _, err := path.Match(v.FileDefault, "x"); err != nil || path.IsAbs(v.FileDefault) || path.Clean(v.FileDefault) != v.FileDefault || v.FileDefault == ".." || strings.HasPrefix(v.FileDefault, "../") {
+					add("%s: file-default %q is not a clean relative path pattern", w, v.FileDefault)
+				}
+			}
 			if conn != nil {
 				if v.Field == "" || !kinds.FieldRE.MatchString(v.Field) {
 					add("%s: a variable of a connection names its field (field:)", w)

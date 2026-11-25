@@ -141,7 +141,7 @@ func StatusLines(st *Status, env string) []string {
 			l += fmt.Sprintf(", %d from linked items", f.FromLinks)
 		}
 		if len(f.Empty) > 0 {
-			l += fmt.Sprintf(", %d empty", len(f.Empty))
+			l += fmt.Sprintf(", %d empty (%s)", len(f.Empty), strings.Join(f.Empty, ", "))
 		}
 		lines = append(lines, l)
 		for _, v := range f.Vars {

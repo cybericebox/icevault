@@ -35,6 +35,7 @@ products:
 ```
 
 - A variable of a connection of a declared kind takes the type, choices and pattern of its field when it names none.
+- `file-default: <path pattern>` on a variable of a connection (a relative `path.Match` pattern, no `..`) names a file that a site using the connection may keep instead of a value: while the field is empty and such a file exists, the window shows "a file of this site is used" instead of "not set". Only the name of the file is read, never its content.
 - `required-when` on a variable of an optional connection makes the connection needed while the condition holds.
 - Every field should explain itself (what it is, what it is used for, where to get it, which permissions a token needs). Built-in kinds carry a general help in en, uk and ru without any project name; a help on a variable of a connection (`connections: variables: help`) is more exact and is shown in preference on the connection page and in the field editor. `icevault project check` lists variables and fields without help as `warnings`.
 - A vault opened without the project only has the built-in kinds: connections of any other kind are shown as they are, cannot be edited and are never dropped.

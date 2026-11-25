@@ -7,16 +7,16 @@ vault: environment prod: 7 settings file(s) with 34 variable(s), 3 other file(s)
       PORTAL                               environment            owner
       ENGINE                               environment            owner
       INDEXER                              environment            owner
-  services/engine.env: 4 variable(s), 1 empty
+  services/engine.env: 4 variable(s), 1 empty (BOOTSTRAP_INVITE)
       ENGINE_PROFILE_DIR                   environment            system
       ENGINE_TAG                           environment            owner
       ENGINE_THREADS                       environment            owner
       BOOTSTRAP_INVITE                     environment            owner
-  services/indexer.env: 3 variable(s), 1 empty
+  services/indexer.env: 3 variable(s), 1 empty (BROKER_URL)
       INDEXER_SECRET                       environment            system
       BROKER_URL                           environment            owner
       BROKER_PASSWORD                      environment            owner
-  services/portal.env: 13 variable(s), 2 empty
+  services/portal.env: 13 variable(s), 2 empty (CDN_PURGE_KEY, CDN_SIGNING_KEY)
       PUBLIC_HOST                          environment            owner
       CONTACT_ADDRESS                      environment            owner
       BILLING_ACCOUNT                      environment            owner
