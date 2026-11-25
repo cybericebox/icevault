@@ -878,3 +878,29 @@ func TestAgentPlainNameTakenFromASecretRowIsRefused(t *testing.T) {
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "ODDNAME", "visibility": "secret"})
 	r.refused("var-create", map[string]any{"scope": "shared", "key": "ODDNAME", "visibility": "plain"}, "shadows_secret")
 }
+
+func TestAgentConnectionNameBoundByTheProjectWaits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	bound := ""
+	for _, p := range r.core.d.Products {
+		for _, u := range p.Connections {
+			if u.Name != "" && r.core.BoundConnectionName(u.Name) && r.core.Model().Connection(u.Name) == nil {
+				bound = u.Name
+			}
+		}
+	}
+	if bound == "" {
+		t.Skip("the example project binds no connection name")
+	}
+	p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": bound})
+	if p.State != agentapi.StatePending || r.core.Model().Connection(bound) != nil {
+		t.Fatalf("a rename to a bound name did not wait: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	c := r.call("connection-create", map[string]any{"name": bound, "kind": "s3"})
+	if c.State != agentapi.StatePending || r.core.Model().Connection(bound) != nil {
+		t.Fatalf("a connection made under a bound name did not wait: %+v", c)
+	}
+	r.ok("connection-update", map[string]any{"connection": "Blob store", "new_name": "Blob store 2"}) // an ordinary rename of a used connection goes the usual way (core may ask)
+}

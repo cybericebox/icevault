@@ -91,3 +91,9 @@ type VisDefaulter interface {
 type SecretCounter interface {
 	EnvHoldsSecrets(env string) bool
 }
+
+// ConnNameBinder is a Core that knows which connection names the project description binds to a use (the name it gives a connection it makes, the name a
+// program asks for): a connection made or renamed to such a name is linked by the commands that fill an environment, so it changes where they link.
+type ConnNameBinder interface {
+	BoundConnectionName(name string) bool
+}

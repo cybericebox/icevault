@@ -245,7 +245,11 @@ func (x *agentCtx) run(op string) agentapi.Response {
 	case "move-value":
 		return x.copyValue(true)
 	case "connection-create":
-		return x.done(x.write("m-connection", withAction(pick(a, keyName, keyKind, "description"), "create")))
+		w := withAction(pick(a, keyName, keyKind, "description"), "create")
+		if x.boundName(as(a, keyName)) { // the commands that fill an environment link a connection by this name: it is not made without Allow
+			return x.queue(op, "connection", as(a, keyName), "", "", func(nx *agentCtx) error { return nx.write("m-connection", w) })
+		}
+		return x.done(x.write("m-connection", w))
 	case "connection-update":
 		cn := x.conn(as(a, "connection"))
 		if cn == nil {
@@ -253,6 +257,17 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		}
 		w := map[string]any{keyUUID: as(cn, keyUUID), keyAction: actUpd, keyName: as(a, "new_name")}
 		copyIf(w, a, "description")
+		if nn := as(a, "new_name"); nn != "" && nn != as(a, "connection") && x.boundName(nn) { // a rename to a name the project binds redirects where environments link
+			uuid, name := as(cn, keyUUID), as(a, "connection")
+			return x.queue("connection-update", "connection", name+" -> "+nn, "", "", func(nx *agentCtx) error {
+				if c2 := nx.conn(name); c2 == nil || as(c2, keyUUID) != uuid {
+					return errGone
+				}
+				c := copyMap(w)
+				c["confirm"] = true
+				return nx.write("m-connection", c)
+			})
+		}
 		return x.writeAsk("m-connection", w, "connection-update", "connection", as(a, "connection"), "")
 	case "connection-delete":
 		return x.connectionDelete()
@@ -363,6 +378,11 @@ func filledRow(r map[string]any) bool { return as(r, "state") == stSet }
 // secretKeyAnywhere says whether a variable of that name is secret anywhere in the vault (shared, General, a site, a product, or by the description of the
 // project): a plain variable of the same name must not shadow it.
 // secretByModel says whether the project (or the name rule) makes a variable of that name secret.
+func (x *agentCtx) boundName(name string) bool {
+	b, can := x.c.(ConnNameBinder)
+	return can && b.BoundConnectionName(name)
+}
+
 func (x *agentCtx) secretByModel(key string) bool {
 	vd, can := x.c.(VisDefaulter)
 	return can && vd.DefaultVisibility(key) != visPlain

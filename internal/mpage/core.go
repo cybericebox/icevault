@@ -990,3 +990,26 @@ func (c *Core) EnvHoldsSecrets(env string) bool {
 	}
 	return false
 }
+
+// BoundConnectionName says whether the project description gives that name to a use of a connection (its name, its serve-as, or the title of its kind).
+func (c *Core) BoundConnectionName(name string) bool {
+	if c.d == nil || name == "" {
+		return false
+	}
+	uses := []project.ConnectionUse{}
+	for _, p := range c.d.Products {
+		uses = append(uses, p.Connections...)
+	}
+	uses = append(uses, c.d.VaultConnections...)
+	for _, u := range uses {
+		if u.Name == name || u.ServeAs == name {
+			return true
+		}
+		if u.Name == "" {
+			if k, known := c.kinds().Kind(u.Kind); known && k.Title == name {
+				return true
+			}
+		}
+	}
+	return false
+}
