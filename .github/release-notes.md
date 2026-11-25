@@ -1,8 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.8.0
+## Changes since v0.8.1
 
-- `env fill-missing` (and **Create missing entries** in the window) now makes an optional connection when a `required-when` of one of its variables holds in the environment, the same rule as **Missing for deploy**. Before, every optional connection was skipped, so its fields could only be filled after adding the connection by hand.
+<!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 ## What is here
 
