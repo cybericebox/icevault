@@ -1,9 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.8.1
+## Changes since v0.8.2
 
-- A site whose Terraform state is in an HCP connection now gives `STATE_BACKEND=hcp` (the derived setting of the site): before, the setting came only from a word kept on the site that the window never sets, so such a site ran on the project's default.
-- The update chip says "{version} available" (without the product name) and its Update button stands out; the checkbox of the update panel lines up with the text.
+<!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 ## What is here
 
