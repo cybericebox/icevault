@@ -7,6 +7,7 @@ package mpage
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -21,20 +22,21 @@ import (
 
 // The keys of the answers and the arguments that many ops share, and the actions of the CRUD ops.
 const (
-	jName     = "name"
-	jState    = "state"
-	jKind     = "kind"
-	jEnv      = "env"
-	jKey      = "key"
-	jList     = "list"
-	jTitle    = "title"
-	jWhere    = "where"
-	jSite     = "site"
-	jConn     = "connection"
-	jProduct  = "product"
-	actCreate = "create"
-	actUpdate = "update"
-	actDelete = "delete"
+	stateEmpty = "empty"
+	jName      = "name"
+	jState     = "state"
+	jKind      = "kind"
+	jEnv       = "env"
+	jKey       = "key"
+	jList      = "list"
+	jTitle     = "title"
+	jWhere     = "where"
+	jSite      = "site"
+	jConn      = "connection"
+	jProduct   = "product"
+	actCreate  = "create"
+	actUpdate  = "update"
+	actDelete  = "delete"
 )
 
 // Core is the window's core over an open vault of the vault model.
@@ -98,7 +100,7 @@ func text(t project.Text) map[string]string {
 func (c *Core) varView(x *vmodel.Var, h *project.Variable, values func(string) string, rs map[*vmodel.Var]*vmodel.Resolved) map[string]any {
 	state := "set"
 	if x == nil || x.Value == "" {
-		state = "empty"
+		state = stateEmpty
 	}
 	out := map[string]any{jState: state}
 	if x != nil {
@@ -217,7 +219,7 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 	names := map[string]bool{}
 	add := func(name, title string, secret bool, kf *kinds.Field) {
 		f := x.Field(name)
-		state := "empty"
+		state := stateEmpty
 		if f != nil && f.Value != "" {
 			state = "set"
 		}
@@ -248,6 +250,11 @@ func (c *Core) connView(x *vmodel.Connection, rs *vmodel.Resolutions) map[string
 			})
 		}
 		row["variables"] = used
+		if state == stateEmpty {
+			if rel := c.fileDefaultUsed(x, name); rel != "" {
+				row["file_used"] = rel
+			}
+		}
 		flag := false
 		if c.d != nil {
 			c.d.Walk(func(h project.Home) {
@@ -382,7 +389,7 @@ func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[strin
 		}
 		sk, _ := kinds.SiteKind(s.Kind)
 		sites = append(sites, map[string]any{"uuid": s.UUID, jName: s.Name, jKind: s.Kind, "kind_title": sk.Title, "needs_connection": sk.Connection, "state_kind": sk.State,
-			jConn: connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals, rs), "files": len(s.Files), "users": users})
+			jConn: connUUID(s.Connection), jState: connUUID(s.State), "state_backend": s.StateBackend, "vars": c.vars(s.Vars, sdesc, vals, rs), "files": len(s.Files), "file_list": fileViews(s.Files, s.Name), "users": users})
 	}
 	products := []map[string]any{}
 	for _, p := range e.Products {
@@ -405,7 +412,55 @@ func (c *Core) envView(e *vmodel.Environment, all *vmodel.Resolutions) map[strin
 		}
 	}
 	return map[string]any{jName: e.Name, jTitle: e.Title, "general": general, "imports": keysOf(e.Imports), "shared_available": avail, "sites": sites, "products": products,
-		"files": len(e.Files), "missing": missing, "adopt": c.adoptView(e.Name)}
+		"files": len(e.Files), "file_list": envFileViews(e), "missing": missing, "adopt": c.adoptView(e.Name)}
+}
+
+// fileViews lists kept files for the page: the path, the site it belongs to, whether it is sealed and when it changed. Never the content, the size or
+// the mode.
+func fileViews(files []*vmodel.File, site string) []map[string]any {
+	out := []map[string]any{}
+	for _, f := range files {
+		out = append(out, map[string]any{"rel": f.Rel, jSite: site, "sealed": f.Vis == vmodel.VisSealed, "changed": f.Changed})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["rel"].(string) < out[j]["rel"].(string) })
+	return out
+}
+
+// envFileViews lists the files of the environment itself and then those of its sites (each with its site's name).
+func envFileViews(e *vmodel.Environment) []map[string]any {
+	out := fileViews(e.Files, "")
+	for _, s := range e.Sites {
+		out = append(out, fileViews(s.Files, s.Name)...)
+	}
+	return out
+}
+
+// fileDefaultUsed names the file a site that uses the connection keeps under the file-default pattern of the field ("" = none).
+func (c *Core) fileDefaultUsed(x *vmodel.Connection, field string) string {
+	if c.d == nil {
+		return ""
+	}
+	pats := []string{}
+	c.d.Walk(func(h project.Home) {
+		if h.Conn != nil && h.Conn.Kind == x.Kind && h.Var.Field == field && h.Var.FileDefault != "" {
+			pats = append(pats, h.Var.FileDefault)
+		}
+	})
+	for _, e := range c.m.Envs {
+		for _, s := range e.Sites {
+			if s.Connection != x {
+				continue
+			}
+			for _, f := range s.Files {
+				for _, p := range pats {
+					if ok, _ := path.Match(p, f.Rel); ok {
+						return f.Rel
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // adoptView lists what the environment holds as its own values that a connection of the description now takes over (names only): the banner
@@ -519,7 +574,7 @@ func (c *Core) missing(e *vmodel.Environment, p *vmodel.Product, view map[string
 	}
 	scan := func(where, site string, rows []map[string]any) {
 		for _, r := range rows {
-			if req, _ := r["required"].(bool); req && r[jState] == "empty" && r["active"] != false {
+			if req, _ := r["required"].(bool); req && r[jState] == stateEmpty && r["active"] != false {
 				out = append(out, map[string]any{jWhere: where, jKey: r[jKey], "label": r["label"], jSite: site})
 			}
 		}
@@ -627,7 +682,7 @@ func (c *Core) Nav() map[string]any {
 	for _, o := range c.m.Other {
 		state := "set"
 		if o.Value == "" && len(o.Data) == 0 {
-			state = "empty"
+			state = stateEmpty
 		}
 		other = append(other, map[string]any{"uuid": o.UUID, jTitle: o.Title, "notes": o.Notes, jState: state, "file": len(o.Data) > 0 || o.Extra != "", "expires": o.Expires, "expiry": c.expiryState(o.Expires)})
 	}

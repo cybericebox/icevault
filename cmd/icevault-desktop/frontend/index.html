@@ -3001,7 +3001,7 @@ function mfields(parent, rows, c) {
     const tr = el("tr"); const k = "conn/" + c.uuid + "|" + r.key;
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, r.help ? mtext(r.help) : "");
     const vc = el("td"); const w = el("div", "vcell");
-    if (r.state === "empty") { w.append(el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
+    if (r.state === "empty") { w.append(el("span", "notset", r.file_used ? t("m.var.file_used", { name: r.file_used }) : r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
     const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + mvis(r))));
     { const xt = mexptag(r); if (xt) kc.append(" ", xt); }
     const [ac, ab] = mactcell();
@@ -3090,6 +3090,9 @@ function mEnv(main) {
   const s = mblock(main, t("m.env.sites"), "server", [editing() ? btn(t("m.site.new"), "plus", () => msiteDialog(e, null)) : null], t("m.env.sites_note"));
   if (!e.sites.length) s.append(mempty(t("m.empty.sites")));
   e.sites.forEach((x) => msite(s, e, x));
+  // Files: what the environment keeps (names and dates only, never the content)
+  const fl = mblock(main, t("m.env.files"), "file", [], t("m.env.files_note"));
+  mfiles(fl, e.file_list);
   // Products: what runs
   const p = mblock(main, t("m.env.products"), "package", [editing() ? btn(t("m.product.new"), "plus", () => mproductDialog(e, null)) : null], t("m.env.products_note"));
   if (!e.products.length) p.append(mempty(t("m.empty.products")));
@@ -3147,7 +3150,19 @@ function msite(parent, e, x) {
   card.append(ctl);
   const vs = el("div", "msub"); const vh = el("div", "msub-h"); vh.append(el("span", "", t("m.site.settings")), el("span", "grow")); vs.append(vh); mfold(vs, vh, mscope() + "|site|" + x.name + "|vars");
   if (editing()) vh.append(btn(t("m.btn.add_var"), "plus", () => mvarDialog("env/" + e.name + "/site/" + x.name, null)));
-  mvars(vs, x.vars, "env/" + e.name + "/site/" + x.name); card.append(vs); parent.append(card);
+  mvars(vs, x.vars, "env/" + e.name + "/site/" + x.name); card.append(vs);
+  const fs = el("div", "msub"); const fh = el("div", "msub-h"); fh.append(el("span", "", t("m.env.files")), el("span", "grow")); fs.append(fh); mfold(fs, fh, mscope() + "|site|" + x.name + "|files");
+  mfiles(fs, x.file_list); card.append(fs); parent.append(card);
+}
+
+// the kept files of an environment or a site: path, site, sealed mark, last change. Never the content.
+function mfiles(parent, list) {
+  list = list || [];
+  const trs = list.map((f) => { const tr = el("tr"); const [ac] = mactcell();
+    const dc = el("td"); dc.append(el("span", "quiet", f.site || t("files.all_sites")));
+    const kc = el("td"); const tags = el("div", "mtags"); if (f.sealed) tags.append(withIcon("lock", t("val.sealed"), "sealed")); const ch = el("span", "quiet", ago(f.changed)); if (f.changed) setTip(ch, fullTime(f.changed)); tags.append(ch); kc.append(tags);
+    tr.append(mnamecell(f.rel, "", true, ""), dc, kc, ac); return tr; });
+  mtable(parent, trs, t("m.empty.files"), [t("col.path"), t("col.site"), t("col.changed"), ""]);
 }
 
 function msiteDialog(e, x) {
