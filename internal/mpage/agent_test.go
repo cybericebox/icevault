@@ -897,3 +897,141 @@ func TestAgentBoundaryOfAFilledOtherAndDeclaredFields(t *testing.T) {
 	})
 	r.flagged("other-delete", map[string]any{"other": "only notes"}, "delete_other")
 }
+
+func TestAgentAdoptRefusesWhenThePasswordChangedAfterTheCopy(t *testing.T) {
+	r := newRig(t, 0)
+	sc, release, err := r.core.BatchScratch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := r.v.SetPassword([]byte("another-throwaway-pw-2")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.core.BatchAdopt(sc); code(err) != "changed" {
+		t.Fatalf("a copy made before a password change was adopted: %v", err)
+	}
+	v, err := vault.Open(r.v.Path(), vault.Credentials{Password: []byte("another-throwaway-pw-2")}) // the new password still opens it
+	if err != nil {
+		t.Fatalf("the password change was undone: %v", err)
+	}
+	v.Close()
+}
+
+func TestAgentDialogShowsEveryArgumentThatIsUsed(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "SHOWN_PLAIN", "visibility": "plain"}})
+	id := r.begin("everything")
+	long := strings.Repeat("x", 300)
+	for _, s := range []step{
+		{"var-create", map[string]any{"scope": "env/prod/general", "key": "SHOWN_TWO", "visibility": "plain", "description": "made by test", "expires": "2099-01-01"}},
+		{"set-value", map[string]any{"scope": "env/prod/general", "key": "SHOWN_PLAIN", "value": long}},
+		{"set-value", map[string]any{"scope": "env/prod/general", "key": "SHOWN_TWO", "value": "${{ self.PUBLIC_HOST }}"}},
+		{"set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}},
+		{"product-update", map[string]any{"env": "prod", "name": "portal", "enabled": false, "connections": []any{"Blob store"}}},
+	} {
+		if resp := r.item(id, s.op, s.args); !resp.OK {
+			t.Fatalf("%s: %+v", s.op, resp)
+		}
+	}
+	r.call("batch-submit", map[string]any{"id": id})
+	raw := mustJSON(r.app.AgentPending())
+	for _, want := range []string{"\"field\":\"description\"", "made by test", "\"field\":\"expires\"", "2099-01-01", "\"field\":\"visibility\"", "…", "${{ self.PUBLIC_HOST }}",
+		"\"hidden\":true", "\"field\":\"enabled\"", "\"value\":\"false\"", "\"field\":\"connections\"", "Blob store", "contributors", "test agent (pid"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("the dialog data lacks %q", want)
+		}
+	}
+	if strings.Contains(raw, long) {
+		t.Error("a long value is shown whole")
+	}
+	r.noSecrets()
+}
+
+func TestAgentItemSeenDifferentlyAtApplyFails(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.okAll(step{"connection-create", map[string]any{"name": "Other cloud", "kind": "google"}}, step{"connection-create", map[string]any{"name": "Third cloud", "kind": "google"}})
+	id := r.begin("relink")
+	r.item(id, "site-update", map[string]any{"env": "prod", "name": "main", "connection": "Other cloud"})
+	r.call("batch-submit", map[string]any{"id": id})
+	// what the dialog said (GCP to Other cloud) is not true any more: the site was relinked meanwhile
+	m := r.core.Model()
+	s := m.Env("prod").Site("main")
+	s.Connection = m.Connection("Third cloud")
+	if err := r.core.commit(); err != nil {
+		t.Fatal(err)
+	}
+	if d := r.app.AgentDecide(id, true); d.Status == 200 {
+		t.Fatal("an item whose old value changed was applied")
+	}
+	if r.core.Model().Env("prod").Site("main").Connection.Name != "Third cloud" {
+		t.Fatal("the vault changed")
+	}
+}
+
+func TestAgentSweepsOldCopiesOnly(t *testing.T) {
+	old, err := os.MkdirTemp("", "icevault-batch-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := os.MkdirTemp("", "icevault-batch-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(fresh)
+	when := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(old, when, when); err != nil {
+		t.Fatal(err)
+	}
+	r := newRig(t, 0)
+	r.unlock()
+	if _, err := os.Stat(old); err == nil {
+		os.RemoveAll(old)
+		t.Fatal("a left-over copy was not swept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("a fresh copy was swept")
+	}
+}
+
+func TestAgentBatchesAreNotBegunTooOften(t *testing.T) {
+	r := newRigGap(t, 0, 10*time.Second)
+	r.unlock()
+	r.begin("one")
+	if resp := r.call("batch-begin", map[string]any{"title": "two"}); resp.OK || resp.Code != "rate_limited" {
+		t.Fatalf("%+v", resp)
+	}
+}
+
+func TestAgentNonLatinClientNameIsMarked(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	call := func(op string, args map[string]any) agentapi.Response {
+		resp, err := agentapi.Call(r.dir, agentapi.Request{Op: op, Args: args, Client: "\u0430gent"}, 10*time.Second) // a Cyrillic a
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	id := call("batch-begin", map[string]any{"title": "t"}).Data.(map[string]any)["id"].(string)
+	call("var-create", map[string]any{"batch": id, "scope": "shared", "key": "ABC"})
+	call("batch-submit", map[string]any{"id": id})
+	if raw := mustJSON(r.app.AgentPending()); !strings.Contains(raw, "\"nonlatin\":true") {
+		t.Fatalf("%s", raw)
+	}
+}
+
+func TestAgentSubmitKeepsTheBatchPastTheDeadlineOfTheDraft(t *testing.T) {
+	r := newRig(t, 2*time.Second)
+	r.unlock()
+	id := r.begin("late")
+	r.item(id, "var-create", map[string]any{"scope": "shared", "key": "LATE_ONE", "visibility": "plain"})
+	time.Sleep(1200 * time.Millisecond)
+	r.call("batch-submit", map[string]any{"id": id})
+	time.Sleep(1500 * time.Millisecond) // past the deadline of the draft, before the deadline of the batch
+	if st := r.status(id); st.State != agentapi.StatePending {
+		t.Fatalf("the timer of the draft expired the batch: %+v", st)
+	}
+}

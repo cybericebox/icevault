@@ -1645,15 +1645,17 @@ async function agentCheck() {
     onClose: async () => { if (!decided) { decided = true; await api("/api/agent-decide", { id: p.id, allow: false }); } agentAsking = false; setTimeout(agentCheck, 200); if (agentRedraw) agentRedraw(); } });
   const box = confirmLayer.box, err = box.querySelector(".err"); box.classList.add("agent");
   // the whole batch: every change by names and scopes (never a value), what it changes, and why it needs a close look
-  box.insertBefore(el("div", "note", [t("agent.batch.count", { n: p.items.length }), t("agent.ask.who", { who: p.who }), p.peer ? t("agent.ask.peer", { peer: p.peer }) : "", p.nonlatin ? t("agent.ask.nonlatin") : ""].filter(Boolean).join(" ")), err);
+  box.insertBefore(el("div", "note", [t("agent.batch.count", { n: p.items.length }), t("agent.ask.who", { who: p.who }), p.peer ? t("agent.ask.peer", { peer: p.peer }) : "", (p.contributors || []).length ? t("agent.batch.contrib", { list: p.contributors.join("; ") }) : "", p.nonlatin ? t("agent.ask.nonlatin") : ""].filter(Boolean).join(" ")), err);
   const ul = el("ul", "agitems");
   p.items.forEach((it, i) => {
     const li = el("li"), line = el("div", "agitem"); line.append(el("b", "mono", (i + 1) + ". " + it.op), document.createTextNode(" "), el("span", "mono wrapany", q(it.target)));
     li.append(line);
     if (it.what) li.append(el("div", "dim wrapany", [q(it.what), it.where ? q(it.where) : "", it.from ? "← " + q(it.from) : ""].filter(Boolean).join(" ")));
+    (it.details || []).forEach((d) => li.append(el("div", "dim mono wrapany", t("agent.batch.detail", { field: d.field, value: d.hidden ? t("agent.batch.hidden") : d.value }))));
     (it.changes || []).forEach((c) => li.append(el("div", "dim wrapany", t("agent.ask.change", { field: t("agent.ask.field." + c.field), old: c.old || t("agent.ask.none"), new: c.new || t("agent.ask.none") }))));
     if ((it.sens || []).length) { const s = el("div", "agsens"); s.append(icon("alert"), document.createTextNode(it.sens.map((x) => t("agent.reason." + x)).join("; "))); li.append(s); }
     if (it.nonlatin) li.append(el("div", "dim", t("agent.ask.nonlatin")));
+    if (it.prefix) li.append(el("div", "dim", t("agent.ask.prefix")));
     ul.append(li);
   });
   box.insertBefore(ul, err);

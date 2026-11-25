@@ -1098,7 +1098,10 @@ func (c *Core) KeyPlaces(key string) []desktop.KeyPlace {
 }
 
 // scratchCore is a Core on a copy of the vault (see BatchScratch).
-type scratchCore struct{ *Core }
+type scratchCore struct {
+	*Core
+	id vault.Identity // the vault this is a copy of, when the copy was made
+}
 
 // Lock does nothing: the copy is removed by its release function.
 func (scratchCore) Lock() {}
@@ -1133,7 +1136,7 @@ func (c *Core) BatchScratch() (desktop.Core, func(), error) {
 		return nil, nil, err
 	}
 	sc.Now = c.Now
-	return scratchCore{sc}, func() { sv.Close(); release() }, nil
+	return scratchCore{Core: sc, id: c.v.Identity()}, func() { sv.Close(); release() }, nil
 }
 
 // BatchAdopt makes the content of the copy the content of the vault and reads the model again.
@@ -1142,12 +1145,18 @@ func (c *Core) BatchAdopt(scratch desktop.Core) error {
 	if !isScratch {
 		return errors.New("not a copy made by BatchScratch")
 	}
+	if c.v.Identity() != s.id { // the file was replaced or the password changed since the copy was made: the copy must not undo that
+		return refuse("changed", nil)
+	}
 	if err := c.v.AdoptContent(s.v); err != nil {
 		return err
 	}
 	m, err := vmodel.Load(c.v)
 	if err != nil {
-		return err
+		if c.m != nil {
+			c.m.ReadOnly = true // the model in memory is the old one: nothing may be written from it over what was saved
+		}
+		return desktop.ErrBatchSaved
 	}
 	c.m = m
 	return nil

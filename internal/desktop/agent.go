@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -67,17 +68,27 @@ type agentItem struct {
 	what, where, from string
 	changes           []agentChange
 	sens              []string
+	details           []agentDetail // every argument that Apply uses, as the dialog shows it
 	nonlatin          bool
+	by                string // who added it (the program and the one that started it)
+	hideValue         bool   // the value is a secret: the dialog says so, it does not show it
+}
+
+// agentDetail is one argument of an item as the dialog shows it: plain text, cleaned and cut with a visible "…".
+type agentDetail struct {
+	Field  string `json:"field"`
+	Value  string `json:"value"`
+	Hidden bool   `json:"hidden"`
 }
 
 // agentBatch is a batch: the changes of an agent, validated one by one on a copy of the vault, sent to the window as a whole.
 type agentBatch struct {
-	id, title, who, peer, key string
-	created, asked            time.Time
-	items                     []*agentItem
-	scratch                   Core // the copy the items were validated on (drafts only)
-	release                   func()
-	stop                      func()
+	id, title, who, peer, key, owner string
+	created, asked                   time.Time
+	items                            []*agentItem
+	scratch                          Core // the copy the items were validated on (drafts only)
+	release                          func()
+	stop                             func()
 }
 
 // agentResult is what became of an item when the batch was applied.
@@ -106,6 +117,7 @@ type agentHub struct {
 	last   map[string]time.Time
 	drafts map[string]*agentBatch
 	pend   map[string]*agentBatch
+	begun  map[string]time.Time
 	ord    []string
 	done   map[string]agentDone
 	dord   []string
@@ -121,7 +133,18 @@ func newAgentHub(a *App, dir string, ttl, gap time.Duration) *agentHub {
 	if ttl <= 0 {
 		ttl = AgentTTLDefault
 	}
-	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, drafts: map[string]*agentBatch{}, pend: map[string]*agentBatch{}, done: map[string]agentDone{}}
+	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, begun: map[string]time.Time{}, drafts: map[string]*agentBatch{}, pend: map[string]*agentBatch{}, done: map[string]agentDone{}}
+}
+
+// sweepScratch removes the copies of the vault that a program that did not end cleanly left in the temporary folder (a batch lives ten minutes, so
+// only what is older than an hour goes).
+func sweepScratch() {
+	list, _ := filepath.Glob(filepath.Join(os.TempDir(), "icevault-batch-*"))
+	for _, p := range list {
+		if st, err := os.Lstat(p); err == nil && st.IsDir() && time.Since(st.ModTime()) > time.Hour {
+			_ = os.RemoveAll(p)
+		}
+	}
 }
 
 // hasNonLatin says whether a name has a letter that is not Latin (a Cyrillic or Greek letter can look like a Latin one).
@@ -140,7 +163,7 @@ func clean(s string, n int) string {
 	i := 0
 	for _, r := range s {
 		if i >= n {
-			b.WriteString("...")
+			b.WriteString("…")
 			break
 		}
 		if unicode.IsControl(r) {
@@ -171,6 +194,7 @@ func (h *agentHub) start() {
 		return
 	}
 	h.err = ""
+	sweepScratch()
 	if err := agentapi.MakeDir(h.dir); err != nil {
 		h.err = "agent_dir"
 		h.a.say("the agent API is off: its folder is not the user's own or is open to others")

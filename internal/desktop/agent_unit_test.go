@@ -21,4 +21,27 @@ func TestCleanHidesInvisibleCharacters(t *testing.T) {
 	if got := clean("a\u202eb\u200bc\x1b", 20); got != "a?b?c " {
 		t.Fatalf("%q", got)
 	}
+	if got := clean("abcdef", 3); got != "abc…" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestADraftBelongsToTheClientThatBeganIt(t *testing.T) {
+	h := newAgentHub(nil, "", 0, -1)
+	h.drafts["x"] = &agentBatch{id: "x", owner: "1000:42"}
+	if h.draftOf("x", "1000:42") == nil {
+		t.Fatal("the owner does not get its draft")
+	}
+	if h.draftOf("x", "1000:43") != nil || h.draftOf("x", "1001:42") != nil {
+		t.Fatal("another client got the draft")
+	}
+}
+
+func TestAReplayStopsWhenTheVaultWasLocked(t *testing.T) {
+	h := newAgentHub(nil, "", 0, -1)
+	items := []*agentItem{{op: "var-create", target: "a"}, {op: "var-create", target: "b"}}
+	results, failed, code := h.replay(nil, items, func() bool { return true })
+	if failed != 0 || code != "locked" || len(results) != 2 || results[0].Result != "failed: locked" || results[1].Result != "skipped" {
+		t.Fatalf("%d %q %+v", failed, code, results)
+	}
 }

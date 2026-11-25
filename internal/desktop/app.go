@@ -289,7 +289,16 @@ func (a *App) syncDisk(full, wait bool) (bool, error) {
 	} else if !a.syncing.TryLock() {
 		return false, nil
 	}
+	if !wait { // the background check: not while an operation holds the core (a batch is being applied, a password is being changed)
+		if !a.ops.TryLock() {
+			a.syncing.Unlock()
+			return false, nil
+		}
+	}
 	changed, err := s.Sync(full)
+	if !wait {
+		a.ops.Unlock()
+	}
 	a.syncing.Unlock()
 	if err != nil || !changed {
 		return false, err
@@ -310,7 +319,9 @@ func (a *App) Refresh() Response {
 	if _, e := a.store(); e != nil {
 		return answer(e)
 	}
+	a.ops.Lock()
 	changed, err := a.syncDisk(true, true)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}

@@ -42,6 +42,12 @@ const (
 	actDelete    = "delete"
 )
 
+const (
+	keyConn   = "connection"
+	visSecret = "secret"
+	keyValue  = "value"
+)
+
 type agentCtx struct {
 	h       *agentHub
 	c       Core
@@ -51,6 +57,9 @@ type agentCtx struct {
 	changes []agentChange // what the item changes (names old and new), for the dialog
 	rec     *agentItem    // the item that is being recorded (nil when it is replayed)
 	pkey    string        // the client the rate limit counts: the program that started the command
+	owner   string        // the client that began the batch
+	by      string        // who is running this item, as the dialog names the contributor
+	extra   []agentDetail // what the rules add to the arguments (a visibility that is forced)
 	nav     map[string]any
 }
 
@@ -92,7 +101,7 @@ func refusedErr(err error) agentapi.Response {
 func targetOf(args map[string]any) string {
 	out := ""
 	add := func(prefix string, m map[string]any) {
-		for _, k := range []string{keyEnv, keyScope, keyName, keyKey, "new_key", "new_name", keyTitle, "new_title", "connection", keyField, "other", keyKind, keySite, "from", keyState, "visibility"} {
+		for _, k := range []string{keyEnv, keyScope, keyName, keyKey, "new_key", "new_name", keyTitle, "new_title", keyConn, keyField, "other", keyKind, keySite, "from", keyState, "visibility"} {
 			if s, isStr := m[k].(string); isStr && s != "" {
 				if out != "" {
 					out += " "
@@ -282,7 +291,7 @@ func otherFilled(o map[string]any) bool {
 	return as(o, keyState) == stSet || ab(o, "file") || as(o, "notes") != ""
 }
 
-func isSecretRow(r map[string]any) bool { return as(r, "visibility") != visPlain || ab(r, "secret") }
+func isSecretRow(r map[string]any) bool { return as(r, "visibility") != visPlain || ab(r, visSecret) }
 
 func filledRow(r map[string]any) bool { return as(r, keyState) == stSet }
 
@@ -345,7 +354,8 @@ func (x *agentCtx) varCreate() agentapi.Response {
 			return agentRefused("shadows_secret", nil)
 		}
 		if as(a, "visibility") == "" {
-			w["visibility"] = "secret"
+			w["visibility"] = visSecret
+			x.extra = append(x.extra, agentDetail{Field: "visibility", Value: visSecret})
 		}
 	}
 	shadows, secret := x.shadowedPlaces(scope, key)
@@ -463,7 +473,7 @@ func rank(vis string) int {
 	switch vis {
 	case visPlain:
 		return 0
-	case "secret":
+	case visSecret:
 		return 1
 	case "sealed":
 		return 2
@@ -607,14 +617,14 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 			return nil, &Error{Status: 404, Code: "not_found"}
 		}
 		return &agentTarget{kind: "other", name: as(m, "other"), uuid: as(o, keyUUID), secret: true, filled: as(o, keyState) == stSet}, nil
-	case as(m, "connection") != "":
-		cn := x.conn(as(m, "connection"))
+	case as(m, keyConn) != "":
+		cn := x.conn(as(m, keyConn))
 		if cn == nil {
 			return nil, &Error{Status: 404, Code: "not_found"}
 		}
 		for _, f := range alist(cn, "fields") {
 			if as(f, keyName) == as(m, keyField) {
-				return &agentTarget{kind: keyField, name: as(m, "connection"), field: as(m, keyField), uuid: as(cn, keyUUID), secret: ab(f, "secret"), filled: as(f, keyState) == stSet}, nil
+				return &agentTarget{kind: keyField, name: as(m, keyConn), field: as(m, keyField), uuid: as(cn, keyUUID), secret: ab(f, visSecret), filled: as(f, keyState) == stSet}, nil
 			}
 		}
 		return nil, &Error{Status: 404, Code: "not_found"}
@@ -631,11 +641,11 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 func (t *agentTarget) put(x *agentCtx, value string) error {
 	switch t.kind {
 	case kindVar:
-		return x.write("m-var", map[string]any{keyScope: t.scope, keyKey: t.key, "value": value})
+		return x.write("m-var", map[string]any{keyScope: t.scope, keyKey: t.key, keyValue: value})
 	case keyField:
-		return x.write("m-field", map[string]any{keyUUID: t.uuid, keyField: t.field, "value": value})
+		return x.write("m-field", map[string]any{keyUUID: t.uuid, keyField: t.field, keyValue: value})
 	}
-	return x.write("m-other", map[string]any{keyAction: actUpd, keyUUID: t.uuid, "value": value})
+	return x.write("m-other", map[string]any{keyAction: actUpd, keyUUID: t.uuid, keyValue: value})
 }
 
 func (t *agentTarget) read(c Core) (string, error) {
@@ -680,18 +690,21 @@ func (t agentTarget) id() agentTarget { t.filled = false; return t }
 
 // targetArgs keeps the names of a target: what the request is aimed at.
 func targetArgs(m map[string]any) map[string]any {
-	return pick(m, keyScope, keyKey, "connection", "field", "other")
+	return pick(m, keyScope, keyKey, keyConn, "field", "other")
 }
 
 // setValue sets a value: at once where the place is plain, after the person's Allow where it is secret. The value never comes back.
 func (x *agentCtx) setValue() agentapi.Response {
-	value, isStr := x.args["value"].(string)
+	value, isStr := x.args[keyValue].(string)
 	if !isStr || len(value) > agentMaxValue {
 		return agentRefused("bad_request", nil)
 	}
 	t, err := x.target(x.args)
 	if err != nil {
 		return refusedErr(err)
+	}
+	if x.rec != nil {
+		x.rec.hideValue = t.secret // the dialog says that the value is a secret; it shows a plain one (also a reference) as it is
 	}
 	if !t.secret && !strings.Contains(value, "${{") { // a plain value that refers to other values is not made at once: what it refers to may be a secret
 		return x.done(t.put(x, value))
@@ -792,23 +805,23 @@ func (x *agentCtx) connectionCreate() agentapi.Response {
 		first = first && as(c, keyKind) != as(a, keyKind)
 	}
 	if x.boundName(name) || (first && x.kindNeeded(as(a, keyKind))) {
-		return x.queue("connection-create", "connection", name, "", "", func(nx *agentCtx) error { return nx.write("m-connection", w) })
+		return x.queue("connection-create", keyConn, name, "", "", func(nx *agentCtx) error { return nx.write("m-connection", w) })
 	}
 	return x.done(x.write("m-connection", w))
 }
 
 func (x *agentCtx) connectionUpdate() agentapi.Response {
 	a := x.args
-	cn := x.conn(as(a, "connection"))
+	cn := x.conn(as(a, keyConn))
 	if cn == nil {
 		return agentRefused("not_found", nil)
 	}
 	nn := strings.TrimSpace(as(a, "new_name"))
 	w := map[string]any{keyUUID: as(cn, keyUUID), keyAction: actUpd, keyName: nn}
 	copyIf(w, a, "description")
-	if nn != "" && nn != as(a, "connection") && x.boundName(nn) { // a rename to a name the project binds redirects where environments link
-		uuid, name := as(cn, keyUUID), as(a, "connection")
-		return x.queue("connection-update", "connection", name+" -> "+nn, "", "", func(nx *agentCtx) error {
+	if nn != "" && nn != as(a, keyConn) && x.boundName(nn) { // a rename to a name the project binds redirects where environments link
+		uuid, name := as(cn, keyUUID), as(a, keyConn)
+		return x.queue("connection-update", keyConn, name+" -> "+nn, "", "", func(nx *agentCtx) error {
 			if c2 := nx.conn(name); c2 == nil || as(c2, keyUUID) != uuid {
 				return errGone
 			}
@@ -817,7 +830,7 @@ func (x *agentCtx) connectionUpdate() agentapi.Response {
 			return nx.write("m-connection", c)
 		})
 	}
-	return x.writeAsk("m-connection", w, "connection-update", "connection", as(a, "connection"), "")
+	return x.writeAsk("m-connection", w, "connection-update", keyConn, as(a, keyConn), "")
 }
 
 func (x *agentCtx) kindServed(kind string) bool {
@@ -841,7 +854,7 @@ func (x *agentCtx) kindNeeded(kind string) bool {
 }
 
 func (x *agentCtx) connectionDelete() agentapi.Response {
-	name := as(x.args, "connection")
+	name := as(x.args, keyConn)
 	cn := x.conn(name)
 	if cn == nil {
 		return agentRefused("not_found", nil)
@@ -849,7 +862,7 @@ func (x *agentCtx) connectionDelete() agentapi.Response {
 	w := map[string]any{keyUUID: as(cn, keyUUID), keyAction: actDelete}
 	filledSecret := false
 	for _, f := range alist(cn, "fields") {
-		filledSecret = filledSecret || (ab(f, "secret") && as(f, keyState) == stSet)
+		filledSecret = filledSecret || (ab(f, visSecret) && as(f, keyState) == stSet)
 	}
 	same := 0
 	for _, c := range alist(x.nav, "connections") {
@@ -863,7 +876,7 @@ func (x *agentCtx) connectionDelete() agentapi.Response {
 		return x.done(x.write("m-connection", w))
 	}
 	uuid := as(cn, keyUUID)
-	return x.queue("connection-delete", "connection", name, "", "", func(nx *agentCtx) error {
+	return x.queue("connection-delete", keyConn, name, "", "", func(nx *agentCtx) error {
 		c2 := nx.conn(name)
 		if c2 == nil || as(c2, keyUUID) != uuid {
 			return errGone
@@ -894,7 +907,7 @@ func (x *agentCtx) envDelete() agentapi.Response {
 func hasSecrets(e map[string]any) bool {
 	secret := func(rows []map[string]any) bool {
 		for _, r := range rows {
-			if as(r, keyState) == stSet && (as(r, "visibility") != visPlain || ab(r, "secret")) {
+			if as(r, keyState) == stSet && (as(r, "visibility") != visPlain || ab(r, visSecret)) {
 				return true
 			}
 		}
@@ -962,7 +975,7 @@ func (x *agentCtx) envCreate() agentapi.Response {
 
 func (x *agentCtx) fieldOp(op string) agentapi.Response {
 	a := x.args
-	cn := x.conn(as(a, "connection"))
+	cn := x.conn(as(a, keyConn))
 	if cn == nil {
 		return agentRefused("not_found", nil)
 	}
@@ -973,12 +986,12 @@ func (x *agentCtx) fieldOp(op string) agentapi.Response {
 		}
 	}
 	w := map[string]any{keyUUID: as(cn, keyUUID), keyField: as(a, keyField)}
-	if v, given := a["secret"]; given { // a secret flag goes up only: a field that is secret stays secret, whatever is asked
+	if v, given := a[visSecret]; given { // a secret flag goes up only: a field that is secret stays secret, whatever is asked
 		b, isBool := v.(bool)
 		if !isBool {
 			return agentRefused("bad_request", nil)
 		}
-		if !b && row != nil && ab(row, "secret") {
+		if !b && row != nil && ab(row, visSecret) {
 			return agentRefused("no_lowering", nil)
 		}
 	}
@@ -987,20 +1000,21 @@ func (x *agentCtx) fieldOp(op string) agentapi.Response {
 		if row != nil && ab(row, "present") {
 			return agentRefused("name_exists", map[string]any{keyName: as(a, keyField)})
 		}
-		copyIf(w, a, "secret", "expires")
-		if row != nil && ab(row, "secret") { // a field the kind declares secret is made secret, whatever is asked
-			w["secret"] = true
+		copyIf(w, a, visSecret, "expires")
+		if row != nil && ab(row, visSecret) { // a field the kind declares secret is made secret, whatever is asked
+			w[visSecret] = true
+			x.extra = append(x.extra, agentDetail{Field: visSecret, Value: "true"})
 		}
 	case "field-update":
 		if row == nil || !ab(row, "present") {
 			return agentRefused("not_found", nil)
 		}
-		copyIf(w, a, "secret", "expires") // a field can become secret, never plain
+		copyIf(w, a, visSecret, "expires") // a field can become secret, never plain
 	case "field-delete":
 		w[actDelete] = true
-		_, declared := row["required"]                                                     // only the fields a kind declares have it
-		if row != nil && ((ab(row, "secret") && as(row, keyState) == stSet) || declared) { // a filled secret field, and a field the kind declares, go only after Allow
-			uuid, conn, field := as(cn, keyUUID), as(a, "connection"), as(a, keyField)
+		_, declared := row["required"]                                                      // only the fields a kind declares have it
+		if row != nil && ((ab(row, visSecret) && as(row, keyState) == stSet) || declared) { // a filled secret field, and a field the kind declares, go only after Allow
+			uuid, conn, field := as(cn, keyUUID), as(a, keyConn), as(a, keyField)
 			return x.queue(op, keyField, field, conn, "", func(nx *agentCtx) error {
 				if c2 := nx.conn(conn); c2 == nil || as(c2, keyUUID) != uuid {
 					return errGone
@@ -1022,7 +1036,7 @@ func (x *agentCtx) siteOp(op string) agentapi.Response {
 	if op == "site-create" {
 		w[keyAction] = "create"
 	}
-	for _, k := range []string{"connection", keyState} {
+	for _, k := range []string{keyConn, keyState} {
 		if ahas(a, k) {
 			u, found := x.connUUID(as(a, k))
 			if !found {
@@ -1046,7 +1060,7 @@ func (x *agentCtx) siteOp(op string) agentapi.Response {
 		return agentRefused("not_found", nil)
 	}
 	// another connection, another state connection or another kind changes what the products on the site run with: the person decides
-	relink := (ahas(a, "connection") && as(w, "connection") != as(cur, "connection")) || (ahas(a, keyState) && as(w, keyState) != as(cur, keyState)) ||
+	relink := (ahas(a, keyConn) && as(w, keyConn) != as(cur, keyConn)) || (ahas(a, keyState) && as(w, keyState) != as(cur, keyState)) ||
 		(as(a, keyKind) != "" && as(a, keyKind) != as(cur, keyKind))
 	if relink {
 		uuid, env, name := as(cur, keyUUID), as(a, keyEnv), as(a, keyName)
@@ -1145,7 +1159,7 @@ func (x *agentCtx) connNameOf(uuid string) string {
 
 func (x *agentCtx) siteChanges(cur, w map[string]any) []agentChange {
 	var out []agentChange
-	for _, k := range []string{"connection", keyState} {
+	for _, k := range []string{keyConn, keyState} {
 		if _, given := w[k]; given && as(w, k) != as(cur, k) {
 			out = append(out, agentChange{Field: k, Old: clean(x.connNameOf(as(cur, k)), 120), New: clean(x.connNameOf(as(w, k)), 120)})
 		}
@@ -1240,14 +1254,14 @@ func (x *agentCtx) thingDelete(op, kind, list, write string) agentapi.Response {
 
 func varOut(scope string, r map[string]any) map[string]any {
 	out := map[string]any{keyScope: scope, keyKey: r[keyKey], "filled": as(r, keyState) == stSet}
-	for _, k := range []string{"visibility", "managed", "description", "changed", "expires", "expiry", "label", "required", "secret", "system", "missing", "imported", "overridden", "active"} {
+	for _, k := range []string{"visibility", "managed", "description", "changed", "expires", "expiry", "label", "required", visSecret, "system", "missing", "imported", "overridden", "active"} {
 		if v, found := r[k]; found && v != nil {
 			out[k] = v
 		}
 	}
-	if as(r, "visibility") == visPlain && !ab(r, "secret") && as(r, keyState) == stSet {
-		if v, isStr := r["value"].(string); isStr {
-			out["value"] = v
+	if as(r, "visibility") == visPlain && !ab(r, visSecret) && as(r, keyState) == stSet {
+		if v, isStr := r[keyValue].(string); isStr {
+			out[keyValue] = v
 		}
 	}
 	return out
@@ -1291,7 +1305,7 @@ func (x *agentCtx) structure(envOnly string) map[string]any {
 		sites := []map[string]any{}
 		for _, s := range alist(e, "sites") {
 			siteName[as(s, keyUUID)] = as(s, keyName)
-			sites = append(sites, map[string]any{keyName: s[keyName], keyKind: s[keyKind], "connection": nameOf(as(s, "connection")), "state_connection": nameOf(as(s, keyState)),
+			sites = append(sites, map[string]any{keyName: s[keyName], keyKind: s[keyKind], keyConn: nameOf(as(s, keyConn)), "state_connection": nameOf(as(s, keyState)),
 				"variables": varsOut("env/"+en+"/site/"+as(s, keyName), alist(s, "vars")), "files": filesOut(alist(s, "file_list")), "products": s["users"]})
 		}
 		products := []map[string]any{}
@@ -1331,15 +1345,15 @@ func (x *agentCtx) structure(envOnly string) map[string]any {
 	for _, c := range alist(n, "connections") {
 		fields := []map[string]any{}
 		for _, f := range alist(c, "fields") {
-			fo := map[string]any{keyName: f[keyName], "label": f["label"], "secret": ab(f, "secret"), "present": ab(f, "present"), "filled": as(f, keyState) == stSet}
+			fo := map[string]any{keyName: f[keyName], "label": f["label"], visSecret: ab(f, visSecret), "present": ab(f, "present"), "filled": as(f, keyState) == stSet}
 			for _, k := range []string{"expires", "expiry"} {
 				if v, found := f[k]; found {
 					fo[k] = v
 				}
 			}
-			if !ab(f, "secret") && as(f, keyState) == stSet {
-				if v, isStr := f["value"].(string); isStr {
-					fo["value"] = v
+			if !ab(f, visSecret) && as(f, keyState) == stSet {
+				if v, isStr := f[keyValue].(string); isStr {
+					fo[keyValue] = v
 				}
 			}
 			fields = append(fields, fo)

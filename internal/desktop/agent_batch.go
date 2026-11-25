@@ -1,7 +1,9 @@
 package desktop
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,21 +21,6 @@ import (
 var (
 	errAgentRate = errors.New("batches are submitted too often")
 )
-
-func sameStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	x, y := append([]string(nil), a...), append([]string(nil), b...)
-	sort.Strings(x)
-	sort.Strings(y)
-	for i := range x {
-		if x[i] != y[i] {
-			return false
-		}
-	}
-	return true
-}
 
 // drop releases the copy of the vault of a batch and what it holds.
 func (b *agentBatch) drop() {
@@ -106,15 +93,29 @@ var errAgentTooMany = errors.New("too many batches are open or waiting")
 
 // submit moves a batch from the drafts to the one place that waits for the person.
 func (h *agentHub) submit(b *agentBatch) error {
+	if b.stop != nil { // the timer of the draft is cancelled before the batch is taken: it must not fire on the batch that waits
+		b.stop()
+		b.stop = nil
+	}
+	rearm := func() {
+		id := b.id
+		if left := h.ttl - time.Since(b.created); left > 0 {
+			b.stop = h.a.o.AfterFunc(left, func() { h.expire(id) })
+		} else {
+			go h.expire(id)
+		}
+	}
 	h.mu.Lock()
 	if len(h.pend) >= agentMaxPending {
 		h.mu.Unlock()
+		rearm()
 		return errAgentTooMany
 	}
 	now := time.Now()
 	if h.gap > 0 { // a client that submits again at once is not asked about: the person is not worn down with prompts
 		if t, found := h.last[b.key]; found && now.Sub(t) < h.gap {
 			h.mu.Unlock()
+			rearm()
 			return errAgentRate
 		}
 		h.last[b.key] = now
@@ -124,10 +125,7 @@ func (h *agentHub) submit(b *agentBatch) error {
 	h.pend[b.id] = b
 	h.ord = append(h.ord, b.id)
 	h.mu.Unlock()
-	if b.stop != nil { // the time to answer starts now
-		b.stop()
-	}
-	id := b.id
+	id := b.id // the time to answer starts now
 	b.stop = h.a.o.AfterFunc(h.ttl, func() { h.expire(id) })
 	if b.release != nil { // the copy of the draft is not needed: apply makes a new one
 		b.release()
@@ -238,7 +236,7 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 	if args == nil {
 		args = map[string]any{}
 	}
-	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(peer.UID)} // one bucket for the user: new processes do not get round the limit
+	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(peer.UID), owner: ownerOf(peer), by: byOf(who, peer)} // one bucket for the user: new processes do not get round the limit
 	var resp agentapi.Response
 	switch req.Op {
 	case "help":
@@ -270,6 +268,32 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 	return resp
 }
 
+// ownerOf names the program that began a batch: the user and the process that started the client (the client itself is a new process at every call).
+func ownerOf(p agentapi.Peer) string {
+	pid := p.PPID
+	if pid <= 0 {
+		pid = p.PID
+	}
+	return strconv.Itoa(p.UID) + ":" + strconv.Itoa(pid)
+}
+
+func byOf(who string, p agentapi.Peer) string {
+	s := who
+	if p.Parent != "" {
+		s += " via " + p.Parent + " (pid " + strconv.Itoa(p.PPID) + ")"
+	}
+	return clean(s, 200)
+}
+
+// draftOf is the open batch of that id when this client began it; for any other client there is none.
+func (h *agentHub) draftOf(id, owner string) *agentBatch {
+	b := h.draft(id)
+	if b == nil || b.owner != owner {
+		return nil
+	}
+	return b
+}
+
 func (x *agentCtx) editing() bool {
 	x.h.a.mu.Lock()
 	defer x.h.a.mu.Unlock()
@@ -284,6 +308,13 @@ func (h *agentHub) batchBegin(x *agentCtx) agentapi.Response {
 	if !can {
 		return agentRefused("no_batch", nil)
 	}
+	h.mu.Lock() // batches are not begun too often either: every one is a copy of the vault
+	if t, found := h.begun[x.pkey]; h.gap > 0 && found && time.Since(t) < h.gap/10 {
+		h.mu.Unlock()
+		return agentRefused("rate_limited", nil)
+	}
+	h.begun[x.pkey] = time.Now()
+	h.mu.Unlock()
 	_, _ = h.a.syncDisk(false, true)
 	sc, release, err := runner.BatchScratch()
 	if err != nil {
@@ -293,7 +324,7 @@ func (h *agentHub) batchBegin(x *agentCtx) agentapi.Response {
 	if title == "" {
 		title = "batch"
 	}
-	b := &agentBatch{title: title, who: x.who, peer: clean(x.peer, 200), key: x.pkey, scratch: sc, release: release}
+	b := &agentBatch{title: title, who: x.who, peer: clean(x.peer, 200), key: x.pkey, owner: x.owner, scratch: sc, release: release}
 	if err := h.begin(b); err != nil {
 		release()
 		return agentRefused("too_many_batches", nil)
@@ -302,6 +333,9 @@ func (h *agentHub) batchBegin(x *agentCtx) agentapi.Response {
 }
 
 func (h *agentHub) batchDiscard(x *agentCtx) agentapi.Response {
+	if h.draftOf(as(x.args, "id"), x.owner) == nil {
+		return agentRefused("not_found", nil)
+	}
 	b := h.dropDraft(as(x.args, "id"))
 	if b == nil {
 		return agentRefused("not_found", nil)
@@ -320,7 +354,7 @@ func (h *agentHub) batchItem(x *agentCtx, op string) agentapi.Response {
 	if id == "" {
 		return agentRefused("batch_required", nil)
 	}
-	b := h.draft(id)
+	b := h.draftOf(id, x.owner)
 	if b == nil {
 		return agentRefused("not_found", nil)
 	}
@@ -332,18 +366,13 @@ func (h *agentHub) batchItem(x *agentCtx, op string) agentapi.Response {
 	}
 	args := copyMap(x.args)
 	delete(args, "batch")
-	ex := &agentCtx{h: h, c: b.scratch, args: args, who: x.who, peer: x.peer, pkey: x.pkey, rec: &agentItem{op: op}}
+	ex := &agentCtx{h: h, c: b.scratch, args: args, who: x.who, peer: x.peer, pkey: x.pkey, by: x.by, rec: &agentItem{op: op}}
 	resp := ex.run(op)
 	if !resp.OK {
 		return resp
 	}
-	it := ex.rec
-	it.args = args
-	it.target = clean(targetOf(args), 300)
-	it.nonlatin = hasNonLatin(it.target + it.what + it.where + it.from)
-	for _, c := range it.changes {
-		it.nonlatin = it.nonlatin || hasNonLatin(c.Old+c.New)
-	}
+	it := ex.describe()
+	it.args, it.by = args, x.by
 	b.items = append(b.items, it)
 	return okData(map[string]any{"item": len(b.items), "sensitive": it.sens})
 }
@@ -352,7 +381,7 @@ func (h *agentHub) batchSubmit(x *agentCtx) agentapi.Response {
 	if !x.editing() {
 		return agentRefused("view_mode", nil)
 	}
-	b := h.draft(as(x.args, "id"))
+	b := h.draftOf(as(x.args, "id"), x.owner)
 	if b == nil {
 		return agentRefused("not_found", nil)
 	}
@@ -397,11 +426,17 @@ func (a *App) AgentPending() Response {
 			b := h.pend[id]
 			items := []map[string]any{}
 			nonlatin := false
-			for _, it := range b.items {
-				items = append(items, map[string]any{"op": it.op, "target": it.target, "what": it.what, "where": it.where, "from": it.from, "changes": it.changes, "sens": it.sens, "nonlatin": it.nonlatin})
+			clash := prefixClashes(b.items)
+			seen, contributors := map[string]bool{}, []string{}
+			for i, it := range b.items {
+				items = append(items, map[string]any{"op": it.op, "target": it.target, "what": it.what, "where": it.where, "from": it.from, "changes": it.changes, "sens": it.sens, "details": it.details, "nonlatin": it.nonlatin, "prefix": clash[i]})
 				nonlatin = nonlatin || it.nonlatin
+				if !seen[it.by] {
+					seen[it.by] = true
+					contributors = append(contributors, it.by)
+				}
 			}
-			list = append(list, map[string]any{"id": b.id, keyTitle: b.title, "who": b.who, "peer": b.peer, "items": items, "nonlatin": nonlatin || hasNonLatin(b.title),
+			list = append(list, map[string]any{"id": b.id, keyTitle: b.title, "who": b.who, "peer": b.peer, "items": items, "contributors": contributors, "nonlatin": nonlatin || hasNonLatin(b.title+b.who),
 				"asked": b.asked.UTC().Format(time.RFC3339), "expires": b.asked.Add(h.ttl).UTC().Format(time.RFC3339)})
 		}
 		h.mu.Unlock()
@@ -411,16 +446,21 @@ func (a *App) AgentPending() Response {
 
 // replay runs the items on a core, in order, as the first run did: every target is found again and every rule is checked again. It answers what became of
 // each item and the first failure (-1: none).
-func (h *agentHub) replay(c Core, items []*agentItem) (results []agentResult, failed int, code string) {
+func (h *agentHub) replay(c Core, items []*agentItem, abort func() bool) (results []agentResult, failed int, code string) {
 	failed = -1
 	for i, it := range items {
+		if failed < 0 && abort != nil && abort() { // the vault was locked: nothing more is done
+			failed, code = i, "locked"
+			results = append(results, agentResult{Index: i + 1, Op: it.op, Target: it.target, Result: "failed: locked"})
+			continue
+		}
 		if failed >= 0 {
 			results = append(results, agentResult{Index: i + 1, Op: it.op, Target: it.target, Result: "skipped"})
 			continue
 		}
 		x := &agentCtx{h: h, c: c, args: copyMap(it.args), rec: &agentItem{op: it.op}}
 		resp := x.run(it.op)
-		if resp.OK && !sameStrings(x.rec.sens, it.sens) { // the rules see the item differently than when the person was shown it
+		if resp.OK && x.describe().sig() != it.sig() { // the rules or the names see the item differently than when the person was shown it
 			resp = agentRefused("gone", nil)
 		}
 		if !resp.OK {
@@ -486,12 +526,21 @@ func (a *App) AgentDecide(id string, allow bool) Response {
 		return answer(err)
 	}
 	defer release()
-	results, failed, code := h.replay(sc, b.items)
+	abort := func() bool { c2, e2 := a.store(); return e2 != nil || c2 != c }
+	results, failed, code := h.replay(sc, b.items, abort)
 	if failed >= 0 {
 		h.finishBatch(id, title, b.who, agentapi.StateFailed, code, results)
 		return Response{409, map[string]any{keyCode: "batch_failed", keyParams: map[string]any{"n": failed + 1, "op": results[failed].Op, "why": code}}}
 	}
+	if abort() { // locked while the items were run: the copy is dropped
+		h.finishBatch(id, title, b.who, agentapi.StateFailed, "locked", results)
+		return fail(404, "agent_gone")
+	}
 	if err := runner.BatchAdopt(sc); err != nil {
+		if errors.Is(err, ErrBatchSaved) { // it is on disk; the window reads the vault again
+			h.finishBatch(id, title, b.who, agentapi.StateApplied, "reload_failed", results)
+			return ok(map[string]any{"ok": true, "warning": "reload_failed"})
+		}
 		code, _ := agentCode(err)
 		h.finishBatch(id, title, b.who, agentapi.StateFailed, code, results)
 		return answer(err)
@@ -511,4 +560,111 @@ func (h *agentHub) finishBatch(id, title, who, state, code string, results []age
 	for _, it := range results {
 		h.log(it.Op, it.Target, who, it.Result)
 	}
+}
+
+// describe fills what the dialog shows of the item that was just run: the names, every argument that is used, and whether a name has non-Latin letters.
+func (x *agentCtx) describe() *agentItem {
+	it := x.rec
+	it.target = clean(targetOf(x.args), 300)
+	it.details = append(detailsOf(x.args, it.hideValue), x.extra...)
+	it.nonlatin = hasNonLatin(it.target + it.what + it.where + it.from)
+	for _, c := range it.changes {
+		it.nonlatin = it.nonlatin || hasNonLatin(c.Old+c.New)
+	}
+	for _, d := range it.details {
+		it.nonlatin = it.nonlatin || hasNonLatin(d.Field+d.Value)
+	}
+	return it
+}
+
+// sig is what must be the same when the item is run again: what the person was shown.
+func (it *agentItem) sig() string {
+	b, _ := json.Marshal([]any{it.op, it.target, it.what, it.where, it.from, it.changes, it.sens, it.details, it.nonlatin})
+	return string(b)
+}
+
+// detailsOf lists every argument of an item (but "batch") as text: strings cleaned and cut with a "…", flags, lists, and the targets of a copy. A secret value is
+// not shown, the dialog says that it is one.
+func detailsOf(args map[string]any, hideValue bool) []agentDetail {
+	var out []agentDetail
+	var walk func(prefix string, m map[string]any)
+	walk = func(prefix string, m map[string]any) {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			f := prefix + k
+			switch v := m[k].(type) {
+			case string:
+				d := agentDetail{Field: clean(f, 60), Value: clean(v, 200)}
+				if f == keyValue && hideValue {
+					d.Value, d.Hidden = "", true
+				}
+				out = append(out, d)
+			case bool:
+				out = append(out, agentDetail{Field: clean(f, 60), Value: strconv.FormatBool(v)})
+			case float64:
+				out = append(out, agentDetail{Field: clean(f, 60), Value: strconv.FormatFloat(v, 'f', -1, 64)})
+			case []any:
+				var s []string
+				for _, e := range v {
+					s = append(s, clean(fmt.Sprint(e), 200))
+				}
+				out = append(out, agentDetail{Field: clean(f, 60), Value: strings.Join(s, ", ")})
+			case map[string]any:
+				walk(f+".", v)
+			}
+		}
+	}
+	walk("", args)
+	return out
+}
+
+// prefixClashes marks the items that use two different names that start alike (a long common beginning): read to the end, the dialog says.
+func prefixClashes(items []*agentItem) []bool {
+	names := map[string][]int{}
+	for i, it := range items {
+		add := func(s string) {
+			if s != "" {
+				names[s] = append(names[s], i)
+			}
+		}
+		add(it.what)
+		add(it.where)
+		for _, d := range it.details {
+			f := d.Field
+			if j := strings.LastIndex(f, "."); j >= 0 {
+				f = f[j+1:]
+			}
+			switch f {
+			case "name", "key", "new_key", "new_name", "scope", keyConn, "field", "other", "title", "new_title", "env", "site":
+				add(d.Value)
+			}
+		}
+	}
+	out := make([]bool, len(items))
+	list := make([]string, 0, len(names))
+	for n := range names {
+		list = append(list, n)
+	}
+	for i := range list {
+		for j := i + 1; j < len(list); j++ {
+			a, c := []rune(list[i]), []rune(list[j])
+			n := 0
+			for n < len(a) && n < len(c) && a[n] == c[n] {
+				n++
+			}
+			if n >= 20 && (n < len(a) || n < len(c)) {
+				for _, k := range names[list[i]] {
+					out[k] = true
+				}
+				for _, k := range names[list[j]] {
+					out[k] = true
+				}
+			}
+		}
+	}
+	return out
 }

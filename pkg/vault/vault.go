@@ -268,6 +268,34 @@ func (v *Vault) Path() string { return v.path }
 func (v *Vault) Format() Format { return v.format }
 
 // Close forgets the database and overwrites the key material it can reach. Go cannot promise more: the garbage collector may have copied it.
+// Identity says which file a Vault stands for and which credentials open it: the path, the hash of the file as last read or written, and a hash of the
+// credentials. A copy made now can be told from a vault that was replaced or whose password changed since.
+type Identity struct {
+	Path    string
+	DiskSum [32]byte
+	Creds   [32]byte
+}
+
+// Identity answers the Identity of the open vault (the zero value for a closed one).
+func (v *Vault) Identity() Identity {
+	if v.db == nil {
+		return Identity{}
+	}
+	h := sha256.New()
+	c := v.db.Credentials
+	if c != nil {
+		h.Write(c.Passphrase)
+		h.Write([]byte{0})
+		h.Write(c.Key)
+		h.Write([]byte{0})
+		h.Write(c.Windows)
+	}
+	var id Identity
+	id.Path, id.DiskSum = v.path, v.diskSum
+	copy(id.Creds[:], h.Sum(nil))
+	return id
+}
+
 // AdoptContent makes the content of o (a copy of this vault, opened with the same key and changed) the content of v and saves it in one write; the file
 // is replaced atomically, so it is either all there or not at all. When the save fails v is as it was. o is left empty (closed).
 func (v *Vault) AdoptContent(o *Vault) error {

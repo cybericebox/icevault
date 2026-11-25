@@ -119,6 +119,9 @@ type VarProbe interface {
 	KeyPlaces(key string) []KeyPlace
 }
 
+// ErrBatchSaved is what BatchAdopt answers when the batch was saved but the vault could not be read again: it is on disk, and the window must reload.
+var ErrBatchSaved = errors.New("the batch was saved, the vault could not be read again")
+
 // BatchRunner is a Core that can work on a copy of the vault: the agent API validates a batch of changes on the copy and, when every item passes, makes the
 // copy the content of the vault in one save (all or nothing).
 type BatchRunner interface {
