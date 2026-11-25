@@ -259,7 +259,7 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 				}
 			}
 			if c == nil {
-				if use.Optional {
+				if use.Optional && !neededWhen(use, get) {
 					continue
 				}
 				c = connFor(m, d, use, rep)
@@ -269,6 +269,23 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 		}
 	}
 	return rep, nil
+}
+
+// neededWhen says whether an optional connection is needed in this environment: a required-when of one of its variables holds (the rule the
+// window's "missing for deploy" uses), so fill-missing makes it like a connection that is not optional.
+func neededWhen(use *project.ConnectionUse, get func(string) string) bool {
+	for _, v := range use.Variables {
+		if v.Field == "" {
+			continue
+		}
+		if w, err := project.ParseWhen(v.When); v.When != "" && (err != nil || w == nil || !w.Holds(get)) {
+			continue // a variable that is not used here needs nothing
+		}
+		if cond, err := project.ParseWhen(v.RequiredWhen); err == nil && cond != nil && cond.Holds(get) {
+			return true
+		}
+	}
+	return false
 }
 
 // connFor is the connection a use links: the one of its name and kind, else the only one of its kind, else a new empty one (named by the use
