@@ -421,6 +421,8 @@ body.resizing, body.resizing * { cursor:col-resize !important; user-select:none;
 .disknote { display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 4px 0 10px; border-radius:var(--ib-r); background:var(--ib-warn-bg); color:var(--ib-warn); font-size:13px; font-weight:500; white-space:nowrap; }
 .disknote .btn { height:24px; padding:0 8px; color:var(--ib-ink); }
 .updnote { background:var(--ib-ok-bg); color:var(--ib-ok); }
+.updnote .btn { background:var(--ib-ok); border-color:var(--ib-ok); color:#fff; font-weight:600; }
+.updnote .btn:hover { filter:brightness(1.08); background:var(--ib-ok); }
 .listbox .sep { height:1px; margin:4px 6px; background:var(--ib-line); }
 .listbox .opt.chk::before { content:none; }
 .listbox .opt .cbox { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:16px; height:16px; margin-top:2px; border:1.5px solid var(--ib-control); border-radius:4px; color:var(--ib-on-action); }
@@ -518,7 +520,9 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mchecks { display:flex; flex-direction:column; gap:2px; max-height:50vh; overflow:auto; margin:8px 0; }
 .mcheck { display:grid; grid-template-columns:20px max-content 1fr; align-items:center; gap:8px; min-height:36px; padding:0 8px; border-radius:var(--ib-r); cursor:pointer; }
 .mcheck:hover { background:var(--ib-hover); }
-.mcheck input { width:16px; height:16px; accent-color:var(--ib-action); }
+.mcheck input { width:16px; height:16px; margin:0; accent-color:var(--ib-action); }
+.mchecks.flush .mcheck { padding:0; grid-template-columns:16px 1fr; }
+.mchecks.flush .mcheck:hover { background:none; }
 .broken { font-size:13px; font-weight:500; color:var(--ib-danger); }
 .mtable td:has(.ksub), .mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
 .mtable .ksub { margin-top:2px; font-size:12px; line-height:1.3; color:var(--ib-dim); white-space:normal; overflow-wrap:anywhere; }
@@ -1633,7 +1637,7 @@ async function openUpdPanel() {
   panel.open(t("upd.title")); const box = panel.box;
   const head = el("div", "note"), body = el("div", "note"), err = el("div", "err"), actions = el("div", "actions"); err.setAttribute("role", "alert");
   const autoRow = el("label", "mcheck"), auto = el("input"); auto.type = "checkbox"; auto.id = "upd-auto"; autoRow.htmlFor = "upd-auto"; autoRow.append(auto, el("span", "", t("upd.auto")));
-  const checks = el("div", "mchecks"); checks.append(autoRow);
+  const checks = el("div", "mchecks flush"); checks.append(autoRow);
   const how = el("div", "note", t("upd.how"));
   box.append(head, body, how, checks, err, actions);
   const showErr = (text) => { err.textContent = ""; if (text) err.append(icon("alert"), document.createTextNode(text)); };
