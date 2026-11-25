@@ -192,12 +192,12 @@ func populate() tree {
 	tr.put("apps/api.env", imAPI, 0o600)
 	tr.put("net/dns.env", imDNS, 0o600)
 	tr.put("cloud/gcp-site.env", imGoogle, 0o600)
-	tr.put("made/google/keys/signing/k1.key", strings.Repeat("ab", 32)+"\n", 0o400)
-	tr.put("made/google/keys/signing/CURRENT", "k1\n", 0o400)
-	tr.put("made/google/keys/session-secret", secretValue, 0o600)
-	tr.put("made/google/account/credentials.json", `{"private_key": "x"}`, 0o600)
-	tr.put("made/google/kubeconfig.yaml", "kube: "+secretValue, 0o600)
-	tr.put("made/google/keys/edge-send-next", "", 0o600)
+	tr.put("built/google/keys/signing/k1.key", strings.Repeat("ab", 32)+"\n", 0o400)
+	tr.put("built/google/keys/signing/CURRENT", "k1\n", 0o400)
+	tr.put("built/google/keys/session-secret", secretValue, 0o600)
+	tr.put("built/google/creds/key.json", `{"private_key": "x"}`, 0o600)
+	tr.put("built/google/access.yaml", "kube: "+secretValue, 0o600)
+	tr.put("built/google/keys/edge-send-next", "", 0o600)
 	return tr
 }
 
@@ -342,7 +342,7 @@ func TestChangedSystemVariableAndKeyFileAreTheOnlyWritesAndOldValuesAreRetired(t
 	tr := populate()
 	r.mustImport("staging", tr, withConf("HOSTING=google\n"))
 	tr.put("apps/web.env", strings.Replace(imWeb, secretValue, "rotated-session-value", 1), 0o600)
-	tr.put("made/google/keys/session-secret", "new-secret", 0o600)
+	tr.put("built/google/keys/session-secret", "new-secret", 0o600)
 	out := r.mustImport("staging", tr, withConf("HOSTING=google\n"))
 	contains2(t, out, "2 changed")
 	contains2(t, out, "edit COOKIE_SECRET")

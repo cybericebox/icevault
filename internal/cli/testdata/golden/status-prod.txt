@@ -1,7 +1,7 @@
 vault: environment prod: 7 settings file(s) with 34 variable(s), 3 other file(s), 0 retired
   core.env: 7 variable(s)
       NOTES_LABEL                          environment            owner
-      TFC_ORG                              environment            owner
+      STATE_ORG                            environment            owner
       HOSTING                              environment            owner
       STATE_STORE                          environment            owner
       PORTAL                               environment            owner

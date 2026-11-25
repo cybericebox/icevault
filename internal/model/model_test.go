@@ -61,7 +61,7 @@ func eq(t *testing.T, got, want any, what string) {
 func TestParsing(t *testing.T) {
 	// test_groups_nest_to_any_depth_and_site_notes_are_read
 	s := snapOf(t, baseRows(row{"environments/prod/cluster", ".group", "", "state=active\nonly-sites=aws-main"},
-		row{"environments/prod/cluster/etcd", "ETCD_KEY", "k", own + "secret"})...)
+		row{"environments/prod/cluster/ring", "RING_KEY", "k", own + "secret"})...)
 	groups := map[string]string{}
 	for _, e := range s.Item("global", "main").Entries {
 		groups[e.Key] = e.Group
@@ -69,7 +69,7 @@ func TestParsing(t *testing.T) {
 	eq(t, groups, map[string]string{"HOST": "net", "PORT": "net/deep/er"}, "groups")
 	eq(t, s.GroupMeta("global", "main", "net/deep").Title, "Deep", "group title")
 	eq(t, s.GroupMeta("environments", "prod", "cluster").OnlySites, []string{"aws-main"}, "group sites")
-	eq(t, s.GroupSites("environments", "prod", "cluster/etcd"), []string{"aws-main"}, "subgroup inherits")
+	eq(t, s.GroupSites("environments", "prod", "cluster/ring"), []string{"aws-main"}, "subgroup inherits")
 	eq(t, s.Item("external", "dns").OnlySites, []string{"aws-main", "aws-eu"}, "item sites")
 	eq(t, s.Item("sites", "aws-main").SiteType, "aws", "site type")
 }
@@ -105,7 +105,7 @@ func TestNotesParsing(t *testing.T) {
 func TestStorePaths(t *testing.T) {
 	// test_the_store_paths
 	eq(t, VarEntry("environments", "staging", "web", "PUBLIC_HOST"), "IceVault/environments/staging/web/PUBLIC_HOST", "var")
-	eq(t, FileEntryPath("environments", "prod", "generated/x/y"), "IceVault/environments/prod/files/generated/x/y", "file")
+	eq(t, FileEntryPath("environments", "prod", "extra/x/y"), "IceVault/environments/prod/files/extra/x/y", "file")
 	eq(t, BlobEntry("environments", "prod", "services-portal"), "IceVault/environments/prod/.blobs/services-portal", "blob")
 	eq(t, ItemEntry("mine", "box"), "IceVault/mine/box/.item", "item")
 	eq(t, SectionEntry("mine"), "IceVault/mine/.section", "section")

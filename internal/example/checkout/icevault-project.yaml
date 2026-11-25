@@ -132,7 +132,7 @@ site-kinds:
       name: Terraform Cloud
       file: core.env
       variables:
-        - {name: TFC_ORG, field: organization}
+        - {name: STATE_ORG, field: organization}
     variables:
       - {name: GKE_POOL, label: {en: Node pool}, required: true}
       - {name: GCP_ZONE, label: {en: Zone}}

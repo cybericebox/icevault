@@ -316,7 +316,7 @@ func connUUID(x *vmodel.Connection) string {
 }
 
 // values is the namespace of an environment for the conditions (General with imports, the site, every product).
-// The place variable of a product (BRAIN, INDEXER ...) is written from its place on export, so the conditions read it from there; the defaults of the
+// The place variable of a product (ENGINE, INDEXER ...) is written from its place on export, so the conditions read it from there; the defaults of the
 // description apply to what is not set.
 func (c *Core) values(e *vmodel.Environment) func(string) string {
 	m := map[string]string{}

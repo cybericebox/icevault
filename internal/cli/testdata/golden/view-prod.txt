@@ -1,7 +1,7 @@
 environment 'prod' (linked items included): 34 variable(s), 4 empty
   FILE                    VARIABLE            SOURCE                  MANAGED  STATE  CHANGED
   core.env                NOTES_LABEL         environment             owner    set    2026-01-02T03:04:05Z
-  core.env                TFC_ORG             environment             owner    set    2026-01-02T03:04:05Z
+  core.env                STATE_ORG           environment             owner    set    2026-01-02T03:04:05Z
   core.env                HOSTING             environment             owner    set    
   core.env                STATE_STORE         environment             owner    set    
   core.env                PORTAL              environment             owner    set    

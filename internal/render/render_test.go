@@ -39,16 +39,16 @@ files:
   - {path: apps/web.env, used-when: "WEB=cluster or (API=cluster and HOSTING in [aws, google])"}
   - {path: apps/worker.env, used-when: "WORKER in [host, cluster]"}
 kept-files:
-  - {name: signing key state, pattern: "made/[a-z0-9_-]+/keys/signing/CURRENT", mode: "0400", why: the name of the key in use}
-  - {name: signing keys, pattern: "made/[a-z0-9_-]+/keys/signing/.+", mode: "0400", why: signed orders need them, keep-retired: true, needed-until: the last order signed with it has expired, guard: signing}
-  - {name: key ring order, pattern: "made/[a-z0-9_-]+/keys/ring/order", mode: "0600", why: the order of the ring, site-bound: true}
-  - {name: key ring, pattern: "made/[a-z0-9_-]+/keys/ring/.+", mode: "0600", why: the keys of the ring, keep-retired: true, needed-until: the last ring backup made before it is gone, site-bound: true}
-  - {name: cluster keys, pattern: "made/[a-z0-9_-]+/keys/.+", mode: "0600", why: made once, keep-retired: true, site-bound: true}
-  - {name: cloud credentials, pattern: "made/[a-z0-9_-]+/account/credentials(\\.json)?", mode: "0600", why: a new one needs an admin, managed: owner, site-bound: true}
-  - {name: cluster access, pattern: "made/[a-z0-9_-]+/kubeconfig\\.yaml", mode: "0600", why: the access, site-bound: true}
-  - {name: enrollment token, pattern: "made/web/enroll\\.env", mode: "0600", why: a token the web reads}
+  - {name: signing key state, pattern: "built/[a-z0-9_-]+/keys/signing/CURRENT", mode: "0400", why: the name of the key in use}
+  - {name: signing keys, pattern: "built/[a-z0-9_-]+/keys/signing/.+", mode: "0400", why: signed orders need them, keep-retired: true, needed-until: the last order signed with it has expired, guard: signing}
+  - {name: key ring order, pattern: "built/[a-z0-9_-]+/keys/ring/order", mode: "0600", why: the order of the ring, site-bound: true}
+  - {name: key ring, pattern: "built/[a-z0-9_-]+/keys/ring/.+", mode: "0600", why: the keys of the ring, keep-retired: true, needed-until: the last ring backup made before it is gone, site-bound: true}
+  - {name: cluster keys, pattern: "built/[a-z0-9_-]+/keys/.+", mode: "0600", why: made once, keep-retired: true, site-bound: true}
+  - {name: cloud credentials, pattern: "built/[a-z0-9_-]+/creds/key(\\.json)?", mode: "0600", why: a new one needs an admin, managed: owner, site-bound: true}
+  - {name: cluster access, pattern: "built/[a-z0-9_-]+/access\\.yaml", mode: "0600", why: the access, site-bound: true}
+  - {name: enrollment token, pattern: "built/web/invite\\.env", mode: "0600", why: a token the web reads}
 left-out:
-  - {pattern: "made/[a-z0-9_-]+/tf-data(/.*)?", why: working files}
+  - {pattern: "built/[a-z0-9_-]+/scratch(/.*)?", why: working files}
   - {pattern: "dumps/.*", why: database copies}
   - {pattern: "vault/.*", why: the vault itself}
 derived:
@@ -159,8 +159,8 @@ func TestTableSettingsFilesAndOtherFiles(t *testing.T) {
 			t.Errorf("%s: %q", rel, k)
 		}
 	}
-	for _, rel := range []string{"made/aws/keys/signing/k1.key", "made/aws/keys/signing/CURRENT", "made/google/keys/session-secret", "made/aws/account/credentials",
-		"made/google/account/credentials.json", "made/google/kubeconfig.yaml", "made/web/enroll.env"} {
+	for _, rel := range []string{"built/aws/keys/signing/k1.key", "built/aws/keys/signing/CURRENT", "built/google/keys/session-secret", "built/aws/creds/key",
+		"built/google/creds/key.json", "built/google/access.yaml", "built/web/invite.env"} {
 		if k, _ := p.Classify(rel); k != "file" {
 			t.Errorf("%s: %q", rel, k)
 		}
@@ -172,35 +172,35 @@ func TestTableSettingsFilesAndOtherFiles(t *testing.T) {
 
 func TestTableKeyRing(t *testing.T) {
 	p := proj()
-	for rel, name := range map[string]string{"made/aws/keys/ring/order": "key ring order", "made/aws/keys/ring/key1.key": "key ring", "made/aws/keys/ring/retired/key1.key": "key ring"} {
+	for rel, name := range map[string]string{"built/aws/keys/ring/order": "key ring order", "built/aws/keys/ring/key1.key": "key ring", "built/aws/keys/ring/retired/key1.key": "key ring"} {
 		k, r := p.Classify(rel)
 		if r == nil {
 			t.Fatalf("%s not classified", rel)
 		}
 		eq(t, []any{k, r.Name, r.Managed, r.Mode}, []any{"file", name, "system", 0o600}, rel)
 	}
-	if !p.RetireFile("made/aws/keys/ring/key1.key") || !p.RetireFile("made/aws/keys/ring/retired/key1.key") || p.RetireFile("made/aws/keys/ring/order") {
+	if !p.RetireFile("built/aws/keys/ring/key1.key") || !p.RetireFile("built/aws/keys/ring/retired/key1.key") || p.RetireFile("built/aws/keys/ring/order") {
 		t.Error("retire rule for the ring")
 	}
-	if p.RetireFile("made/aws/keys/signing/CURRENT") || !p.RetireFile("made/aws/keys/signing/k1.key") || p.RetireFile("made/aws/kubeconfig.yaml") {
+	if p.RetireFile("built/aws/keys/signing/CURRENT") || !p.RetireFile("built/aws/keys/signing/k1.key") || p.RetireFile("built/aws/access.yaml") {
 		t.Error("retire rule for the signing keys")
 	}
-	if !strings.Contains(p.NeededUntil("made/aws/keys/ring/key1.key"), "ring backup") || !strings.Contains(p.NeededUntil("made/aws/keys/signing/k1.key"), "signed") {
+	if !strings.Contains(p.NeededUntil("built/aws/keys/ring/key1.key"), "ring backup") || !strings.Contains(p.NeededUntil("built/aws/keys/signing/k1.key"), "signed") {
 		t.Error("needed until")
 	}
 }
 
 func TestTableModes(t *testing.T) {
 	p := proj()
-	_, signing := p.Classify("made/aws/keys/signing/k1.key")
-	_, other := p.Classify("made/aws/keys/session-secret")
+	_, signing := p.Classify("built/aws/keys/signing/k1.key")
+	_, other := p.Classify("built/aws/keys/session-secret")
 	eq(t, []int{signing.Mode, other.Mode}, []int{0o400, 0o600}, "modes")
-	eq(t, []string{signing.Managed, p.FileRule("made/aws/account/credentials").Managed}, []string{"system", "owner"}, "managed")
+	eq(t, []string{signing.Managed, p.FileRule("built/aws/creds/key").Managed}, []string{"system", "owner"}, "managed")
 }
 
 func TestTableLeftOut(t *testing.T) {
 	p := proj()
-	for _, rel := range []string{"made/aws/tf-data/x", "dumps/2026/db.tar", "vault/t.kdbx", "vault/t.kdbx.info.json"} {
+	for _, rel := range []string{"built/aws/scratch/x", "dumps/2026/db.tar", "vault/t.kdbx", "vault/t.kdbx.info.json"} {
 		if k, _ := p.Classify(rel); k != "" {
 			t.Errorf("%s must not be kept", rel)
 		}
@@ -222,21 +222,21 @@ func TestStemsRoundTrip(t *testing.T) {
 }
 
 func TestTreeFiles(t *testing.T) {
-	cov, skipped, unknown := proj().TreeFiles([]string{webRel, "made/aws/kubeconfig.yaml", "made/aws/tf-data/x", "stray.txt", "cloud/gcp-site.env"}, nil)
+	cov, skipped, unknown := proj().TreeFiles([]string{webRel, "built/aws/access.yaml", "built/aws/scratch/x", "stray.txt", "cloud/gcp-site.env"}, nil)
 	keys := []string{}
 	for k := range cov {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	eq(t, keys, []string{webRel, "cloud/gcp-site.env", "made/aws/kubeconfig.yaml"}, "covered")
-	eq(t, skipped, []string{"made/aws/tf-data/x"}, "skipped")
+	eq(t, keys, []string{webRel, "built/aws/access.yaml", "cloud/gcp-site.env"}, "covered")
+	eq(t, skipped, []string{"built/aws/scratch/x"}, "skipped")
 	eq(t, unknown, []string{"stray.txt"}, "unknown")
 }
 
 func TestSiteBound(t *testing.T) {
 	p := proj()
-	for rel, want := range map[string]bool{"made/aws/kubeconfig.yaml": true, "made/aws/keys/signing/k1.key": false, "made/web/enroll.env": false,
-		"made/aws/keys/ring/k": true, webRel: false} {
+	for rel, want := range map[string]bool{"built/aws/access.yaml": true, "built/aws/keys/signing/k1.key": false, "built/web/invite.env": false,
+		"built/aws/keys/ring/k": true, webRel: false} {
 		if p.SiteBound(rel) != want {
 			t.Errorf("SiteBound(%s) != %v", rel, want)
 		}
@@ -708,15 +708,15 @@ func TestRenderTreeModes(t *testing.T) {
 	env.HasMeta = true
 	env.Blobs["apps-web"] = []byte(CanonJSON(mustLayout("A=1\n# c\nB=2\n")))
 	env.Entries = []*model.Entry{entry("A", "x y", "g", "apps/web.env"), entry("B", "2", "g", "apps/web.env")}
-	env.Files["made/aws/keys/signing/k1.key"] = &model.FileEntry{Data: []byte("k"), Mode: 0o600, Sha: model.SHA256([]byte("k"))}
+	env.Files["built/aws/keys/signing/k1.key"] = &model.FileEntry{Data: []byte("k"), Mode: 0o600, Sha: model.SHA256([]byte("k"))}
 	files, err := proj().Render(snap, "e", "", false)
 	eq(t, err, nil, "render")
 	eq(t, len(files), 2, "two files")
 	eq(t, []any{files[0].Rel, files[0].Mode, string(files[0].Data)}, []any{"apps/web.env", 0o600, "A=\"x y\"\n# c\nB=2\n"}, "settings file")
-	eq(t, []any{files[1].Rel, files[1].Mode}, []any{"made/aws/keys/signing/k1.key", 0o400}, "the rule's mode wins")
+	eq(t, []any{files[1].Rel, files[1].Mode}, []any{"built/aws/keys/signing/k1.key", 0o400}, "the rule's mode wins")
 	// drift
 	changed, missing, extra := Drift(files, map[string]string{"apps/web.env": "deadbeef", "stray": "x"})
-	eq(t, [][]string{changed, missing, extra}, [][]string{{"apps/web.env"}, {"made/aws/keys/signing/k1.key"}, {"stray"}}, "drift")
+	eq(t, [][]string{changed, missing, extra}, [][]string{{"apps/web.env"}, {"built/aws/keys/signing/k1.key"}, {"stray"}}, "drift")
 }
 
 func mustLayout(text string) Layout { l, _ := ParseEnv(text); return l }

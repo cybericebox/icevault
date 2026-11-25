@@ -78,7 +78,7 @@ func TestAValueThatDoesNotFitItsTypeIsReportedAndStopsTheRender(t *testing.T) {
 	}
 }
 
-// setPlace moves a product of the vault of the harness (the BRAIN / INDEXER word of the project) and sets some of its variables.
+// setPlace moves a product of the vault of the harness (the ENGINE / INDEXER word of the project) and sets some of its variables.
 func setPlace(t *testing.T, h *harness, env, product, place string, vars map[string]string) {
 	t.Helper()
 	v, err := vault.Open(h.env["ICEVAULT_VAULT"], vault.Credentials{Password: []byte(pw)})
@@ -109,7 +109,7 @@ func setPlace(t *testing.T, h *harness, env, product, place string, vars map[str
 }
 
 // A variable the description needs for one place only (required-when: INDEXER=cluster, INDEXER in [host, cluster]) is listed as missing exactly
-// while the place says so: the rule is the project's, never fixed in the tool (the Brain rule of the infrastructure has the same form).
+// while the place says so: the rule is the project's, never fixed in the tool.
 func TestMissingFollowsThePlaceOfAProduct(t *testing.T) {
 	h := goldenHarness(t)
 	missing := func() string {
