@@ -98,4 +98,23 @@ type ConnNameBinder interface {
 	BoundConnectionName(name string) bool
 	// ConnectionKindNeeded says whether a use of the project description needs a connection of that kind (the commands that fill an environment link the only one of a kind).
 	ConnectionKindNeeded(kind string) bool
+	// ConnectionKindServed says whether a program asks for a connection of that kind by a serve-as name (icevault external serve).
+	ConnectionKindServed(kind string) bool
+}
+
+// KeyPlace is where a variable of some key lives: its scope (as the scopes of "m-var"), whether it is secret, whether it holds a value, and whether it is
+// an import of a shared one into the General of an environment.
+type KeyPlace struct {
+	Scope    string
+	Secret   bool
+	Filled   bool
+	Imported bool
+}
+
+// VarProbe is a Core that answers from its model, not from the answer of "nav", which does not show the group of a site kind that no site uses.
+type VarProbe interface {
+	// VarExists says whether a variable of the key is in exactly that scope.
+	VarExists(scope, key string) bool
+	// KeyPlaces lists every place a variable of that key lives, in every scope and every group.
+	KeyPlaces(key string) []KeyPlace
 }

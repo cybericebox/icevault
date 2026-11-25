@@ -185,6 +185,8 @@ func (c *Core) writeVar(a map[string]any) error {
 		}
 		x = &vmodel.Var{Key: key, Managed: vmodel.ManagedOwner, Vis: c.defaultVis(key)}
 		list.set(append(vs, x))
+	} else if flag(a, "create_only") { // the agent API makes a variable, it never changes one that is there
+		return refuse("name_exists", map[string]any{jName: key})
 	} else if x.Managed == vmodel.ManagedSystem && has(a, "value") {
 		return refuse("system_managed", map[string]any{jKey: key})
 	}

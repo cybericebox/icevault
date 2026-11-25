@@ -203,22 +203,7 @@ func (x *agentCtx) run(op string) agentapi.Response {
 	a := x.args
 	switch op {
 	case "var-create":
-		if r := x.varRow(as(a, keyScope), as(a, keyKey)); r != nil && !ab(r, "missing") {
-			return agentRefused("name_exists", map[string]any{keyName: as(a, keyKey)})
-		}
-		w := pick(a, keyScope, keyKey, "visibility", "description", "expires")
-		if x.secretKeyAnywhere(as(a, keyKey)) { // a plain variable of that name would shadow a secret one: it is made secret, and its value waits for Allow
-			if v := as(a, "visibility"); v != "" && rank(v) < 1 {
-				if x.secretByModel(as(a, keyKey)) {
-					return agentRefused("no_lowering", nil)
-				}
-				return agentRefused("shadows_secret", nil)
-			}
-			if as(a, "visibility") == "" {
-				w["visibility"] = "secret"
-			}
-		}
-		return x.done(x.write("m-var", w))
+		return x.varCreate()
 	case "var-rename":
 		return x.varRename()
 	case "var-delete":
@@ -366,6 +351,79 @@ func (x *agentCtx) boundName(name string) bool {
 	return can && b.BoundConnectionName(name)
 }
 
+// varExists asks the core whether the key is in exactly that scope, and falls back to the answer of nav.
+func (x *agentCtx) varExists(scope, key string) bool {
+	if vp, can := x.c.(VarProbe); can {
+		return vp.VarExists(scope, key)
+	}
+	r := x.varRow(scope, key)
+	return r != nil && !ab(r, "missing")
+}
+
+// envOfScope is the environment a scope belongs to ("" for shared).
+func envOfScope(s string) string {
+	if p := splitScope(s); len(p) >= 2 && p[0] == keyEnv {
+		return p[1]
+	}
+	return ""
+}
+
+// shadowedPlaces lists the places of the same environment that already hold a variable of the key: a new one in another scope of it would override them (or
+// they would override it).
+func (x *agentCtx) shadowedPlaces(scope, key string) (all []string, secret bool) {
+	vp, can := x.c.(VarProbe)
+	if !can {
+		return nil, false
+	}
+	env := envOfScope(scope)
+	for _, p := range vp.KeyPlaces(key) {
+		if p.Scope == "shared" || (p.Scope == scope && !p.Imported) || env == "" || envOfScope(p.Scope) != env {
+			continue
+		}
+		all = append(all, p.Scope)
+		secret = secret || p.Secret
+	}
+	return all, secret
+}
+
+func (x *agentCtx) varCreate() agentapi.Response {
+	a := x.args
+	scope, key := as(a, keyScope), as(a, keyKey)
+	if x.varExists(scope, key) {
+		return agentRefused("name_exists", map[string]any{keyName: key})
+	}
+	w := pick(a, keyScope, keyKey, "visibility", "description", "expires")
+	w["create_only"] = true
+	if x.secretKeyAnywhere(key) { // a plain variable of that name would shadow a secret one: it is made secret, and its value waits for Allow
+		if v := as(a, "visibility"); v != "" && rank(v) < 1 {
+			if x.secretByModel(key) {
+				return agentRefused("no_lowering", nil)
+			}
+			return agentRefused("shadows_secret", nil)
+		}
+		if as(a, "visibility") == "" {
+			w["visibility"] = "secret"
+		}
+	}
+	shadows, secret := x.shadowedPlaces(scope, key)
+	if secret {
+		return agentRefused("shadows_secret", nil)
+	}
+	if len(shadows) > 0 { // it would override a value of the same environment: the person decides
+		x.changes = []agentChange{{Field: "shadows", Old: clean(strings.Join(shadows, ", "), 200), New: clean(scope, 200)}}
+		return x.queue("var-create", kindVar, key, scope, "", func(nx *agentCtx) error {
+			if nx.varExists(scope, key) {
+				return &Error{Status: 409, Code: "name_exists"}
+			}
+			if _, sec := nx.shadowedPlaces(scope, key); sec {
+				return &Error{Status: 409, Code: "shadows_secret"}
+			}
+			return nx.write("m-var", w)
+		})
+	}
+	return x.done(x.write("m-var", w))
+}
+
 func (x *agentCtx) secretByModel(key string) bool {
 	vd, can := x.c.(VisDefaulter)
 	return can && vd.DefaultVisibility(key) != visPlain
@@ -374,6 +432,13 @@ func (x *agentCtx) secretByModel(key string) bool {
 func (x *agentCtx) secretKeyAnywhere(key string) bool {
 	if x.secretByModel(key) {
 		return true
+	}
+	if vp, can := x.c.(VarProbe); can { // the core sees every group, also the ones of site kinds that no site shows
+		for _, p := range vp.KeyPlaces(key) {
+			if p.Secret {
+				return true
+			}
+		}
 	}
 	has := func(rows []map[string]any) bool {
 		for _, r := range rows {
@@ -691,7 +756,7 @@ func (x *agentCtx) setValue() agentapi.Response {
 	if err != nil {
 		return refusedErr(err)
 	}
-	if !t.secret {
+	if !t.secret && !strings.Contains(value, "${{") { // a plain value that refers to other values is not made at once: what it refers to may be a secret
 		return x.done(t.put(x, value))
 	}
 	if t.system {
@@ -700,7 +765,7 @@ func (x *agentCtx) setValue() agentapi.Response {
 	saved, args := t.id(), targetArgs(x.args)
 	return x.queue("set-value", t.kind, t.what(), t.where(), "", func(nx *agentCtx) error {
 		t2, err := nx.target(args)
-		if err != nil || t2.id() != saved || !t2.secret || t2.system { // deleted and made again as something else while it waited
+		if err != nil || t2.id() != saved || t2.system { // deleted and made again as something else while it waited
 			return errGone
 		}
 		return t2.put(nx, value)
@@ -818,6 +883,21 @@ func (x *agentCtx) connectionUpdate() agentapi.Response {
 	return x.writeAsk("m-connection", w, "connection-update", "connection", as(a, "connection"), "")
 }
 
+func (x *agentCtx) kindServed(kind string) bool {
+	b, can := x.c.(ConnNameBinder)
+	return can && b.ConnectionKindServed(kind)
+}
+
+func (x *agentCtx) connectionsOfKind(kind string) int {
+	n := 0
+	for _, c := range alist(x.nav, "connections") {
+		if as(c, keyKind) == kind {
+			n++
+		}
+	}
+	return n
+}
+
 func (x *agentCtx) kindNeeded(kind string) bool {
 	b, can := x.c.(ConnNameBinder)
 	return can && b.ConnectionKindNeeded(kind)
@@ -841,12 +921,17 @@ func (x *agentCtx) connectionDelete() agentapi.Response {
 		}
 	}
 	lastButOne := same == 2 && x.kindNeeded(as(cn, keyKind)) // the one left would be linked by the commands that fill an environment
-	if len(alist(cn, "users")) == 0 && !filledSecret && !lastButOne {
+	served := x.kindServed(as(cn, keyKind))                  // a program asks for a connection of this kind by name
+	if len(alist(cn, "users")) == 0 && !filledSecret && !lastButOne && !served {
 		return x.done(x.write("m-connection", w))
 	}
 	uuid := as(cn, keyUUID)
 	return x.queue("connection-delete", "connection", name, "", "", func(nx *agentCtx) error {
-		if c2 := nx.conn(name); c2 == nil || as(c2, keyUUID) != uuid {
+		c2 := nx.conn(name)
+		if c2 == nil || as(c2, keyUUID) != uuid {
+			return errGone
+		}
+		if (nx.connectionsOfKind(as(c2, keyKind)) == 2 && nx.kindNeeded(as(c2, keyKind))) != lastButOne { // what the person was told is not true any more
 			return errGone
 		}
 		c := copyMap(w)
@@ -966,6 +1051,9 @@ func (x *agentCtx) fieldOp(op string) agentapi.Response {
 			return agentRefused("name_exists", map[string]any{keyName: as(a, keyField)})
 		}
 		copyIf(w, a, "secret", "expires")
+		if row != nil && ab(row, "secret") { // a field the kind declares secret is made secret, whatever is asked
+			w["secret"] = true
+		}
 	case "field-update":
 		if row == nil || !ab(row, "present") {
 			return agentRefused("not_found", nil)
@@ -973,7 +1061,8 @@ func (x *agentCtx) fieldOp(op string) agentapi.Response {
 		copyIf(w, a, "secret", "expires") // a field can become secret, never plain
 	case "field-delete":
 		w[actDelete] = true
-		if row != nil && ab(row, "secret") && as(row, keyState) == stSet { // a filled secret field goes only after Allow
+		_, declared := row["required"]                                                     // only the fields a kind declares have it
+		if row != nil && ((ab(row, "secret") && as(row, keyState) == stSet) || declared) { // a filled secret field, and a field the kind declares, go only after Allow
 			uuid, conn, field := as(cn, keyUUID), as(a, "connection"), as(a, keyField)
 			return x.queue(op, keyField, field, conn, "", func(nx *agentCtx) error {
 				if c2 := nx.conn(conn); c2 == nil || as(c2, keyUUID) != uuid {

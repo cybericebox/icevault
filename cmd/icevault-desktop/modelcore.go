@@ -164,6 +164,27 @@ func (m *modelCore) ConnectionKindNeeded(kind string) bool {
 	return m.v == nil || m.mp.ConnectionKindNeeded(kind)
 }
 
+func (m *modelCore) ConnectionKindServed(kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.ConnectionKindServed(kind)
+}
+
+func (m *modelCore) VarExists(scope, key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.VarExists(scope, key)
+}
+
+func (m *modelCore) KeyPlaces(key string) []desktop.KeyPlace {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return nil
+	}
+	return m.mp.KeyPlaces(key)
+}
+
 func (m *modelCore) Write(op string, args map[string]any) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -99,6 +99,16 @@ func newAgentHub(a *App, dir string, ttl, gap time.Duration) *agentHub {
 	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, pend: map[string]*agentReq{}, done: map[string]agentDone{}}
 }
 
+// hasNonLatin says whether a name has a letter that is not Latin (a Cyrillic or Greek letter can look like a Latin one).
+func hasNonLatin(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) && !unicode.Is(unicode.Latin, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // clean makes a name safe for a log line and a dialog: no control characters, at most n runes.
 func clean(s string, n int) string {
 	var b strings.Builder
@@ -408,7 +418,7 @@ func (a *App) AgentPending() Response {
 		h.mu.Lock()
 		for _, id := range h.ord {
 			p := h.pend[id]
-			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer, "changes": p.changes,
+			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer, "changes": p.changes, "nonlatin": hasNonLatin(p.what + p.where + p.from),
 				"asked": p.asked.UTC().Format(time.RFC3339), "expires": p.asked.Add(h.ttl).UTC().Format(time.RFC3339)})
 		}
 		h.mu.Unlock()

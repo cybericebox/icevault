@@ -991,18 +991,35 @@ func (c *Core) EnvHoldsSecrets(env string) bool {
 	return false
 }
 
-// BoundConnectionName says whether the project description gives that name to a use of a connection (its name, its serve-as, or the title of its kind).
-func (c *Core) BoundConnectionName(name string) bool {
-	if c.d == nil || name == "" {
-		return false
+// uses are all the uses of a connection the project description has: of a product, of the vault, of a site kind (its connection and its state).
+func (c *Core) uses() []project.ConnectionUse {
+	if c.d == nil {
+		return nil
 	}
-	uses := []project.ConnectionUse{}
+	var uses []project.ConnectionUse
 	for _, p := range c.d.Products {
 		uses = append(uses, p.Connections...)
 	}
 	uses = append(uses, c.d.VaultConnections...)
+	for _, sk := range c.d.SiteKinds {
+		if sk.Connection != nil {
+			uses = append(uses, *sk.Connection)
+		}
+		if sk.State != nil {
+			uses = append(uses, *sk.State)
+		}
+	}
+	return uses
+}
+
+// BoundConnectionName says whether the project description gives that name to a use of a connection (its name, its serve-as, the title of its kind or the
+// id of its kind).
+func (c *Core) BoundConnectionName(name string) bool {
+	if name == "" {
+		return false
+	}
 	same := strings.EqualFold
-	for _, u := range uses {
+	for _, u := range c.uses() {
 		if same(u.Name, name) || same(u.ServeAs, name) || same(u.Kind, name) {
 			return true
 		}
@@ -1017,20 +1034,62 @@ func (c *Core) BoundConnectionName(name string) bool {
 
 // ConnectionKindNeeded says whether a use of the project description needs a connection of that kind.
 func (c *Core) ConnectionKindNeeded(kind string) bool {
-	if c.d == nil {
-		return false
-	}
-	for _, p := range c.d.Products {
-		for _, u := range p.Connections {
-			if u.Kind == kind {
-				return true
-			}
-		}
-	}
-	for _, u := range c.d.VaultConnections {
+	for _, u := range c.uses() {
 		if u.Kind == kind {
 			return true
 		}
 	}
 	return false
+}
+
+// ConnectionKindServed says whether a program asks for a connection of that kind by a serve-as name.
+func (c *Core) ConnectionKindServed(kind string) bool {
+	for _, u := range c.uses() {
+		if u.Kind == kind && u.ServeAs != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// VarExists says whether a variable of the key is in exactly that scope (also in the group of a site kind that no site shows).
+func (c *Core) VarExists(scope, key string) bool {
+	l, err := c.scope(scope)
+	if err != nil {
+		return false
+	}
+	for _, v := range l.get() {
+		if v.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// KeyPlaces lists every place a variable of that key lives.
+func (c *Core) KeyPlaces(key string) []desktop.KeyPlace {
+	var out []desktop.KeyPlace
+	add := func(scope string, vs []*vmodel.Var, imported bool) {
+		for _, v := range vs {
+			if v.Key == key {
+				out = append(out, desktop.KeyPlace{Scope: scope, Secret: v.Vis != vmodel.VisPlain, Filled: v.Value != "", Imported: imported})
+			}
+		}
+	}
+	add("shared", c.m.Shared, false)
+	for _, e := range c.m.Envs {
+		base := "env/" + e.Name
+		add(base+"/general", e.General, false)
+		add(base+"/general", e.Imports, true)
+		for _, s := range e.Sites {
+			add(base+"/site/"+s.Name, s.Vars, false)
+		}
+		for _, p := range e.Products {
+			add(base+"/product/"+p.Name, p.Vars, false)
+			for kind, vs := range p.Sub {
+				add(base+"/product/"+p.Name+"/"+kind, vs, false)
+			}
+		}
+	}
+	return out
 }

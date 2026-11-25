@@ -12,6 +12,7 @@ import (
 
 	"github.com/cybericebox/icevault/internal/agentapi"
 	"github.com/cybericebox/icevault/internal/desktop"
+	"github.com/cybericebox/icevault/internal/project"
 	"github.com/cybericebox/icevault/internal/vmodel"
 	"github.com/cybericebox/icevault/pkg/vault"
 )
@@ -728,9 +729,11 @@ func TestAgentPlainVariableNeverShadowsASecretOne(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
 	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "visibility": "plain"}, "no_lowering") // a name the project rule makes secret
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"})
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"}, "shadows_secret")                     // it would override the secret of a product of the environment
+	r.ok("env-create", map[string]any{"name": "other"})
+	r.ok("var-create", map[string]any{"scope": "env/other/general", "key": "COOKIE_KEY"})
 	var vis string
-	for _, v := range r.core.Model().Env("prod").General {
+	for _, v := range r.core.Model().Env("other").General {
 		if v.Key == "COOKIE_KEY" {
 			vis = v.Vis
 		}
@@ -738,7 +741,7 @@ func TestAgentPlainVariableNeverShadowsASecretOne(t *testing.T) {
 	if vis == "" || vis == "plain" {
 		t.Fatalf("the new variable is %q: it must not be plain", vis)
 	}
-	p := r.call("set-value", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
+	p := r.call("set-value", map[string]any{"scope": "env/other/general", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
 	if p.State != agentapi.StatePending {
 		t.Fatalf("the value of a variable that shares a secret name did not wait: %+v", p)
 	}
@@ -995,4 +998,155 @@ func TestAgentRelinkDialogShowsOldAndNew(t *testing.T) {
 			t.Errorf("the pending list lacks %s: %s", want, raw)
 		}
 	}
+}
+
+func TestAgentSiteKindUsesCountAsBoundAndNeeded(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	used := map[string]bool{}
+	for _, p := range r.core.d.Products {
+		for _, u := range p.Connections {
+			used[u.Kind] = true
+		}
+	}
+	have := map[string]bool{}
+	for _, c := range r.core.Model().Connections {
+		have[c.Kind] = true
+	}
+	kind := ""
+	for _, k := range r.core.kinds().Kinds() {
+		if !used[k.ID] && !have[k.ID] {
+			kind = k.ID
+		}
+	}
+	if kind == "" {
+		t.Fatal("every kind is used or present")
+	}
+	r.core.d.SiteKinds["only-here"] = project.SiteKind{Connection: &project.ConnectionUse{Kind: kind, Name: "Bound by a site kind", ServeAs: "served-by-site"}}
+	if !r.core.BoundConnectionName("bound by a SITE kind") || !r.core.BoundConnectionName("served-by-site") || !r.core.ConnectionKindNeeded(kind) || !r.core.ConnectionKindServed(kind) {
+		t.Fatal("a use of a site kind is not seen")
+	}
+	if p := r.call("connection-create", map[string]any{"name": "Plain name", "kind": kind}); p.State != agentapi.StatePending {
+		t.Fatalf("the first connection of a kind a site kind needs did not wait: %+v", p)
+	}
+	if p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": "Bound by a site kind"}); p.State != agentapi.StatePending {
+		t.Fatalf("a rename to a name a site kind binds did not wait: %+v", p)
+	}
+}
+
+func TestAgentVarCreateSeesHiddenGroupsAndShadows(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	prod := r.core.Model().Env("prod")
+	prod.Product("portal").Sub["compose"] = []*vmodel.Var{{Key: "HIDDEN_PLAIN", Value: "x", Vis: vmodel.VisPlain}, {Key: "HIDDEN_VALUE", Value: "hidden-value", Vis: vmodel.VisSecret}}
+	r.refused("var-create", map[string]any{"scope": "env/prod/product/portal/compose", "key": "HIDDEN_PLAIN"}, "name_exists") // the group no site shows
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "HIDDEN_VALUE", "visibility": "plain"}, "shadows_secret")
+	r.refused("var-create", map[string]any{"scope": "env/prod/site/main", "key": "HIDDEN_VALUE"}, "shadows_secret") // it would override a secret of the environment
+	// a key the environment holds in another scope: the person decides; another environment is not touched
+	p := r.call("var-create", map[string]any{"scope": "env/prod/site/main", "key": "PUBLIC_HOST"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a variable that overrides another did not wait: %+v", p)
+	}
+	raw, _ := json.Marshal(r.app.AgentPending())
+	if !strings.Contains(string(raw), "shadows") || !strings.Contains(string(raw), "env/prod/general") {
+		t.Fatalf("the dialog does not say what is overridden: %s", raw)
+	}
+	imp := r.call("var-create", map[string]any{"scope": "env/prod/general", "key": "CONTACT_ADDRESS"}) // imported shared value of the environment
+	if imp.State != agentapi.StatePending {
+		t.Fatalf("a variable that overrides an import did not wait: %+v", imp)
+	}
+	r.ok("env-create", map[string]any{"name": "bare"})
+	r.ok("var-create", map[string]any{"scope": "env/bare/general", "key": "PUBLIC_HOST"})
+}
+
+func TestAgentCoreNeverChangesAnExistingVariableOnCreateOnly(t *testing.T) {
+	r := newRig(t, 0)
+	_, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "PUBLIC_HOST", "visibility": "secret", "create_only": true})
+	if code(err) != "name_exists" {
+		t.Fatalf("%v", err)
+	}
+	for _, v := range r.core.Model().Env("prod").General {
+		if v.Key == "PUBLIC_HOST" && v.Vis != vmodel.VisPlain {
+			t.Fatal("the visibility was changed")
+		}
+	}
+}
+
+func TestAgentConnectionDeleteIsCheckedAgainAtAllow(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("connection-create", map[string]any{"name": "S3 two", "kind": "s3"})
+	r.ok("connection-create", map[string]any{"name": "S3 three", "kind": "s3"})
+	p := r.call("connection-delete", map[string]any{"connection": "Blob store"}) // used: waits; three of its kind
+	if p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	pp := r.call("connection-delete", map[string]any{"connection": "S3 three"}) // leaves two: at once (if the kind is needed it waits, then it is answered)
+	if pp.State == agentapi.StatePending {
+		r.app.AgentDecide(pp.ID, true)
+	}
+	if r.core.Model().Connection("S3 three") != nil {
+		t.Skip("the deletion of the third connection waited and was not applied: nothing changed under the first request")
+	}
+	if d := r.app.AgentDecide(p.ID, true); d.Status == 200 {
+		t.Fatalf("a delete that now leaves exactly one connection of a needed kind went through: %+v", d)
+	}
+}
+
+func TestAgentServedKindDeleteWaits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	for _, p := range r.core.d.Products {
+		for i := range p.Connections {
+			if p.Connections[i].Kind == "s3" {
+				p.Connections[i].ServeAs = "served-store"
+			}
+		}
+	}
+	r.ok("connection-create", map[string]any{"name": "S3 two", "kind": "s3"})
+	r.ok("connection-create", map[string]any{"name": "S3 three", "kind": "s3"})
+	if p := r.call("connection-delete", map[string]any{"connection": "S3 three"}); p.State != agentapi.StatePending {
+		t.Fatalf("a delete of a connection of a kind a program asks for by name did not wait: %+v", p)
+	}
+}
+
+func TestAgentPlainValueWithAReferenceWaits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	p := r.call("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "${{ self.COOKIE_KEY }}"})
+	if p.State != agentapi.StatePending || r.reveal("shared", "CONTACT_ADDRESS") != "hello@example.net" {
+		t.Fatalf("%+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "plain@example.net"})
+}
+
+func TestAgentDeclaredFieldsAreSecretOrWaitOnDelete(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("connection-create", map[string]any{"name": "Declared", "kind": "s3"})
+	r.refused("field-create", map[string]any{"connection": "Declared", "field": "secret_access_key", "secret": false}, "no_lowering")
+	r.ok("field-create", map[string]any{"connection": "Declared", "field": "secret_access_key"})
+	if f := r.core.Model().Connection("Declared").Field("secret_access_key"); f == nil || !f.Secret {
+		t.Fatal("a field the kind declares secret was made plain")
+	}
+	if p := r.call("field-delete", map[string]any{"connection": "GCP", "field": "project"}); p.State != agentapi.StatePending {
+		t.Fatalf("a declared field was deleted at once: %+v", p)
+	}
+}
+
+func TestAgentShowsThatANameHasNonLatinLetters(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("other-create", map[string]any{"title": "w\u0456fi"}) // a Cyrillic i
+	p := r.call("set-value", map[string]any{"other": "w\u0456fi", "value": "other-secret-value-88"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	raw, _ := json.Marshal(r.app.AgentPending())
+	if !strings.Contains(string(raw), "\"nonlatin\":true") {
+		t.Fatalf("%s", raw)
+	}
+	q := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	_ = q
 }
