@@ -6,8 +6,11 @@
 package mpage
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -1092,4 +1095,60 @@ func (c *Core) KeyPlaces(key string) []desktop.KeyPlace {
 		}
 	}
 	return out
+}
+
+// scratchCore is a Core on a copy of the vault (see BatchScratch).
+type scratchCore struct{ *Core }
+
+// Lock does nothing: the copy is removed by its release function.
+func (scratchCore) Lock() {}
+
+// BatchScratch copies the vault file to a private temporary folder, opens the copy with the key of the open vault and returns a Core on it.
+func (c *Core) BatchScratch() (desktop.Core, func(), error) {
+	data, err := os.ReadFile(c.v.Path())
+	if err != nil {
+		return nil, nil, err
+	}
+	dir, err := os.MkdirTemp("", "icevault-batch-")
+	if err != nil {
+		return nil, nil, err
+	}
+	release := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, "v.kdbx")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		release()
+		return nil, nil, err
+	}
+	k := c.v.Key()
+	sv, err := vault.Reopen(path, k)
+	k.Wipe()
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	sc, err := New(sv, c.d)
+	if err != nil {
+		sv.Close()
+		release()
+		return nil, nil, err
+	}
+	sc.Now = c.Now
+	return scratchCore{sc}, func() { sv.Close(); release() }, nil
+}
+
+// BatchAdopt makes the content of the copy the content of the vault and reads the model again.
+func (c *Core) BatchAdopt(scratch desktop.Core) error {
+	s, isScratch := scratch.(scratchCore)
+	if !isScratch {
+		return errors.New("not a copy made by BatchScratch")
+	}
+	if err := c.v.AdoptContent(s.v); err != nil {
+		return err
+	}
+	m, err := vmodel.Load(c.v)
+	if err != nil {
+		return err
+	}
+	c.m = m
+	return nil
 }

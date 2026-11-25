@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/cybericebox/icevault/internal/agentapi"
@@ -29,16 +28,18 @@ const (
 )
 
 const (
-	keyKey    = "key"
-	keyScope  = "scope"
-	visPlain  = "plain"
-	keySite   = "site"
-	keyState  = "state"
-	opStatus  = "status"
-	modeEdit  = "edit"
-	keyEnv    = "env"
-	keyAction = "action"
-	actDelete = "delete"
+	keyKey       = "key"
+	keyScope     = "scope"
+	visPlain     = "plain"
+	keySite      = "site"
+	keyState     = "state"
+	keyTitle     = "title"
+	opSiteCreate = "site-create"
+	opStatus     = "status"
+	modeEdit     = "edit"
+	keyEnv       = "env"
+	keyAction    = "action"
+	actDelete    = "delete"
 )
 
 type agentCtx struct {
@@ -47,16 +48,17 @@ type agentCtx struct {
 	args    map[string]any
 	who     string
 	peer    string
-	changes []agentChange // what the next queued request changes (names old and new), for the dialog
+	changes []agentChange // what the item changes (names old and new), for the dialog
+	rec     *agentItem    // the item that is being recorded (nil when it is replayed)
 	pkey    string        // the client the rate limit counts: the program that started the command
 	nav     map[string]any
 }
 
 // agentOps are the names the API knows, in the order "help" lists them.
-var agentOps = []string{"help", opStatus, "structure",
+var agentOps = []string{"help", "structure", "batch-begin", "batch-submit", "batch-status", "batch-discard",
 	"var-create", "var-rename", "var-delete", "var-meta", "set-value", "copy-value", "move-value",
 	"connection-create", "connection-update", "connection-delete", "field-create", "field-update", "field-delete",
-	"site-create", "site-update", "site-delete", "product-create", "product-update", "product-delete",
+	opSiteCreate, "site-update", "site-delete", "product-create", "product-update", "product-delete",
 	"env-create", "env-update", "env-delete", "other-create", "other-update", "other-delete"}
 
 func as(m map[string]any, k string) string { s, _ := m[k].(string); return s }
@@ -86,64 +88,11 @@ func refusedErr(err error) agentapi.Response {
 	return agentRefused(code, params)
 }
 
-// handle runs one request of a client. peer is the process on the other end of the socket, as the system says.
-func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Response {
-	a := h.a
-	who := clean(req.Client, 40)
-	if who == "" {
-		who = "agent"
-	}
-	who += " (pid " + strconv.Itoa(peer.PID) + ")"
-	known := false
-	for _, op := range agentOps {
-		known = known || op == req.Op
-	}
-	if !known {
-		h.log(req.Op, "", who, "refused: unknown_op")
-		return agentRefused("unknown_op", nil)
-	}
-	a.ops.Lock()
-	defer a.ops.Unlock()
-	c, e := a.store() // after the lock of the operations: a lock of the vault in between is seen here
-	if e != nil {
-		return agentRefused("locked", nil)
-	}
-	args := req.Args
-	if args == nil {
-		args = map[string]any{}
-	}
-	if req.Op != "help" && req.Op != opStatus && req.Op != "structure" { // the writes need the window in edit mode, as the window's own do
-		a.mu.Lock()
-		mode := a.mode
-		a.mu.Unlock()
-		if mode != modeEdit {
-			h.log(req.Op, targetOf(args), who, "refused: view_mode")
-			return agentRefused("view_mode", nil)
-		}
-	}
-	if req.Op != opStatus && req.Op != "help" {
-		_, _ = a.syncDisk(false, true)
-	}
-	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(peer.UID)} // one bucket for the user: an agent cannot get round the limit by new processes
-	resp := x.run(req.Op)
-	if req.Op != opStatus { // a client polls status: that is not an action
-		result := "ok"
-		switch {
-		case resp.State == agentapi.StatePending:
-			result = agentapi.StatePending
-		case !resp.OK:
-			result = "refused: " + resp.Code
-		}
-		h.log(req.Op, targetOf(args), who, result)
-	}
-	return resp
-}
-
 // targetOf names what a request is about: the names it carries, never a value.
 func targetOf(args map[string]any) string {
 	out := ""
 	add := func(prefix string, m map[string]any) {
-		for _, k := range []string{keyEnv, keyScope, keyName, keyKey, "new_key", "new_name", "title", "new_title", "connection", keyField, "other", keyKind, keySite, "from", keyState, "visibility"} {
+		for _, k := range []string{keyEnv, keyScope, keyName, keyKey, "new_key", "new_name", keyTitle, "new_title", "connection", keyField, "other", keyKind, keySite, "from", keyState, "visibility"} {
 			if s, isStr := m[k].(string); isStr && s != "" {
 				if out != "" {
 					out += " "
@@ -188,12 +137,6 @@ func (x *agentCtx) write(op string, args map[string]any) error {
 }
 
 func (x *agentCtx) run(op string) agentapi.Response {
-	switch op {
-	case "help":
-		return okData(map[string]any{"ops": agentOps})
-	case opStatus:
-		return x.status()
-	}
 	if err := x.loadNav(); err != nil {
 		return refusedErr(err)
 	}
@@ -243,11 +186,11 @@ func (x *agentCtx) run(op string) agentapi.Response {
 	case "env-create":
 		return x.envCreate()
 	case "env-update":
-		return x.done(x.write("m-env", withAction(pick(a, keyName, "new_name", "title"), actUpd)))
+		return x.done(x.write("m-env", withAction(pick(a, keyName, "new_name", keyTitle), actUpd)))
 	case "env-delete":
 		return x.envDelete()
 	case "other-create":
-		return x.done(x.write("m-other", withAction(pick(a, "title", "expires"), "create")))
+		return x.done(x.write("m-other", withAction(pick(a, keyTitle, "expires"), "create")))
 	case "other-update", "other-delete":
 		o := x.other(as(a, "other"))
 		if o == nil {
@@ -266,7 +209,7 @@ func (x *agentCtx) run(op string) agentapi.Response {
 				})
 			}
 		} else {
-			w["title"] = as(a, "new_title")
+			w[keyTitle] = as(a, "new_title")
 			copyIf(w, a, "expires")
 			if nt := as(a, "new_title"); nt != "" && nt != as(a, "other") && otherFilled(o) { // a filled secret is renamed only after Allow
 				uuid, title := as(o, keyUUID), as(a, "other")
@@ -541,7 +484,7 @@ func (x *agentCtx) conn(name string) map[string]any {
 
 func (x *agentCtx) other(title string) map[string]any {
 	for _, o := range alist(x.nav, "other") {
-		if as(o, "title") == title && title != "" {
+		if as(o, keyTitle) == title && title != "" {
 			return o
 		}
 	}
@@ -715,25 +658,19 @@ func (t *agentTarget) label() string {
 	return t.name
 }
 
-// queue puts a request that needs the person's Allow in the queue; fn runs after Allow, on a core that may have changed meanwhile, so it looks again at
-// what it was about (nav) and refuses with "gone" when that is not the same thing any more.
+// queue marks the item as one that needs a close look (the window flags it with the reason) and runs it; fn finds again what the op is about, and refuses
+// with "gone" when it is not the same thing. what, where and from are the names the window shows.
 func (x *agentCtx) queue(op, kind, what, where, from string, fn func(nx *agentCtx) error) agentapi.Response {
-	h := x.h
-	id, err := h.enqueue(&agentReq{op: op, kind: kind, what: clean(what, 120), where: clean(where, 200), from: clean(from, 200), who: x.who, peer: clean(x.peer, 200), key: x.pkey, changes: x.changes,
-		apply: func(c Core) error {
-			nx := &agentCtx{h: h, c: c}
-			if err := nx.loadNav(); err != nil {
-				return err
-			}
-			return fn(nx)
-		}})
-	if errors.Is(err, errAgentRate) {
-		return agentRefused("rate_limited", nil)
+	if x.rec != nil {
+		x.rec.sens = append(x.rec.sens, reasonOf(op, kind))
+		x.rec.what, x.rec.where, x.rec.from = clean(what, 120), clean(where, 200), clean(from, 200)
+		x.rec.changes = append(x.rec.changes, x.changes...)
 	}
-	if err != nil {
-		return agentRefused("too_many_pending", nil)
+	nx := &agentCtx{h: x.h, c: x.c}
+	if err := nx.loadNav(); err != nil {
+		return refusedErr(err)
 	}
-	return agentapi.Response{OK: true, State: agentapi.StatePending, ID: id}
+	return x.done(fn(nx))
 }
 
 var errGone = &Error{Status: 409, Code: "gone"}
@@ -995,7 +932,7 @@ func envPrint(e map[string]any) string {
 // envCreate makes an environment, empty or as a copy of another. A copy that carries secrets waits for the person.
 func (x *agentCtx) envCreate() agentapi.Response {
 	a := x.args
-	w := withAction(pick(a, keyName, "title"), "create")
+	w := withAction(pick(a, keyName, keyTitle), "create")
 	from := as(a, "from")
 	if from == "" {
 		return x.done(x.write("m-env", w))
@@ -1299,22 +1236,6 @@ func (x *agentCtx) thingDelete(op, kind, list, write string) agentapi.Response {
 	})
 }
 
-// ---- status of a request that waited for the person
-
-func (x *agentCtx) status() agentapi.Response {
-	id := as(x.args, "id")
-	h := x.h
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.pend[id] != nil {
-		return agentapi.Response{OK: true, State: agentapi.StatePending, ID: id}
-	}
-	if d, found := h.done[id]; found {
-		return agentapi.Response{OK: true, State: d.state, ID: id, Code: d.code}
-	}
-	return agentRefused("not_found", nil)
-}
-
 // ---- the structure: names, states, plain values; never a secret value
 
 func varOut(scope string, r map[string]any) map[string]any {
@@ -1398,7 +1319,7 @@ func (x *agentCtx) structure(envOnly string) map[string]any {
 				general = append(general, varOut("env/"+en+"/general", r))
 			}
 		}
-		envs = append(envs, map[string]any{keyName: en, "title": e["title"], "general": general, "imports": e["imports"], "sites": sites, "products": products, "files": filesOut(alist(e, "file_list"))})
+		envs = append(envs, map[string]any{keyName: en, keyTitle: e[keyTitle], "general": general, "imports": e["imports"], "sites": sites, "products": products, "files": filesOut(alist(e, "file_list"))})
 	}
 	shared := []map[string]any{}
 	for _, r := range alist(n, "shared") {
@@ -1427,9 +1348,9 @@ func (x *agentCtx) structure(envOnly string) map[string]any {
 	}
 	other := []map[string]any{}
 	for _, o := range alist(n, "other") {
-		other = append(other, map[string]any{"title": o["title"], "filled": as(o, keyState) == stSet, "expires": o["expires"], "expiry": o["expiry"]})
+		other = append(other, map[string]any{keyTitle: o[keyTitle], "filled": as(o, keyState) == stSet, "expires": o["expires"], "expiry": o["expiry"]})
 	}
-	sort.SliceStable(other, func(i, j int) bool { return as(other[i], "title") < as(other[j], "title") })
+	sort.SliceStable(other, func(i, j int) bool { return as(other[i], keyTitle) < as(other[j], keyTitle) })
 	return map[string]any{"read_only": n["read_only"], "environments": envs, "shared": shared, "connections": conns, "other": other}
 }
 

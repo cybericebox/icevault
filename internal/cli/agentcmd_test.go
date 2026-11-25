@@ -59,9 +59,9 @@ func fakeWindow(t *testing.T, dir string, state string) (*[]agentapi.Request, fu
 			got = append(got, req)
 			resp := agentapi.Response{OK: true, Data: map[string]any{"ok": true}}
 			switch req.Op {
-			case "set-value":
+			case "batch-submit":
 				resp = agentapi.Response{OK: true, State: agentapi.StatePending, ID: "abc"}
-			case "status":
+			case "batch-status":
 				polls++
 				resp = agentapi.Response{OK: true, State: agentapi.StatePending, ID: "abc"}
 				if polls >= 2 {
@@ -90,7 +90,7 @@ func TestAgentCommandNeverTakesAValueOnTheCommandLine(t *testing.T) {
 	e, out, errb, dir := agentEnv(t, "")
 	got, stop := fakeWindow(t, dir, agentapi.StateAllowed)
 	defer stop()
-	if rc := Run([]string{"agent", "set-value", `{"scope":"shared","key":"K","value":"typed-secret-1"}`}, e); rc != 2 {
+	if rc := Run([]string{"agent", "batch-submit", `{"scope":"shared","key":"K","value":"typed-secret-1"}`}, e); rc != 2 {
 		t.Fatalf("rc=%d", rc)
 	}
 	if strings.Contains(out.String()+errb.String(), "typed-secret-1") || len(*got) != 0 {
@@ -107,7 +107,7 @@ func TestAgentCommandReadsTheValueFromAFileAndWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	arg, _ := json.Marshal(map[string]any{"scope": "shared", "key": "K", "value_file": f})
-	if rc := Run([]string{"agent", "set-value", string(arg), "--as", "my agent"}, e); rc != 0 {
+	if rc := Run([]string{"agent", "batch-submit", string(arg), "--as", "my agent"}, e); rc != 0 {
 		t.Fatalf("rc=%d %s", rc, out.String())
 	}
 	if !strings.Contains(out.String(), `"state":"allowed"`) || strings.Contains(out.String(), "file-secret-1") {
@@ -123,7 +123,7 @@ func TestAgentCommandValueFromStdinAndDenied(t *testing.T) {
 	e, out, _, dir := agentEnv(t, "stdin-secret-1\n")
 	got, stop := fakeWindow(t, dir, agentapi.StateDenied)
 	defer stop()
-	if rc := Run([]string{"agent", "set-value", `{"other":"wifi","value_stdin":true}`}, e); rc != 3 {
+	if rc := Run([]string{"agent", "batch-submit", `{"other":"wifi","value_stdin":true}`}, e); rc != 3 {
 		t.Fatalf("rc=%d %s", rc, out.String())
 	}
 	if (*got)[0].Args["value"] != "stdin-secret-1" || !strings.Contains(out.String(), "denied") {
@@ -138,7 +138,7 @@ func TestAgentCommandNoWaitAndRefusals(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "v")
 	_ = os.WriteFile(f, []byte("x"), 0o600)
 	arg, _ := json.Marshal(map[string]any{"other": "wifi", "value_file": f})
-	if rc := Run([]string{"agent", "set-value", string(arg), "--no-wait"}, e); rc != 0 || !strings.Contains(out.String(), `"state":"pending"`) {
+	if rc := Run([]string{"agent", "batch-submit", string(arg), "--no-wait"}, e); rc != 0 || !strings.Contains(out.String(), `"state":"pending"`) {
 		t.Fatalf("rc=%d %q", rc, out.String())
 	}
 	out.Reset()

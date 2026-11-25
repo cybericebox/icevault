@@ -32,14 +32,14 @@ cmd "ui" help=#"Open the settings window (IceVault.app)"# {
   }
   flag "--demo" help=#"a throwaway in-memory vault (password demo)"#
 }
-cmd "agent" help=#"Ask the unlocked window to read or change the vault (JSON, never a secret value)"# {
+cmd "agent" help=#"Ask the unlocked window to read the vault or to apply a batch of changes (JSON, never a secret value)"# {
   flag "--no-wait" help=#"answer pending at once, do not wait for the person"#
-  flag "--timeout <seconds>" help=#"how long to wait for the person (default 150)"# {
+  flag "--timeout <seconds>" help=#"how long to wait for the person (default 600)"# {
     arg "<seconds>" {
       complete type="none"
     }
   }
-  flag "--as <name>" help=#"the name shown at the confirmation"# {
+  flag "--as <name>" help=#"the name shown in the dialog"# {
     arg "<name>" {
       complete type="none"
     }

@@ -17,7 +17,7 @@ import (
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
-// The agent API over a throwaway vault: the window (desktop.App) with the real model core, a client on its socket.
+// The agent API over a throwaway vault: the window (desktop.App) with the real model core, a client on its socket. Every write goes through a batch.
 
 // lockCore is the model core with the Lock the window asks of every core (the window's own wrapper drops the password it holds; here nothing is held).
 type lockCore struct{ *Core }
@@ -71,7 +71,7 @@ func (r *agentRig) unlock() {
 
 func (r *agentRig) call(op string, args map[string]any) agentapi.Response {
 	r.t.Helper()
-	resp, err := agentapi.Call(r.dir, agentapi.Request{Op: op, Args: args, Client: "test agent", PID: 4242}, 5*time.Second)
+	resp, err := agentapi.Call(r.dir, agentapi.Request{Op: op, Args: args, Client: "test agent", PID: 4242}, 10*time.Second)
 	if err != nil {
 		r.t.Fatalf("%s: %v", op, err)
 	}
@@ -80,40 +80,110 @@ func (r *agentRig) call(op string, args map[string]any) agentapi.Response {
 	return resp
 }
 
-func (r *agentRig) ok(op string, args map[string]any) agentapi.Response {
+func (r *agentRig) begin(title string) string {
 	r.t.Helper()
-	resp := r.call(op, args)
+	resp := r.call("batch-begin", map[string]any{"title": title})
 	if !resp.OK {
-		r.t.Fatalf("%s %v refused: %s %v", op, args, resp.Code, resp.Params)
+		r.t.Fatalf("batch-begin: %+v", resp)
 	}
-	return resp
+	return resp.Data.(map[string]any)["id"].(string)
 }
 
+func (r *agentRig) item(id, op string, args map[string]any) agentapi.Response {
+	r.t.Helper()
+	a := map[string]any{"batch": id}
+	for k, v := range args {
+		a[k] = v
+	}
+	return r.call(op, a)
+}
+
+func (r *agentRig) status(id string) agentapi.Response {
+	r.t.Helper()
+	return r.call("batch-status", map[string]any{"id": id})
+}
+
+// step is one item of a batch.
+type step struct {
+	op   string
+	args map[string]any
+}
+
+// batch records the steps in one batch, submits it and answers Apply; it answers the status of the batch (or the refusal of the step that was refused).
+func (r *agentRig) batch(steps ...step) agentapi.Response {
+	r.t.Helper()
+	id := r.begin("test batch")
+	for _, s := range steps {
+		if resp := r.item(id, s.op, s.args); !resp.OK {
+			r.call("batch-discard", map[string]any{"id": id})
+			return resp
+		}
+	}
+	if resp := r.call("batch-submit", map[string]any{"id": id}); !resp.OK || resp.State != agentapi.StatePending {
+		r.t.Fatalf("batch-submit: %+v", resp)
+	}
+	r.app.AgentDecide(id, true)
+	return r.status(id)
+}
+
+func (r *agentRig) ok(op string, args map[string]any) {
+	r.t.Helper()
+	if resp := r.batch(step{op, args}); !resp.OK || resp.State != agentapi.StateApplied {
+		r.t.Fatalf("%s %v: %+v", op, args, resp)
+	}
+}
+
+func (r *agentRig) okAll(steps ...step) {
+	r.t.Helper()
+	if resp := r.batch(steps...); !resp.OK || resp.State != agentapi.StateApplied {
+		r.t.Fatalf("batch: %+v", resp)
+	}
+}
+
+// refused: the op is refused when it is recorded (the batch is discarded).
 func (r *agentRig) refused(op string, args map[string]any, code string) {
 	r.t.Helper()
-	resp := r.call(op, args)
+	id := r.begin("refusal")
+	resp := r.item(id, op, args)
+	r.call("batch-discard", map[string]any{"id": id})
 	if resp.OK || resp.Code != code {
 		r.t.Fatalf("%s %v: want refusal %s, got %+v", op, args, code, resp)
 	}
 }
 
-// allow runs an op that waits for the person and answers Allow.
-func (r *agentRig) allow(op string, args map[string]any) {
+// sens records the op in a batch and answers the reasons it is flagged with (nil: none); the batch is discarded.
+func (r *agentRig) sens(op string, args map[string]any) []string {
 	r.t.Helper()
-	resp := r.call(op, args)
-	if !resp.OK || resp.State != agentapi.StatePending {
-		r.t.Fatalf("%s %v must wait for the window: %+v", op, args, resp)
+	id := r.begin("sens")
+	resp := r.item(id, op, args)
+	r.call("batch-discard", map[string]any{"id": id})
+	if !resp.OK {
+		r.t.Fatalf("%s %v refused: %s", op, args, resp.Code)
 	}
-	if d := r.app.AgentDecide(resp.ID, true); d.Status != 200 {
-		r.t.Fatalf("%s: allow: %+v", op, d)
+	var out []string
+	if l, isList := resp.Data.(map[string]any)["sensitive"].([]any); isList {
+		for _, x := range l {
+			out = append(out, x.(string))
+		}
 	}
-	if st := r.status(resp.ID); st.State != agentapi.StateAllowed {
-		r.t.Fatalf("%s: %+v", op, st)
-	}
+	return out
 }
 
-func (r *agentRig) status(id string) agentapi.Response {
-	return r.ok("status", map[string]any{"id": id})
+func (r *agentRig) flagged(op string, args map[string]any, reason string) {
+	r.t.Helper()
+	for _, s := range r.sens(op, args) {
+		if s == reason {
+			return
+		}
+	}
+	r.t.Fatalf("%s %v is not flagged %q", op, args, reason)
+}
+
+func (r *agentRig) notFlagged(op string, args map[string]any) {
+	r.t.Helper()
+	if s := r.sens(op, args); len(s) > 0 {
+		r.t.Fatalf("%s %v is flagged %v", op, args, s)
+	}
 }
 
 func (r *agentRig) reveal(name, key string) string {
@@ -125,8 +195,30 @@ func (r *agentRig) reveal(name, key string) string {
 	return v
 }
 
-func (r *agentRig) connUUID(name string) string {
-	return r.core.Model().Connection(name).UUID
+func (r *agentRig) connUUID(name string) string { return r.core.Model().Connection(name).UUID }
+
+// mutate changes the model of the window's core and saves it (a batch works on a copy of the saved vault).
+func (r *agentRig) mutate(fn func(m *vmodel.Vault)) {
+	r.t.Helper()
+	fn(r.core.Model())
+	if err := r.core.commit(); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// onDisk reads the vault file again, as another program would.
+func (r *agentRig) onDisk() *vmodel.Vault {
+	r.t.Helper()
+	v, err := vault.Open(r.v.Path(), vault.Credentials{Password: []byte("pw-throwaway-1")})
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer v.Close()
+	m, err := vmodel.Load(v)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return m
 }
 
 // noSecrets scans every answer the API gave and the journal (the window's and the file) for the secrets.
@@ -164,7 +256,7 @@ func TestAgentSocketOnlyWhileUnlockedAndPrivate(t *testing.T) {
 	if d, _ := os.Stat(r.dir); d.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("folder mode %v", d.Mode())
 	}
-	if resp := r.ok("help", nil); resp.Data == nil {
+	if resp := r.call("help", nil); !resp.OK || resp.Data == nil {
 		t.Fatal("help is empty")
 	}
 	r.app.Lock()
@@ -175,377 +267,173 @@ func TestAgentSocketOnlyWhileUnlockedAndPrivate(t *testing.T) {
 		t.Fatal("a locked window answered")
 	}
 	r.unlock()
-	r.ok("structure", nil) // unlocking again brings it back
+	if resp := r.call("structure", nil); !resp.OK {
+		t.Fatal("unlocking again did not bring it back")
+	}
 	r.app.Close()
 	if _, err := os.Lstat(sock); err == nil {
 		t.Fatal("the socket stays after closing")
 	}
 }
 
-func TestAgentRefusesAFolderOthersCanWrite(t *testing.T) {
-	r := newRig(t, 0)
-	if err := os.MkdirAll(r.dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(r.dir, 0o777); err != nil {
-		t.Fatal(err)
-	}
-	r.unlock()
-	if _, err := os.Lstat(agentapi.SocketPath(r.dir)); err == nil {
-		t.Fatal("a socket was made in a folder others can write into")
-	}
-	if _, err := agentapi.Call(r.dir, agentapi.Request{Op: "help"}, time.Second); err == nil {
-		t.Fatal("the client used an open folder")
-	}
-	j, _ := json.Marshal(r.app.AgentJournal())
-	if !strings.Contains(string(j), "agent_dir") || strings.Contains(string(j), "\"active\":true") {
-		t.Fatalf("the window does not say the API is off: %s", j)
+func TestAgentRefusesAFolderOthersCanReachOrWriteInto(t *testing.T) {
+	for _, mode := range []os.FileMode{0o777, 0o750} {
+		r := newRig(t, 0)
+		if err := os.MkdirAll(r.dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(r.dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		r.unlock()
+		if _, err := os.Lstat(agentapi.SocketPath(r.dir)); err == nil {
+			t.Fatalf("a socket was made in a folder of mode %v", mode)
+		}
+		if _, err := agentapi.Call(r.dir, agentapi.Request{Op: "help"}, time.Second); err == nil {
+			t.Fatal("the client used an open folder")
+		}
+		j, _ := json.Marshal(r.app.AgentJournal())
+		if !strings.Contains(string(j), "agent_dir") || strings.Contains(string(j), "\"active\":true") {
+			t.Fatalf("the window does not say the API is off: %s", j)
+		}
 	}
 }
 
 func TestAgentStructureHasNamesAndPlainValuesOnly(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	resp := r.ok("structure", nil)
+	resp := r.call("structure", nil)
 	raw, _ := json.Marshal(resp.Data)
-	text := string(raw)
 	for _, want := range []string{"prod", "main", "portal", "GCP", "Blob store", "credentials", "wifi", "CONTACT_ADDRESS", "COOKIE_KEY", "hello@example.net", "example.org", "lumen-prod"} {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(string(raw), want) {
 			t.Errorf("the structure lacks %q", want)
 		}
 	}
-	var s struct {
-		Connections []struct {
-			Name   string
-			Fields []map[string]any
-		}
-	}
-	_ = json.Unmarshal(raw, &s)
-	for _, c := range s.Connections {
-		for _, f := range c.Fields {
-			if f["secret"] == true && f["value"] != nil {
-				t.Errorf("secret field %s.%v has a value", c.Name, f["name"])
-			}
-		}
-	}
-	one := r.ok("structure", map[string]any{"env": "nope"})
-	if raw, _ := json.Marshal(one.Data); strings.Contains(string(raw), "PUBLIC_HOST") {
+	if one := r.call("structure", map[string]any{"env": "nope"}); strings.Contains(mustJSON(one.Data), "PUBLIC_HOST") {
 		t.Error("the env filter does not filter")
 	}
 	r.noSecrets()
 }
 
-func TestAgentStructureOps(t *testing.T) {
+func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+func TestAgentOnlyReadsWorkWithoutABatch(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	// variables: create, set a plain value, rename, label and expiry, delete (to the recycle bin)
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "visibility": "plain", "description": "made by an agent"})
-	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE"}, "name_exists")
-	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "value": "plain text"})
-	if got := r.reveal("env/prod/general", "AGENT_NOTE"); got != "plain text" {
-		t.Fatalf("plain value not set: %q", got)
+	for _, op := range []string{"var-create", "set-value", "env-delete", "connection-create", "other-delete"} {
+		if resp := r.call(op, map[string]any{"scope": "shared", "key": "X", "name": "x", "value": "v"}); resp.OK || resp.Code != "batch_required" {
+			t.Fatalf("%s without a batch: %+v", op, resp)
+		}
 	}
-	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "description": "a label", "expires": "2099-01-02"})
-	r.allow("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_2"}) // it holds a value: it waits
-	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_3"}, "not_found")
-	st, _ := json.Marshal(r.ok("structure", nil).Data)
-	if !strings.Contains(string(st), "AGENT_NOTE_2") || !strings.Contains(string(st), "a label") || !strings.Contains(string(st), "plain text") || !strings.Contains(string(st), "2099-01-02") {
-		t.Fatalf("the structure lacks the new variable: %s", st)
+	if resp := r.call("var-create", map[string]any{"batch": "nope", "scope": "shared", "key": "X"}); resp.OK || resp.Code != "not_found" {
+		t.Fatalf("%+v", resp)
 	}
-	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE_2"})
-	if x := r.core.Model().Env("prod"); x != nil {
-		for _, v := range x.General {
-			if v.Key == "AGENT_NOTE_2" {
-				t.Fatal("deleted variable is still in the model")
+	if len(r.core.Model().Shared) != 1 || r.core.Model().Env("prod") == nil {
+		t.Fatal("something changed")
+	}
+	for _, op := range []string{"help", "structure"} {
+		if !r.call(op, nil).OK {
+			t.Fatalf("%s is refused", op)
+		}
+	}
+}
+
+func TestAgentBatchIsAppliedWholeAndSaved(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	id := r.begin("make a mail relay")
+	steps := []step{
+		{"connection-create", map[string]any{"name": "Mail relay", "kind": "s3"}},
+		{"field-create", map[string]any{"connection": "Mail relay", "field": "region"}},
+		{"set-value", map[string]any{"connection": "Mail relay", "field": "region", "value": "eu-1"}},
+		{"var-create", map[string]any{"scope": "env/prod/general", "key": "RELAY_NOTE", "visibility": "plain"}},
+		{"set-value", map[string]any{"scope": "env/prod/general", "key": "RELAY_NOTE", "value": "ready"}},
+		{"set-value", map[string]any{"other": "wifi", "value": "new-secret-value-77"}},
+	}
+	for i, s := range steps { // later items depend on earlier ones: the connection made first is there for the field
+		if resp := r.item(id, s.op, s.args); !resp.OK {
+			t.Fatalf("item %d %s: %+v", i+1, s.op, resp)
+		}
+	}
+	if r.core.Model().Connection("Mail relay") != nil || r.status(id).State != agentapi.StateOpen {
+		t.Fatal("a recorded item changed the vault")
+	}
+	if resp := r.call("batch-submit", map[string]any{"id": id}); resp.State != agentapi.StatePending {
+		t.Fatalf("%+v", resp)
+	}
+	if r.core.Model().Connection("Mail relay") != nil || r.onDisk().Connection("Mail relay") != nil {
+		t.Fatal("a batch that waits changed the vault")
+	}
+	pend := mustJSON(r.app.AgentPending())
+	for _, want := range []string{"make a mail relay", "connection-create", "set-value", "secret_write", "\"id\":\"" + id, "pid " + strconv.Itoa(os.Getpid())} {
+		if !strings.Contains(pend, want) {
+			t.Errorf("the dialog data lacks %q: %s", want, pend)
+		}
+	}
+	if d := r.app.AgentDecide(id, true); d.Status != 200 {
+		t.Fatalf("apply: %+v", d)
+	}
+	st := r.status(id)
+	if st.State != agentapi.StateApplied || !strings.Contains(mustJSON(st.Data), "\"result\":\"ok\"") {
+		t.Fatalf("%+v", st)
+	}
+	for _, m := range []*vmodel.Vault{r.core.Model(), r.onDisk()} { // in the window and in the file
+		if m.Connection("Mail relay") == nil || m.Connection("Mail relay").Field("region").Value != "eu-1" || m.Other[0].Value != "new-secret-value-77" {
+			t.Fatal("the batch is not all there")
+		}
+	}
+	r.noSecrets()
+}
+
+func TestAgentFailingItemSavesNothing(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "WILL_VANISH", "visibility": "plain"})
+	id := r.begin("two changes")
+	r.item(id, "var-create", map[string]any{"scope": "env/prod/general", "key": "FIRST_OF_TWO", "visibility": "plain"})
+	if resp := r.item(id, "var-delete", map[string]any{"scope": "env/prod/general", "key": "WILL_VANISH"}); !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
+	r.call("batch-submit", map[string]any{"id": id})
+	// while it waits, the second target is deleted by someone else
+	if _, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "WILL_VANISH", "delete": true}); err != nil {
+		t.Fatal(err)
+	}
+	d := r.app.AgentDecide(id, true)
+	if d.Status != 409 || !strings.Contains(mustJSON(d.Data), "batch_failed") {
+		t.Fatalf("%+v", d)
+	}
+	st := r.status(id)
+	if st.State != agentapi.StateFailed || !strings.Contains(mustJSON(st.Data), "failed: not_found") || !strings.Contains(mustJSON(st.Data), "\"index\":2") {
+		t.Fatalf("%+v", st)
+	}
+	for _, m := range []*vmodel.Vault{r.core.Model(), r.onDisk()} {
+		for _, v := range m.Env("prod").General {
+			if v.Key == "FIRST_OF_TWO" {
+				t.Fatal("the first item stayed although the second failed")
 			}
 		}
 	}
-	bin, err := r.v.Entries(vault.RecycleBinName)
-	if err != nil || len(bin) == 0 {
-		t.Fatalf("the deleted variable is not in the recycle bin: %v %d", err, len(bin))
-	}
-	// connections and fields
-	r.ok("connection-create", map[string]any{"name": "Mail relay", "kind": "s3", "description": "x"})
-	r.refused("connection-create", map[string]any{"name": "Mail relay", "kind": "s3"}, "name_exists")
-	r.ok("field-create", map[string]any{"connection": "Mail relay", "field": "region"})
-	r.ok("set-value", map[string]any{"connection": "Mail relay", "field": "region", "value": "eu-1"})
-	r.ok("field-update", map[string]any{"connection": "Mail relay", "field": "region", "expires": "2099-05-05"})
-	r.ok("connection-update", map[string]any{"connection": "Mail relay", "new_name": "Mail relay 2"})
-	// sites, products, links
-	r.ok("site-create", map[string]any{"env": "prod", "name": "edge", "kind": "google-cluster", "connection": "GCP"})
-	r.ok("product-create", map[string]any{"env": "prod", "name": "wiki", "site": "edge", "connections": []any{"Blob store"}})
-	r.ok("product-update", map[string]any{"env": "prod", "name": "wiki", "new_name": "wiki2", "enabled": false})
-	r.allow("product-delete", map[string]any{"env": "prod", "name": "wiki2"})
-	r.ok("site-update", map[string]any{"env": "prod", "name": "edge", "new_name": "edge2"})
-	r.allow("site-delete", map[string]any{"env": "prod", "name": "edge2"})
-	r.refused("site-create", map[string]any{"env": "prod", "name": "x", "kind": "google-cluster", "connection": "Nope"}, "not_found")
-	r.ok("field-delete", map[string]any{"connection": "Mail relay 2", "field": "region"})
-	r.ok("connection-delete", map[string]any{"connection": "Mail relay 2"})
-	// environments
-	r.allow("env-create", map[string]any{"name": "stage", "from": "prod", "title": "Stage"}) // prod holds secrets: a copy of it waits
-	r.ok("env-update", map[string]any{"name": "stage", "new_name": "stage2"})
-	r.allow("env-delete", map[string]any{"name": "stage2", "confirm": true})
-	// other secrets
-	r.ok("other-create", map[string]any{"title": "gate code"})
-	r.ok("other-update", map[string]any{"other": "gate code", "new_title": "gate code 2"})
-	r.ok("other-delete", map[string]any{"other": "gate code 2"})
-	r.refused("other-delete", map[string]any{"other": "gate code 2"}, "not_found")
-	r.refused("nonsense", nil, "unknown_op")
-	// the vault on disk holds what the window holds (Save ran)
-	if _, err := vault.Open(r.v.Path(), vault.Credentials{Password: []byte("pw-throwaway-1")}); err != nil {
-		t.Fatalf("the saved vault does not open: %v", err)
-	}
-	r.noSecrets()
 }
 
-func TestAgentVisibilityOnlyGoesUp(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.refused("var-meta", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "visibility": "secret"}, "no_lowering") // sealed never lowers
-	r.refused("var-meta", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "visibility": "plain"}, "no_lowering")
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "secret"})
-	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "plain"}, "no_lowering")
-	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "sealed"})
-	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "secret"}, "no_lowering")
-	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "loud"}, "bad_request")
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "RISING"})
-	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "RISING", "value": "was plain"})
-	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "RISING", "visibility": "secret"})
-	if raw, _ := json.Marshal(r.ok("structure", nil).Data); strings.Contains(string(raw), "was plain") {
-		t.Fatal("a variable made secret still shows its value")
-	}
-}
-
-func TestAgentSecretWriteWaitsForTheWindow(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	set := map[string]any{"connection": "GCP", "field": "credentials", "value": "new-secret-value-77"}
-	first := r.call("set-value", set)
-	if !first.OK || first.State != agentapi.StatePending || first.ID == "" {
-		t.Fatalf("a secret write must wait: %+v", first)
-	}
-	if got := r.reveal("conn/"+r.connUUID("GCP"), "credentials"); got != "gkey-secret-1" {
-		t.Fatalf("the secret changed before the person said Allow: %q", got)
-	}
-	if st := r.status(first.ID); st.State != agentapi.StatePending {
-		t.Fatalf("status %+v", st)
-	}
-	// the window shows what, where and who; never the value
-	pend, _ := json.Marshal(r.app.AgentPending())
-	for _, want := range []string{"credentials", "GCP", "test agent", "set-value", first.ID} {
-		if !strings.Contains(string(pend), want) {
-			t.Errorf("the pending list lacks %q: %s", want, pend)
-		}
-	}
-	if !contains(r.events, desktop.EventAgentPending) {
-		t.Error("the page was not told")
-	}
-	if resp := r.app.AgentDecide(first.ID, true); resp.Status != 200 {
-		t.Fatalf("allow: %+v", resp)
-	}
-	if st := r.status(first.ID); st.State != agentapi.StateAllowed {
-		t.Fatalf("after Allow: %+v", st)
-	}
-	if got := r.reveal("conn/"+r.connUUID("GCP"), "credentials"); got != "new-secret-value-77" {
-		t.Fatalf("Allow did not set the value: %q", got)
-	}
-	if resp := r.app.AgentDecide(first.ID, true); resp.Status == 200 {
-		t.Fatal("a request was allowed twice")
-	}
-	// Deny leaves it
-	second := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
-	if second.State != agentapi.StatePending {
-		t.Fatalf("%+v", second)
-	}
-	r.app.AgentDecide(second.ID, false)
-	if st := r.status(second.ID); st.State != agentapi.StateDenied {
-		t.Fatalf("after Deny: %+v", st)
-	}
-	if got := r.reveal("other/"+r.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
-		t.Fatalf("Deny changed the secret: %q", got)
-	}
-	// a secret variable waits too, and the sealed one is system-managed and refused
-	third := r.call("set-value", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
-	if third.OK {
-		t.Fatalf("a sealed system variable took a value: %+v", third)
-	}
-	// the journal knows all of it, by names
-	j, _ := json.Marshal(r.app.AgentJournal())
-	for _, want := range []string{"set-value", "allowed", "denied", "pending", "GCP"} {
-		if !strings.Contains(string(j), want) {
-			t.Errorf("the journal lacks %q", want)
-		}
-	}
-	r.noSecrets()
-}
-
-func TestAgentPendingExpiresAndDiesWithTheLock(t *testing.T) {
-	r := newRig(t, 80*time.Millisecond)
-	r.unlock()
-	a := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
-	time.Sleep(250 * time.Millisecond)
-	if st := r.status(a.ID); st.State != agentapi.StateExpired {
-		t.Fatalf("not expired: %+v", st)
-	}
-	if resp := r.app.AgentDecide(a.ID, true); resp.Status == 200 {
-		t.Fatal("an expired request was allowed")
-	}
-	if got := r.reveal("other/"+r.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
-		t.Fatalf("an expired request changed the secret")
-	}
-	r2 := newRig(t, 0)
-	r2.unlock()
-	b := r2.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
-	r2.app.Lock()
-	r2.unlock()
-	if resp := r2.app.AgentDecide(b.ID, true); resp.Status == 200 {
-		t.Fatal("a request survived the lock")
-	}
-	if got := r2.reveal("other/"+r2.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
-		t.Fatal("a request survived the lock and changed the secret")
-	}
-	r.noSecrets()
-	r2.noSecrets()
-}
-
-func TestAgentCopyAndMoveStayInsideTheVault(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	cred := "conn/" + r.connUUID("GCP")
-	// a secret never lands in a plain place: it would show in the list
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT", "visibility": "plain"})
-	r.refused("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}}, "would_expose")
-	// a secret into an empty secret place: at once, and the value is not in the answer
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT", "visibility": "secret"})
-	r.allow("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}})
-	if r.reveal("env/prod/general", "SECRET_SPOT") != "gkey-secret-1" || r.reveal(cred, "credentials") != "gkey-secret-1" {
-		t.Fatal("copy")
-	}
-	// move: the source is emptied
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT", "visibility": "secret"})
-	r.allow("move-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}})
-	if r.reveal("env/prod/general", "MOVED_SPOT") != "gkey-secret-1" || r.reveal("env/prod/general", "SECRET_SPOT") != "" {
-		t.Fatal("move did not move")
-	}
-	// plain to plain, plain to secret
-	r.ok("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}})
-	if r.reveal("env/prod/general", "PLAIN_SPOT") != "hello@example.net" {
-		t.Fatal("plain copy")
-	}
-	// replacing a filled secret waits for the window
-	pend := r.call("copy-value", map[string]any{"from": map[string]any{"connection": "Blob store", "field": "secret_access_key"}, "to": map[string]any{"connection": "GCP", "field": "credentials"}})
-	if pend.State != agentapi.StatePending {
-		t.Fatalf("overwrite of a filled secret must wait: %+v", pend)
-	}
-	if r.reveal(cred, "credentials") != "gkey-secret-1" {
-		t.Fatal("overwritten before Allow")
-	}
-	r.app.AgentDecide(pend.ID, true)
-	if r.reveal(cred, "credentials") != "blob-secret-1" {
-		t.Fatal("Allow did not copy")
-	}
-	// a sealed value is never moved, an empty source is refused, the same place is refused
-	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}, "sealed")
-	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}, "empty_source")
-	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}}, "same_target")
-	r.noSecrets()
-}
-
-func TestAgentSetPlainValueOnlyWherePlain(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "ops@example.net"})
-	r.ok("set-value", map[string]any{"connection": "GCP", "field": "project", "value": "lumen-stage"})
-	if r.reveal("shared", "CONTACT_ADDRESS") != "ops@example.net" || r.reveal("conn/"+r.connUUID("GCP"), "project") != "lumen-stage" {
-		t.Fatal("plain values not set")
-	}
-	r.refused("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "bad_request") // no value
-	r.refused("set-value", map[string]any{"scope": "shared", "key": "NOPE", "value": "x"}, "not_found")
-	r.refused("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "a\nb"}, "line_break")
-	if n := len(r.core.Model().Shared); n != 1 {
-		t.Fatalf("shared has %d entries", n)
-	}
-}
-
-func TestAgentJournalIsKeptInAFileWithoutValues(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("structure", nil)
-	r.refused("set-value", map[string]any{"scope": "shared", "key": "NOPE", "value": "moved-secret-value-99"}, "not_found")
-	p := r.call("set-value", map[string]any{"connection": "GCP", "field": "credentials", "value": "moved-secret-value-99"})
-	r.app.AgentDecide(p.ID, true)
-	b, err := os.ReadFile(filepath.Join(r.dir, agentapi.JournalName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st, _ := os.Stat(filepath.Join(r.dir, agentapi.JournalName)); st.Mode().Perm() != 0o600 {
-		t.Fatalf("journal mode %v", st.Mode())
-	}
-	for _, want := range []string{"structure", "set-value", "connection=GCP", "field=credentials", "allowed", "refused: not_found", "test agent (pid " + strconv.Itoa(os.Getpid()) + ")"} {
-		if !strings.Contains(string(b), want) {
-			t.Errorf("the journal file lacks %q:\n%s", want, b)
-		}
-	}
-	// a second window run reads the earlier entries
-	r.app.Lock()
-	h := r.app
-	h.Unlock("password", "x")
-	if j, _ := json.Marshal(h.AgentJournal()); !strings.Contains(string(j), "structure") {
-		t.Errorf("the journal panel lost the earlier entries: %s", j)
-	}
-	r.noSecrets()
-}
-
-func TestAgentWritesNeedEditMode(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.app.SetMode("view")
-	r.refused("var-create", map[string]any{"scope": "shared", "key": "VIEWONLY"}, "view_mode")
-	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "view_mode")
-	r.ok("structure", nil) // reads work
-	r.ok("help", nil)
-	if len(r.core.Model().Shared) != 1 {
-		t.Fatal("a write got through in view mode")
-	}
-	r.app.SetMode("edit")
-	r.ok("var-create", map[string]any{"scope": "shared", "key": "EDITOK"})
-}
-
-func TestAgentCannotLowerASecretField(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
-	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": "no"}, "bad_request")
-	r.refused("field-create", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
-	r.ok("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": true})
-	if raw, _ := json.Marshal(r.ok("structure", nil).Data); strings.Contains(string(raw), "gkey-secret-1") {
-		t.Fatal("the structure shows a secret field")
-	}
-	if !r.core.Model().Connection("GCP").Field("credentials").Secret {
-		t.Fatal("the field was lowered")
-	}
-	r.noSecrets()
-}
-
-func TestAgentQueuedRequestIsNotReaimed(t *testing.T) {
+func TestAgentTargetThatChangedWhileWaitingIsFoundOutAtApply(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "visibility": "secret"})
-	set := r.call("set-value", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "value": "new-secret-value-77"})
-	cp := r.call("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT"}})
-	if set.State != agentapi.StatePending || cp.State != agentapi.StatePending {
-		t.Fatalf("%+v %+v", set, cp)
+	id := r.begin("aimed")
+	if resp := r.item(id, "set-value", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "value": "new-secret-value-77"}); !resp.OK {
+		t.Fatalf("%+v", resp)
 	}
-	// while they wait, the place is deleted and made again as a plain one
-	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT"})
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "visibility": "plain"})
-	for _, id := range []string{set.ID, cp.ID} {
-		if d := r.app.AgentDecide(id, true); d.Status == 200 {
-			t.Fatalf("a re-aimed request was applied: %+v", d)
-		}
-		if st := r.status(id); st.State != agentapi.StateFailed || st.Code != "gone" {
-			t.Fatalf("%+v", st)
-		}
+	r.call("batch-submit", map[string]any{"id": id})
+	// the place is deleted and made again as a plain one
+	if _, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "delete": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "visibility": "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if d := r.app.AgentDecide(id, true); d.Status == 200 {
+		t.Fatal("a batch that was re-aimed was applied")
 	}
 	if got := r.reveal("env/prod/general", "AIM_SPOT"); got != "" {
 		t.Fatalf("a value landed in the plain place: %q", got)
@@ -553,365 +441,161 @@ func TestAgentQueuedRequestIsNotReaimed(t *testing.T) {
 	r.noSecrets()
 }
 
-func TestAgentEveryWriteIntoASecretNeedsAllow(t *testing.T) {
+func TestAgentRefusalsAreMadeWhenAnItemIsRecorded(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	// a plain value into an empty secret place
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET", "visibility": "secret"})
-	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "ops@example.net"})
-	p := r.call("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET"}})
-	if p.State != agentapi.StatePending || r.reveal("env/prod/general", "EMPTY_SECRET") != "" {
-		t.Fatalf("a copy into an empty secret did not wait: %+v", p)
-	}
-	// a move that empties a secret
-	m := r.call("move-value", map[string]any{"from": map[string]any{"connection": "Blob store", "field": "secret_access_key"}, "to": map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET"}})
-	if m.State != agentapi.StatePending || r.reveal("conn/"+r.connUUID("Blob store"), "secret_access_key") != "blob-secret-1" {
-		t.Fatalf("a move out of a secret did not wait: %+v", m)
-	}
-	r.app.AgentDecide(p.ID, false)
-	r.app.AgentDecide(m.ID, false)
-	// a copy of an environment that holds secrets waits; an empty one is copied at once
-	c := r.call("env-create", map[string]any{"name": "copy1", "from": "prod"})
-	if c.State != agentapi.StatePending || r.core.Model().Env("copy1") != nil {
-		t.Fatalf("%+v", c)
-	}
-	r.app.AgentDecide(c.ID, false)
-	r.ok("env-create", map[string]any{"name": "bare"})
-	r.ok("env-create", map[string]any{"name": "bare2", "from": "bare"})
-	r.noSecrets()
-}
-
-func TestAgentDeletesWaitForAllow(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	for _, c := range []struct {
-		op   string
-		args map[string]any
-	}{
-		{"env-delete", map[string]any{"name": "prod", "confirm": true}},
-		{"site-delete", map[string]any{"env": "prod", "name": "main", "confirm": true}},
-		{"product-delete", map[string]any{"env": "prod", "name": "portal", "confirm": true}},
-		{"connection-delete", map[string]any{"connection": "GCP", "confirm": true}}, // used by a site
-	} {
-		p := r.call(c.op, c.args)
-		if p.State != agentapi.StatePending {
-			t.Fatalf("%s did not wait: %+v", c.op, p)
-		}
-		r.app.AgentDecide(p.ID, false)
-	}
-	m := r.core.Model()
-	if m.Env("prod") == nil || m.Env("prod").Site("main") == nil || m.Env("prod").Product("portal") == nil || m.Connection("GCP") == nil {
-		t.Fatal("something was deleted without Allow")
-	}
-	r.ok("connection-create", map[string]any{"name": "Spare", "kind": "s3"})
-	r.ok("connection-delete", map[string]any{"connection": "Spare"}) // nothing uses it: at once
-	r.allow("connection-delete", map[string]any{"connection": "Blob store"})
-	if r.core.Model().Connection("Blob store") != nil {
-		t.Fatal("Allow did not delete")
-	}
-}
-
-func TestAgentPendingIsCappedAndShowsTheRealPeer(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	for i := 0; i < 4; i++ {
-		if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
-			t.Fatalf("%d: %+v", i, p)
-		}
-	}
-	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "too_many_pending")
-	pend, _ := json.Marshal(r.app.AgentPending())
-	if !strings.Contains(string(pend), "pid "+strconv.Itoa(os.Getpid())) || !strings.Contains(string(pend), "\"peer\":\"") || strings.Contains(string(pend), "pid 4242") {
-		t.Fatalf("the pending list does not name the real peer: %s", pend)
-	}
-	r.noSecrets()
-}
-
-func TestAgentFolderMustBeExactly0700(t *testing.T) {
-	r := newRig(t, 0)
-	if err := os.MkdirAll(r.dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(r.dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	r.unlock()
-	if _, err := os.Lstat(agentapi.SocketPath(r.dir)); err == nil {
-		t.Fatal("a socket was made in a folder open to the group")
-	}
-}
-
-func TestAgentLockDropsConnectionsAndPending(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	conn, err := net.Dial("unix", agentapi.SocketPath(r.dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	time.Sleep(100 * time.Millisecond)
-	r.app.Lock()
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := conn.Read(make([]byte, 1)); err == nil {
-		t.Fatal("an open connection survived the lock")
-	}
-}
-
-func TestAgentDeletesOfFilledSecretsWaitAndConfirmIsNeverForwarded(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	pending := func(op string, args map[string]any) agentapi.Response {
-		t.Helper()
-		p := r.call(op, args)
-		if p.State != agentapi.StatePending {
-			t.Fatalf("%s %v did not wait: %+v", op, args, p)
-		}
-		return p
-	}
-	// a filled secret: variable, field, other secret, a connection that holds one
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "visibility": "secret"})
-	r.allow("set-value", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "value": "new-secret-value-77"})
-	r.app.AgentDecide(pending("var-delete", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "confirm": true}).ID, false)
-	if r.reveal("env/prod/general", "KEEP_SECRET") != "new-secret-value-77" {
-		t.Fatal("a filled secret variable was deleted without Allow")
-	}
-	r.app.AgentDecide(pending("field-delete", map[string]any{"connection": "GCP", "field": "credentials"}).ID, false)
-	r.app.AgentDecide(pending("other-delete", map[string]any{"other": "wifi"}).ID, false)
-	r.ok("connection-create", map[string]any{"name": "Holds one", "kind": "s3"})
-	r.ok("field-create", map[string]any{"connection": "Holds one", "field": "secret_access_key", "secret": true})
-	r.allow("set-value", map[string]any{"connection": "Holds one", "field": "secret_access_key", "value": "other-secret-value-88"})
-	r.app.AgentDecide(pending("connection-delete", map[string]any{"connection": "Holds one"}).ID, false)
-	if r.core.Model().Connection("GCP").Field("credentials") == nil || len(r.core.Model().Other) == 0 || r.core.Model().Connection("Holds one") == nil {
-		t.Fatal("something was deleted without Allow")
-	}
-	// the agent's "confirm" opens nothing: what something uses waits for the window
-	r.app.AgentDecide(pending("var-delete", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "confirm": true}).ID, false)
-	r.app.AgentDecide(pending("connection-update", map[string]any{"connection": "GCP", "new_name": "GCP 2", "confirm": true}).ID, false)
-	if r.core.Model().Connection("GCP") == nil || len(r.core.Model().Shared) != 1 {
-		t.Fatal("a used thing changed on the agent's own confirm")
-	}
-	r.allow("var-delete", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"})
-	if len(r.core.Model().Shared) != 0 {
-		t.Fatal("Allow did not delete the used shared value")
-	}
-	// plain and unused: at once
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_GONE", "visibility": "plain"})
-	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "PLAIN_GONE"})
-	r.noSecrets()
-}
-
-func TestAgentRelinkAndKindChangesWait(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	for _, c := range []struct {
-		op   string
-		args map[string]any
-	}{
-		{"site-update", map[string]any{"env": "prod", "name": "main", "connection": ""}},
-		{"site-update", map[string]any{"env": "prod", "name": "main", "kind": "compose"}},
-		{"product-update", map[string]any{"env": "prod", "name": "portal", "connections": []any{}}},
-		{"product-update", map[string]any{"env": "prod", "name": "portal", "site": ""}},
-	} {
-		p := r.call(c.op, c.args)
-		if p.State != agentapi.StatePending {
-			t.Fatalf("%s %v did not wait: %+v", c.op, c.args, p)
-		}
-		r.app.AgentDecide(p.ID, false)
-	}
-	m := r.core.Model().Env("prod")
-	if m.Site("main").Connection == nil || m.Product("portal").Site == nil || len(m.Product("portal").Connections) != 1 || m.Site("main").Kind != "google-cluster" {
-		t.Fatal("a relink went through without Allow")
-	}
-	r.ok("site-update", map[string]any{"env": "prod", "name": "main", "new_name": "main2", "connection": "GCP"}) // the same connection: a rename only (core may ask: then it waits)
-}
-
-func TestAgentPlainVariableNeverShadowsASecretOne(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "visibility": "plain"}, "no_lowering") // a name the project rule makes secret
-	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"}, "shadows_secret")                     // it would override the secret of a product of the environment
-	r.ok("env-create", map[string]any{"name": "other"})
-	r.ok("var-create", map[string]any{"scope": "env/other/general", "key": "COOKIE_KEY"})
-	var vis string
-	for _, v := range r.core.Model().Env("other").General {
-		if v.Key == "COOKIE_KEY" {
-			vis = v.Vis
-		}
-	}
-	if vis == "" || vis == "plain" {
-		t.Fatalf("the new variable is %q: it must not be plain", vis)
-	}
-	p := r.call("set-value", map[string]any{"scope": "env/other/general", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("the value of a variable that shares a secret name did not wait: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-	r.noSecrets()
-}
-
-func TestAgentAllowFailsInViewMode(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
-	r.app.SetMode("view")
-	if d := r.app.AgentDecide(p.ID, true); d.Status == 200 {
-		t.Fatal("Allow wrote in view mode")
-	}
-	if st := r.status(p.ID); st.State != agentapi.StateFailed || st.Code != "view_mode" {
-		t.Fatalf("%+v", st)
-	}
-	if r.reveal("other/"+r.core.Model().Other[0].UUID, "") != "wifi-secret-1" {
-		t.Fatal("the secret changed")
-	}
-}
-
-func TestAgentJournalFileIsCleanedWhenRead(t *testing.T) {
-	r := newRig(t, 0)
-	if err := os.MkdirAll(r.dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	long := strings.Repeat("x", 5000)
-	line, _ := json.Marshal(map[string]string{"time": long, "op": "set-value\u001b[31m", "target": long, "who": "a\u202eb" + long, "result": long})
-	if err := os.WriteFile(filepath.Join(r.dir, agentapi.JournalName), append(line, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	r.unlock()
-	resp := r.app.AgentJournal()
-	raw, _ := json.Marshal(resp)
-	if len(raw) > 1500 || strings.Contains(string(raw), "\u001b") || strings.Contains(string(raw), "\u202e") {
-		t.Fatalf("the journal panel got the file as it was: %d bytes", len(raw))
-	}
-}
-
-func TestAgentRenameCannotShadowASecretKey(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "visibility": "plain"})
-	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "new_key": "COOKIE_KEY"}, "shadows_secret")
-	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "new_key": "ROOMY_TWO"})
-	// a secret may take any name; a plain one may take a plain name
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "visibility": "secret"})
-	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "new_key": "SECRETIVE_TWO"})
-}
-
-func TestAgentRenameOfSecretOrFilledWaitsAndNeverShadows(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN", "visibility": "plain"})
-	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN", "new_key": "EMPTY_PLAIN_2"}) // plain and empty: at once
-	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "value": "text"})
-	p := r.call("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "new_key": "FILLED_PLAIN"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a filled variable was renamed at once: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "A_SECRET", "visibility": "secret"})
-	p = r.call("var-rename", map[string]any{"scope": "env/prod/general", "key": "A_SECRET", "new_key": "B_SECRET"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a secret was renamed at once: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, true)
-	// a plain variable never takes a secret name: a model-level one too (the name rule of the project)
-	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "new_key": "DB_PASSWORD"}, "shadows_secret")
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT", "visibility": "plain"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "secret"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "OTHER_SPOT", "visibility": "secret"}})
+	r.refused("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}}, "would_expose")
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY"}, "to": map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP"}}, "sealed")
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}}, "same_target")
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP"}, "to": map[string]any{"scope": "env/prod/general", "key": "OTHER_SPOT"}}, "empty_source")
+	r.refused("set-value", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "value": "other-secret-value-88"}, "system_managed")
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "NOPE", "value": "x"}, "not_found")
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "bad_request")
+	r.refused("var-meta", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "visibility": "secret"}, "no_lowering")
+	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "plain"}, "no_lowering")
+	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "loud"}, "bad_request")
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}, "name_exists")
 	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "DB_PASSWORD", "visibility": "plain"}, "no_lowering")
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "DB_PASSWORD"})
-	for _, v := range r.core.Model().Env("prod").General {
-		if v.Key == "DB_PASSWORD" && v.Vis == "plain" {
-			t.Fatal("a variable with a secret name was made plain")
-		}
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"}, "shadows_secret")
+	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT", "new_key": "DB_PASSWORD"}, "shadows_secret")
+	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
+	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": "no"}, "bad_request")
+	r.refused("field-create", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
+	r.refused("connection-create", map[string]any{"name": "GCP", "kind": "google"}, "name_exists")
+	r.refused("site-create", map[string]any{"env": "prod", "name": "x", "kind": "google-cluster", "connection": "Nope"}, "not_found")
+	r.refused("other-delete", map[string]any{"other": "nope"}, "not_found")
+	r.refused("nonsense", nil, "unknown_op")
+	if raw := mustJSON(r.call("structure", nil).Data); strings.Contains(raw, "gkey-secret-1") {
+		t.Fatal("the structure shows a secret")
 	}
-}
-
-func TestAgentSiteCreateThatLinksProductsWaits(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.allow("product-update", map[string]any{"env": "prod", "name": "portal", "site": ""})
-	p := r.call("site-create", map[string]any{"env": "prod", "name": "extra", "kind": "google-cluster", "connection": "GCP"})
-	if p.State != agentapi.StatePending || r.core.Model().Env("prod").Site("extra") != nil {
-		t.Fatalf("a site that would take over a product did not wait: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, true)
-	if r.core.Model().Env("prod").Site("extra") == nil {
-		t.Fatal("Allow did not create the site")
-	}
-	r.ok("site-create", map[string]any{"env": "prod", "name": "extra2", "kind": "google-cluster"}) // nothing to link now: at once
-}
-
-func TestAgentEnvCopySeesSecretsInGroupsNoSiteShows(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("env-create", map[string]any{"name": "subby"})
-	e := r.core.Model().Env("subby")
-	e.Products = append(e.Products, &vmodel.Product{Name: "hidden", Enabled: true, Sub: map[string][]*vmodel.Var{"compose": {{Key: "HID_KEY", Value: "hidden-value", Vis: vmodel.VisSecret}}}})
-	p := r.call("env-create", map[string]any{"name": "subby2", "from": "subby"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a copy with a secret in a group no site shows did not wait: %+v", p)
-	}
-}
-
-func TestAgentOtherRenameOfFilledSecretWaits(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	p := r.call("other-update", map[string]any{"other": "wifi", "new_title": "wifi 2"})
-	if p.State != agentapi.StatePending || r.core.Model().Other[0].Title != "wifi" {
-		t.Fatalf("%+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-	r.ok("other-create", map[string]any{"title": "empty one"})
-	r.ok("other-update", map[string]any{"other": "empty one", "new_title": "empty two"}) // nothing filled: at once
-}
-
-func TestAgentNewRequestsThatWaitAreRateLimited(t *testing.T) {
-	r := newRigGap(t, 0, 400*time.Millisecond)
-	r.unlock()
-	if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
-	}
-	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "rate_limited")
-	time.Sleep(500 * time.Millisecond)
-	if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
+	if !r.core.Model().Connection("GCP").Field("credentials").Secret {
+		t.Fatal("a field was lowered")
 	}
 	r.noSecrets()
 }
 
-func TestAgentPlainNameTakenFromASecretRowIsRefused(t *testing.T) {
+func TestAgentWhatNeedsACloseLookIsFlaggedWithItsReason(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "ODDNAME", "visibility": "secret"})
-	r.refused("var-create", map[string]any{"scope": "shared", "key": "ODDNAME", "visibility": "plain"}, "shadows_secret")
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "visibility": "secret"}},
+		step{"set-value", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "value": "new-secret-value-77"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "FILLED_PLAIN", "visibility": "plain"}},
+		step{"set-value", map[string]any{"scope": "env/prod/general", "key": "FILLED_PLAIN", "value": "text"}})
+	for _, c := range []struct {
+		op     string
+		args   map[string]any
+		reason string
+	}{
+		{"set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "secret_write"},
+		{"set-value", map[string]any{"scope": "env/prod/general", "key": "FILLED_PLAIN", "value": "${{ self.PUBLIC_HOST }}"}, "secret_write"},
+		{"var-delete", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET"}, "delete_var"},
+		{"var-delete", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "delete_var"},
+		{"var-rename", map[string]any{"scope": "env/prod/general", "key": "FILLED_PLAIN", "new_key": "FILLED_PLAIN_2"}, "rename_secret"},
+		{"var-rename", map[string]any{"scope": "env/prod/general", "key": "KEEP_SECRET", "new_key": "KEEP_SECRET_2"}, "rename_secret"},
+		{"var-create", map[string]any{"scope": "env/prod/site/main", "key": "PUBLIC_HOST"}, "shadows"},
+		{"var-create", map[string]any{"scope": "env/prod/general", "key": "CONTACT_ADDRESS"}, "shadows"},
+		{"env-delete", map[string]any{"name": "prod"}, "delete_env"},
+		{"env-create", map[string]any{"name": "copy1", "from": "prod"}, "env_copy"},
+		{"site-delete", map[string]any{"env": "prod", "name": "main"}, "delete_site"},
+		{"product-delete", map[string]any{"env": "prod", "name": "portal"}, "delete_product"},
+		{"connection-delete", map[string]any{"connection": "GCP"}, "delete_connection"},
+		{"field-delete", map[string]any{"connection": "GCP", "field": "credentials"}, "delete_field"},
+		{"field-delete", map[string]any{"connection": "GCP", "field": "project"}, "delete_field"},
+		{"other-delete", map[string]any{"other": "wifi"}, "delete_other"},
+		{"other-update", map[string]any{"other": "wifi", "new_title": "wifi 2"}, "rename_secret"},
+		{"site-update", map[string]any{"env": "prod", "name": "main", "connection": ""}, "relink"},
+		{"site-update", map[string]any{"env": "prod", "name": "main", "kind": "compose"}, "relink"},
+		{"product-update", map[string]any{"env": "prod", "name": "portal", "connections": []any{}}, "relink"},
+		{"product-update", map[string]any{"env": "prod", "name": "portal", "site": ""}, "relink"},
+		{"connection-update", map[string]any{"connection": "GCP", "new_name": "GCP 2"}, "sensitive"}, // used: the core asks
+	} {
+		if c.op == "connection-update" { // the core's own "are you sure" is flagged
+			if s := r.sens(c.op, c.args); len(s) == 0 {
+				t.Fatalf("%s %v is not flagged", c.op, c.args)
+			}
+			continue
+		}
+		r.flagged(c.op, c.args, c.reason)
+	}
+	// at once: plain, unused, empty
+	r.notFlagged("var-create", map[string]any{"scope": "env/prod/general", "key": "BRAND_NEW", "visibility": "plain"})
+	r.notFlagged("connection-create", map[string]any{"name": "Spare", "kind": "s3"})
+	r.notFlagged("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "plain@example.net"})
+	r.notFlagged("env-create", map[string]any{"name": "bare"})
+	r.notFlagged("site-update", map[string]any{"env": "prod", "name": "main", "connection": "GCP"})
+	if m := r.core.Model(); m.Env("prod") == nil || len(m.Shared) != 1 || m.Connection("Spare") != nil {
+		t.Fatal("recording changed the vault")
+	}
 }
 
-func TestAgentConnectionNameBoundByTheProjectWaits(t *testing.T) {
+func TestAgentSiteCreateThatLinksProductsAndRelinkDialog(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	bound := ""
-	for _, p := range r.core.d.Products {
-		for _, u := range p.Connections {
-			if u.Name != "" && r.core.BoundConnectionName(u.Name) && r.core.Model().Connection(u.Name) == nil {
-				bound = u.Name
-			}
+	r.okAll(step{"product-update", map[string]any{"env": "prod", "name": "portal", "site": ""}})
+	r.flagged("site-create", map[string]any{"env": "prod", "name": "extra", "kind": "google-cluster"}, "links_products")
+	r.okAll(step{"connection-create", map[string]any{"name": "Other cloud", "kind": "google"}})
+	id := r.begin("relink")
+	r.item(id, "site-update", map[string]any{"env": "prod", "name": "main", "connection": "Other cloud"})
+	r.call("batch-submit", map[string]any{"id": id})
+	raw := mustJSON(r.app.AgentPending())
+	for _, want := range []string{"\"field\":\"connection\"", "\"old\":\"GCP\"", "\"new\":\"Other cloud\"", "relink"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("the dialog data lacks %s: %s", want, raw)
 		}
 	}
-	if bound == "" {
-		t.Skip("the example project binds no connection name")
+	r.app.AgentDecide(id, false)
+	if r.core.Model().Env("prod").Site("main").Connection.Name != "GCP" {
+		t.Fatal("a rejected relink was applied")
 	}
-	p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": bound})
-	if p.State != agentapi.StatePending || r.core.Model().Connection(bound) != nil {
-		t.Fatalf("a rename to a bound name did not wait: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-	c := r.call("connection-create", map[string]any{"name": bound, "kind": "s3"})
-	if c.State != agentapi.StatePending || r.core.Model().Connection(bound) != nil {
-		t.Fatalf("a connection made under a bound name did not wait: %+v", c)
-	}
-	r.ok("connection-update", map[string]any{"connection": "Blob store", "new_name": "Blob store 2"}) // an ordinary rename of a used connection goes the usual way (core may ask)
 }
 
-func TestAgentBoundNamesAreNormalizedAndKindIdsCount(t *testing.T) {
+func TestAgentVarCreateSeesHiddenGroupsAndShadows(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.mutate(func(m *vmodel.Vault) {
+		m.Env("prod").Product("portal").Sub["compose"] = []*vmodel.Var{{Key: "HIDDEN_PLAIN", Value: "x", Vis: vmodel.VisPlain}, {Key: "HIDDEN_VALUE", Value: "hidden-value", Vis: vmodel.VisSecret}}
+	})
+	r.refused("var-create", map[string]any{"scope": "env/prod/product/portal/compose", "key": "HIDDEN_PLAIN"}, "name_exists") // the group no site shows
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "HIDDEN_VALUE", "visibility": "plain"}, "shadows_secret")
+	r.refused("var-create", map[string]any{"scope": "env/prod/site/main", "key": "HIDDEN_VALUE"}, "shadows_secret")
+	r.okAll(step{"env-create", map[string]any{"name": "bare"}})
+	r.notFlagged("var-create", map[string]any{"scope": "env/bare/general", "key": "X_PLAIN"}) // another environment is not touched
+	r.mutate(func(m *vmodel.Vault) {
+		m.Env("prod").Products = append(m.Env("prod").Products, &vmodel.Product{Name: "hidden", Enabled: true, Sub: map[string][]*vmodel.Var{"compose": {{Key: "HID_KEY", Value: "hidden-value", Vis: vmodel.VisSecret}}}})
+	})
+	r.okAll(step{"env-create", map[string]any{"name": "subby"}})
+	r.mutate(func(m *vmodel.Vault) {
+		e := m.Env("subby")
+		e.Products = append(e.Products, &vmodel.Product{Name: "hidden", Enabled: true, Sub: map[string][]*vmodel.Var{"compose": {{Key: "HID_KEY", Value: "hidden-value", Vis: vmodel.VisSecret}}}})
+	})
+	r.flagged("env-create", map[string]any{"name": "subby2", "from": "subby"}, "env_copy") // a secret in a group no site shows
+}
+
+func TestAgentCoreNeverChangesAnExistingVariableOnCreateOnly(t *testing.T) {
+	r := newRig(t, 0)
+	_, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "PUBLIC_HOST", "visibility": "secret", "create_only": true})
+	if code(err) != "name_exists" {
+		t.Fatalf("%v", err)
+	}
+	for _, v := range r.core.Model().Env("prod").General {
+		if v.Key == "PUBLIC_HOST" && v.Vis != vmodel.VisPlain {
+			t.Fatal("the visibility was changed")
+		}
+	}
+}
+
+func TestAgentConnectionNamesTheProjectBindsAndNeededKinds(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
 	bound, kind := "", ""
+	count := map[string]int{}
+	for _, c := range r.core.Model().Connections {
+		count[c.Kind]++
+	}
+	one, none := "", ""
 	for _, p := range r.core.d.Products {
 		for _, u := range p.Connections {
 			if u.Name != "" && r.core.BoundConnectionName(u.Name) && r.core.Model().Connection(u.Name) == nil {
@@ -920,32 +604,6 @@ func TestAgentBoundNamesAreNormalizedAndKindIdsCount(t *testing.T) {
 			if kind == "" && r.core.Model().Connection(u.Kind) == nil && u.Kind != "" {
 				kind = u.Kind
 			}
-		}
-	}
-	if bound == "" || kind == "" {
-		t.Skip("the example project binds no connection name")
-	}
-	p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": "  " + strings.ToUpper(bound) + "  "})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a rename to a bound name in other case and with spaces did not wait: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-	c := r.call("connection-create", map[string]any{"name": kind, "kind": "s3"})
-	if c.State != agentapi.StatePending {
-		t.Fatalf("a connection named like a kind id did not wait: %+v", c)
-	}
-}
-
-func TestAgentFirstAndLastButOneConnectionOfANeededKindWait(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	count := map[string]int{}
-	for _, c := range r.core.Model().Connections {
-		count[c.Kind]++
-	}
-	one, none := "", ""
-	for _, p := range r.core.d.Products {
-		for _, u := range p.Connections {
 			if count[u.Kind] == 1 && one == "" {
 				one = u.Kind
 			}
@@ -954,62 +612,26 @@ func TestAgentFirstAndLastButOneConnectionOfANeededKindWait(t *testing.T) {
 			}
 		}
 	}
-	if one == "" || none == "" {
-		t.Fatalf("the example has no needed kind with one connection (%q) or with none (%q)", one, none)
+	if bound == "" || kind == "" || one == "" || none == "" {
+		t.Fatalf("the example lacks what the test needs: %q %q %q %q", bound, kind, one, none)
 	}
-	// the first connection of a needed kind waits
-	if p := r.call("connection-create", map[string]any{"name": "First of its kind", "kind": none}); p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
-	}
-	// a second one of a kind is made at once; deleting it would leave exactly one: that waits
-	r.ok("connection-create", map[string]any{"name": "Second of its kind", "kind": one})
-	p := r.call("connection-delete", map[string]any{"connection": "Second of its kind"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a delete that leaves one connection of a needed kind did not wait: %+v", p)
-	}
-	r.app.AgentDecide(p.ID, false)
-}
-
-func TestAgentOtherWithNotesCountsAsFilled(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("other-create", map[string]any{"title": "only notes"})
-	for _, o := range r.core.Model().Other {
-		if o.Title == "only notes" {
-			o.Notes = "a note"
-		}
-	}
-	if p := r.call("other-delete", map[string]any{"other": "only notes"}); p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
-	}
-}
-
-func TestAgentRelinkDialogShowsOldAndNew(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("connection-create", map[string]any{"name": "Other cloud", "kind": "google"})
-	p := r.call("site-update", map[string]any{"env": "prod", "name": "main", "connection": "Other cloud"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
-	}
-	raw, _ := json.Marshal(r.app.AgentPending())
-	for _, want := range []string{"\"field\":\"connection\"", "\"old\":\"GCP\"", "\"new\":\"Other cloud\""} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("the pending list lacks %s: %s", want, raw)
-		}
-	}
+	r.flagged("connection-update", map[string]any{"connection": "Blob store", "new_name": "  " + strings.ToUpper(bound) + "  "}, "bound_name") // trimmed, other case
+	r.flagged("connection-create", map[string]any{"name": bound, "kind": "s3"}, "bound_name")
+	r.flagged("connection-create", map[string]any{"name": kind, "kind": "s3"}, "bound_name") // a kind id
+	r.flagged("connection-create", map[string]any{"name": "First of its kind", "kind": none}, "bound_name")
+	r.okAll(step{"connection-create", map[string]any{"name": "Second of its kind", "kind": one}})
+	r.flagged("connection-delete", map[string]any{"connection": "Second of its kind"}, "delete_connection") // leaves exactly one
 }
 
 func TestAgentSiteKindUsesCountAsBoundAndNeeded(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	used := map[string]bool{}
+	used, have := map[string]bool{}, map[string]bool{}
 	for _, p := range r.core.d.Products {
 		for _, u := range p.Connections {
 			used[u.Kind] = true
 		}
 	}
-	have := map[string]bool{}
 	for _, c := range r.core.Model().Connections {
 		have[c.Kind] = true
 	}
@@ -1026,127 +648,252 @@ func TestAgentSiteKindUsesCountAsBoundAndNeeded(t *testing.T) {
 	if !r.core.BoundConnectionName("bound by a SITE kind") || !r.core.BoundConnectionName("served-by-site") || !r.core.ConnectionKindNeeded(kind) || !r.core.ConnectionKindServed(kind) {
 		t.Fatal("a use of a site kind is not seen")
 	}
-	if p := r.call("connection-create", map[string]any{"name": "Plain name", "kind": kind}); p.State != agentapi.StatePending {
-		t.Fatalf("the first connection of a kind a site kind needs did not wait: %+v", p)
-	}
-	if p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": "Bound by a site kind"}); p.State != agentapi.StatePending {
-		t.Fatalf("a rename to a name a site kind binds did not wait: %+v", p)
-	}
+	r.flagged("connection-create", map[string]any{"name": "Plain name", "kind": kind}, "bound_name")
+	r.flagged("connection-update", map[string]any{"connection": "Blob store", "new_name": "Bound by a site kind"}, "bound_name")
+	r.okAll(step{"connection-create", map[string]any{"name": "Bound by a site kind", "kind": kind}}) // the batch is what the person approves
 }
 
-func TestAgentVarCreateSeesHiddenGroupsAndShadows(t *testing.T) {
+func TestAgentCopyAndMoveStayInsideTheVault(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	prod := r.core.Model().Env("prod")
-	prod.Product("portal").Sub["compose"] = []*vmodel.Var{{Key: "HIDDEN_PLAIN", Value: "x", Vis: vmodel.VisPlain}, {Key: "HIDDEN_VALUE", Value: "hidden-value", Vis: vmodel.VisSecret}}
-	r.refused("var-create", map[string]any{"scope": "env/prod/product/portal/compose", "key": "HIDDEN_PLAIN"}, "name_exists") // the group no site shows
-	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "HIDDEN_VALUE", "visibility": "plain"}, "shadows_secret")
-	r.refused("var-create", map[string]any{"scope": "env/prod/site/main", "key": "HIDDEN_VALUE"}, "shadows_secret") // it would override a secret of the environment
-	// a key the environment holds in another scope: the person decides; another environment is not touched
-	p := r.call("var-create", map[string]any{"scope": "env/prod/site/main", "key": "PUBLIC_HOST"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("a variable that overrides another did not wait: %+v", p)
+	cred := "conn/" + r.connUUID("GCP")
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT", "visibility": "secret"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT", "visibility": "secret"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT", "visibility": "plain"}})
+	r.okAll(
+		step{"copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}}},
+		step{"move-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}},
+		step{"copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}}})
+	if r.reveal("env/prod/general", "MOVED_SPOT") != "gkey-secret-1" || r.reveal("env/prod/general", "SECRET_SPOT") != "" || r.reveal(cred, "credentials") != "gkey-secret-1" ||
+		r.reveal("env/prod/general", "PLAIN_SPOT") != "hello@example.net" {
+		t.Fatal("copy and move did not do what they say")
 	}
-	raw, _ := json.Marshal(r.app.AgentPending())
-	if !strings.Contains(string(raw), "shadows") || !strings.Contains(string(raw), "env/prod/general") {
-		t.Fatalf("the dialog does not say what is overridden: %s", raw)
-	}
-	imp := r.call("var-create", map[string]any{"scope": "env/prod/general", "key": "CONTACT_ADDRESS"}) // imported shared value of the environment
-	if imp.State != agentapi.StatePending {
-		t.Fatalf("a variable that overrides an import did not wait: %+v", imp)
-	}
-	r.ok("env-create", map[string]any{"name": "bare"})
-	r.ok("var-create", map[string]any{"scope": "env/bare/general", "key": "PUBLIC_HOST"})
+	r.flagged("copy-value", map[string]any{"from": map[string]any{"connection": "Blob store", "field": "secret_access_key"}, "to": map[string]any{"connection": "GCP", "field": "credentials"}}, "secret_write")
+	r.noSecrets()
 }
 
-func TestAgentCoreNeverChangesAnExistingVariableOnCreateOnly(t *testing.T) {
+func TestAgentRejectLeavesTheVaultAsItIs(t *testing.T) {
 	r := newRig(t, 0)
-	_, err := r.core.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "PUBLIC_HOST", "visibility": "secret", "create_only": true})
-	if code(err) != "name_exists" {
-		t.Fatalf("%v", err)
+	r.unlock()
+	id := r.begin("to reject")
+	r.item(id, "set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	r.call("batch-submit", map[string]any{"id": id})
+	if d := r.app.AgentDecide(id, false); d.Status != 200 {
+		t.Fatalf("%+v", d)
 	}
-	for _, v := range r.core.Model().Env("prod").General {
-		if v.Key == "PUBLIC_HOST" && v.Vis != vmodel.VisPlain {
-			t.Fatal("the visibility was changed")
+	if st := r.status(id); st.State != agentapi.StateRejected {
+		t.Fatalf("%+v", st)
+	}
+	if r.reveal("other/"+r.core.Model().Other[0].UUID, "") != "wifi-secret-1" {
+		t.Fatal("Reject changed the secret")
+	}
+	if d := r.app.AgentDecide(id, true); d.Status == 200 {
+		t.Fatal("a rejected batch was applied")
+	}
+	r.noSecrets()
+}
+
+func TestAgentApplyFailsInViewMode(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	id := r.begin("view")
+	r.item(id, "var-create", map[string]any{"scope": "shared", "key": "VIEWONLY"})
+	r.call("batch-submit", map[string]any{"id": id})
+	open := r.begin("still open")
+	r.app.SetMode("view")
+	if d := r.app.AgentDecide(id, true); d.Status == 200 {
+		t.Fatal("Apply wrote in view mode")
+	}
+	if st := r.status(id); st.State != agentapi.StateFailed || st.Code != "view_mode" {
+		t.Fatalf("%+v", st)
+	}
+	if resp := r.item(open, "var-create", map[string]any{"scope": "shared", "key": "VIEWONLY2"}); resp.OK || resp.Code != "view_mode" { // recording needs edit mode too
+		t.Fatalf("%+v", resp)
+	}
+	if resp := r.call("batch-begin", map[string]any{"title": "x"}); resp.OK || resp.Code != "view_mode" {
+		t.Fatalf("%+v", resp)
+	}
+	if !r.call("structure", nil).OK {
+		t.Fatal("reads work in view mode")
+	}
+	if len(r.core.Model().Shared) != 1 {
+		t.Fatal("a write got through in view mode")
+	}
+}
+
+func TestAgentBatchesExpire(t *testing.T) {
+	r := newRig(t, 150*time.Millisecond)
+	r.unlock()
+	draft := r.begin("draft")
+	sent := r.begin("sent")
+	r.item(sent, "var-create", map[string]any{"scope": "shared", "key": "LATE_ONE"})
+	r.call("batch-submit", map[string]any{"id": sent})
+	time.Sleep(500 * time.Millisecond)
+	if resp := r.item(draft, "var-create", map[string]any{"scope": "shared", "key": "X"}); resp.OK {
+		t.Fatal("an expired draft took an item")
+	}
+	for _, id := range []string{draft, sent} {
+		if st := r.status(id); st.State != agentapi.StateExpired {
+			t.Fatalf("%s: %+v", id, st)
 		}
 	}
-}
-
-func TestAgentConnectionDeleteIsCheckedAgainAtAllow(t *testing.T) {
-	r := newRig(t, 0)
-	r.unlock()
-	r.ok("connection-create", map[string]any{"name": "S3 two", "kind": "s3"})
-	r.ok("connection-create", map[string]any{"name": "S3 three", "kind": "s3"})
-	p := r.call("connection-delete", map[string]any{"connection": "Blob store"}) // used: waits; three of its kind
-	if p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
+	if d := r.app.AgentDecide(sent, true); d.Status == 200 {
+		t.Fatal("an expired batch was applied")
 	}
-	pp := r.call("connection-delete", map[string]any{"connection": "S3 three"}) // leaves two: at once (if the kind is needed it waits, then it is answered)
-	if pp.State == agentapi.StatePending {
-		r.app.AgentDecide(pp.ID, true)
-	}
-	if r.core.Model().Connection("S3 three") != nil {
-		t.Skip("the deletion of the third connection waited and was not applied: nothing changed under the first request")
-	}
-	if d := r.app.AgentDecide(p.ID, true); d.Status == 200 {
-		t.Fatalf("a delete that now leaves exactly one connection of a needed kind went through: %+v", d)
+	if len(r.core.Model().Shared) != 1 {
+		t.Fatal("an expired batch changed the vault")
 	}
 }
 
-func TestAgentServedKindDeleteWaits(t *testing.T) {
+func TestAgentLockDropsBatchesAndConnections(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	for _, p := range r.core.d.Products {
-		for i := range p.Connections {
-			if p.Connections[i].Kind == "s3" {
-				p.Connections[i].ServeAs = "served-store"
-			}
+	id := r.begin("lost")
+	r.item(id, "set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	r.call("batch-submit", map[string]any{"id": id})
+	conn, err := net.Dial("unix", agentapi.SocketPath(r.dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	time.Sleep(100 * time.Millisecond)
+	r.app.Lock()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("an open connection survived the lock")
+	}
+	r.unlock()
+	if d := r.app.AgentDecide(id, true); d.Status == 200 {
+		t.Fatal("a batch survived the lock")
+	}
+	if r.reveal("other/"+r.core.Model().Other[0].UUID, "") != "wifi-secret-1" {
+		t.Fatal("a batch survived the lock and changed the secret")
+	}
+}
+
+func TestAgentLimits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	a, b := r.begin("a"), r.begin("b")
+	r.begin("c")
+	r.begin("d")
+	if resp := r.call("batch-begin", map[string]any{"title": "e"}); resp.OK || resp.Code != "too_many_batches" {
+		t.Fatalf("%+v", resp)
+	}
+	if resp := r.call("batch-submit", map[string]any{"id": a}); resp.OK || resp.Code != "empty_batch" {
+		t.Fatalf("%+v", resp)
+	}
+	for i := 0; i < 50; i++ {
+		if resp := r.item(a, "var-create", map[string]any{"scope": "shared", "key": "ITEM_" + strconv.Itoa(i), "visibility": "plain"}); !resp.OK {
+			t.Fatalf("item %d: %+v", i, resp)
 		}
 	}
-	r.ok("connection-create", map[string]any{"name": "S3 two", "kind": "s3"})
-	r.ok("connection-create", map[string]any{"name": "S3 three", "kind": "s3"})
-	if p := r.call("connection-delete", map[string]any{"connection": "S3 three"}); p.State != agentapi.StatePending {
-		t.Fatalf("a delete of a connection of a kind a program asks for by name did not wait: %+v", p)
+	if resp := r.item(a, "var-create", map[string]any{"scope": "shared", "key": "ONE_TOO_MANY"}); resp.OK || resp.Code != "batch_full" {
+		t.Fatalf("%+v", resp)
+	}
+	r.item(b, "var-create", map[string]any{"scope": "shared", "key": "OTHER"})
+	if resp := r.call("batch-submit", map[string]any{"id": a}); !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
+	if resp := r.call("batch-submit", map[string]any{"id": b}); resp.OK || resp.Code != "batch_pending" {
+		t.Fatalf("only one batch waits at a time: %+v", resp)
+	}
+	r.app.AgentDecide(a, true)
+	if n := len(r.core.Model().Shared); n != 51 {
+		t.Fatalf("the full batch was not applied: %d", n)
+	}
+	if resp := r.call("batch-submit", map[string]any{"id": b}); !resp.OK {
+		t.Fatalf("the next batch can wait now: %+v", resp)
 	}
 }
 
-func TestAgentPlainValueWithAReferenceWaits(t *testing.T) {
-	r := newRig(t, 0)
+func TestAgentSubmittedBatchesAreRateLimited(t *testing.T) {
+	r := newRigGap(t, 0, 400*time.Millisecond)
 	r.unlock()
-	p := r.call("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "${{ self.COOKIE_KEY }}"})
-	if p.State != agentapi.StatePending || r.reveal("shared", "CONTACT_ADDRESS") != "hello@example.net" {
-		t.Fatalf("%+v", p)
+	a, b := r.begin("a"), r.begin("b")
+	r.item(a, "var-create", map[string]any{"scope": "shared", "key": "ONE"})
+	r.item(b, "var-create", map[string]any{"scope": "shared", "key": "TWO"})
+	if resp := r.call("batch-submit", map[string]any{"id": a}); !resp.OK {
+		t.Fatalf("%+v", resp)
 	}
-	r.app.AgentDecide(p.ID, false)
-	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "plain@example.net"})
+	r.app.AgentDecide(a, false)
+	if resp := r.call("batch-submit", map[string]any{"id": b}); resp.OK || resp.Code != "rate_limited" {
+		t.Fatalf("%+v", resp)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if resp := r.call("batch-submit", map[string]any{"id": b}); !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
 }
 
-func TestAgentDeclaredFieldsAreSecretOrWaitOnDelete(t *testing.T) {
+func TestAgentJournalHasTheBatchAndItsItemsWithoutValues(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	r.ok("connection-create", map[string]any{"name": "Declared", "kind": "s3"})
-	r.refused("field-create", map[string]any{"connection": "Declared", "field": "secret_access_key", "secret": false}, "no_lowering")
-	r.ok("field-create", map[string]any{"connection": "Declared", "field": "secret_access_key"})
-	if f := r.core.Model().Connection("Declared").Field("secret_access_key"); f == nil || !f.Secret {
-		t.Fatal("a field the kind declares secret was made plain")
+	r.okAll(step{"set-value", map[string]any{"connection": "GCP", "field": "credentials", "value": "moved-secret-value-99"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "JOURNALED", "visibility": "plain"}})
+	b, err := os.ReadFile(filepath.Join(r.dir, agentapi.JournalName))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if p := r.call("field-delete", map[string]any{"connection": "GCP", "field": "project"}); p.State != agentapi.StatePending {
-		t.Fatalf("a declared field was deleted at once: %+v", p)
+	if st, _ := os.Stat(filepath.Join(r.dir, agentapi.JournalName)); st.Mode().Perm() != 0o600 {
+		t.Fatalf("journal mode %v", st.Mode())
+	}
+	for _, want := range []string{"batch-begin", "batch-submit", "\"op\":\"batch\"", "applied", "2 items", "set-value", "connection=GCP", "field=credentials", "JOURNALED", "\"result\":\"ok\"", "test agent (pid " + strconv.Itoa(os.Getpid()) + ")"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the journal file lacks %q:\n%s", want, b)
+		}
+	}
+	r.app.Lock()
+	r.app.Unlock("password", "x")
+	if j := mustJSON(r.app.AgentJournal()); !strings.Contains(j, "batch-begin") {
+		t.Errorf("the journal panel lost the earlier entries: %s", j)
+	}
+	r.noSecrets()
+}
+
+func TestAgentJournalFileIsCleanedWhenRead(t *testing.T) {
+	r := newRig(t, 0)
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 5000)
+	line, _ := json.Marshal(map[string]string{"time": long, "op": "set-value\u001b[31m", "target": long, "who": "a\u202eb" + long, "result": long})
+	if err := os.WriteFile(filepath.Join(r.dir, agentapi.JournalName), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.unlock()
+	raw := mustJSON(r.app.AgentJournal())
+	if len(raw) > 1500 || strings.Contains(raw, "\\u001b") || strings.Contains(raw, "\\u202e") {
+		t.Fatalf("the journal panel got the file as it was: %d bytes", len(raw))
 	}
 }
 
 func TestAgentShowsThatANameHasNonLatinLetters(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	r.ok("other-create", map[string]any{"title": "w\u0456fi"}) // a Cyrillic i
-	p := r.call("set-value", map[string]any{"other": "w\u0456fi", "value": "other-secret-value-88"})
-	if p.State != agentapi.StatePending {
-		t.Fatalf("%+v", p)
-	}
-	raw, _ := json.Marshal(r.app.AgentPending())
-	if !strings.Contains(string(raw), "\"nonlatin\":true") {
+	r.okAll(step{"other-create", map[string]any{"title": "w\u0456fi"}}) // a Cyrillic i
+	id := r.begin("look-alike")
+	r.item(id, "set-value", map[string]any{"other": "w\u0456fi", "value": "other-secret-value-88"})
+	r.call("batch-submit", map[string]any{"id": id})
+	if raw := mustJSON(r.app.AgentPending()); !strings.Contains(raw, "\"nonlatin\":true") {
 		t.Fatalf("%s", raw)
 	}
-	q := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
-	_ = q
+}
+
+func TestAgentBoundaryOfAFilledOtherAndDeclaredFields(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.okAll(step{"other-create", map[string]any{"title": "only notes"}}, step{"connection-create", map[string]any{"name": "Declared", "kind": "s3"}},
+		step{"field-create", map[string]any{"connection": "Declared", "field": "secret_access_key"}})
+	if f := r.core.Model().Connection("Declared").Field("secret_access_key"); f == nil || !f.Secret {
+		t.Fatal("a field the kind declares secret was made plain")
+	}
+	r.mutate(func(m *vmodel.Vault) {
+		for _, o := range m.Other {
+			if o.Title == "only notes" {
+				o.Notes = "a note"
+			}
+		}
+	})
+	r.flagged("other-delete", map[string]any{"other": "only notes"}, "delete_other")
 }

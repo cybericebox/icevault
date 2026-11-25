@@ -333,6 +333,7 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .dlgbox.agent { max-width:820px; } .dlgbox .aghead { margin:20px 0 8px; font-size:14px; font-weight:600; color:var(--ib-ink); }
 .agbody { display:flex; flex-direction:column; justify-content:center; min-height:240px; max-height:380px; overflow:auto; border:1px solid var(--ib-line); border-radius:var(--ib-r); } .agbody.has { justify-content:flex-start; }
 .agbody .empty, .agbody .err { margin:auto; } .agbody .vload { flex:1; }
+.agitems { list-style:none; margin:12px 0 0; padding:0; max-height:360px; overflow:auto; border:1px solid var(--ib-line); border-radius:var(--ib-r); } .agitems li { padding:8px 12px; border-bottom:1px solid var(--ib-line); font-size:13px; } .agitems li:last-child { border-bottom:0; } .agsens { display:flex; gap:6px; align-items:center; margin-top:4px; color:var(--ib-danger); }
 .agrow { display:grid; grid-template-columns:150px 120px minmax(0,1fr) 140px 150px; gap:12px; padding:8px 12px; font-size:13px; border-bottom:1px solid var(--ib-line); } .agrow:last-child { border-bottom:0; }
 .agrow.agh { position:sticky; top:0; background:var(--ib-raised); font-weight:600; color:var(--ib-dim); } .wrapany { overflow-wrap:anywhere; }
 .dlgbox .actions .left { margin-right:auto; }
@@ -1637,15 +1638,25 @@ async function agentCheck() {
   agentAsking = true;
   const r = await api("/api/agent-pending");
   if (r.status !== 200 || !r.data.list.length) { agentAsking = false; return; }
-  const p = r.data.list[0], v = { who: p.who, what: p.what, where: p.where, from: p.from };
-  v.peer = p.peer || "";
-  const del = /-delete$/.test(p.op), write = ["set-value", "copy-value", "move-value"].includes(p.op), copy = p.op === "env-create", secretWrite = write;
-  const note = [t(del ? "agent.ask.del." + p.kind : write || copy ? "agent.ask.what." + p.kind : "agent.ask.what.change", v), p.op === "copy-value" ? t("agent.ask.copy", v) : p.op === "move-value" ? t("agent.ask.move", v) : "", secretWrite ? t("agent.ask.value") : "", p.nonlatin ? t("agent.ask.nonlatin") : "", ...(p.changes || []).map((c) => t("agent.ask.change", { field: t("agent.ask.field." + c.field), old: c.old || t("agent.ask.none"), new: c.new || t("agent.ask.none") })), del ? t("agent.ask.recycle") : "", t("agent.ask.who", v), v.peer ? t("agent.ask.peer", v) : ""].filter(Boolean).join(" ");
-  const title = del ? t("agent.ask.title.delete", v) : copy ? t("agent.ask.title.envcopy", v) : write ? t("agent.ask.title", v) : t("agent.ask.title.change", v);
+  const p = r.data.list[0], q = (s) => t("agent.batch.q", { s });
   let decided = false;
-  confirmBox(title, note, t("agent.ask.allow"), { cancelText: t("agent.ask.deny"),
+  confirmBox(t("agent.batch.title", { who: p.who, title: p.title }), "", t("agent.batch.apply"), { cancelText: t("agent.batch.reject"),
     onOk: async () => { const x = await api("/api/agent-decide", { id: p.id, allow: true }); if (x.status === 200) { decided = true; return true; } if (x.data && x.data.code === "agent_gone") decided = true; return srv(x.data); },
     onClose: async () => { if (!decided) { decided = true; await api("/api/agent-decide", { id: p.id, allow: false }); } agentAsking = false; setTimeout(agentCheck, 200); if (agentRedraw) agentRedraw(); } });
+  const box = confirmLayer.box, err = box.querySelector(".err"); box.classList.add("agent");
+  // the whole batch: every change by names and scopes (never a value), what it changes, and why it needs a close look
+  box.insertBefore(el("div", "note", [t("agent.batch.count", { n: p.items.length }), t("agent.ask.who", { who: p.who }), p.peer ? t("agent.ask.peer", { peer: p.peer }) : "", p.nonlatin ? t("agent.ask.nonlatin") : ""].filter(Boolean).join(" ")), err);
+  const ul = el("ul", "agitems");
+  p.items.forEach((it, i) => {
+    const li = el("li"), line = el("div", "agitem"); line.append(el("b", "mono", (i + 1) + ". " + it.op), document.createTextNode(" "), el("span", "mono wrapany", q(it.target)));
+    li.append(line);
+    if (it.what) li.append(el("div", "dim wrapany", [q(it.what), it.where ? q(it.where) : "", it.from ? "← " + q(it.from) : ""].filter(Boolean).join(" ")));
+    (it.changes || []).forEach((c) => li.append(el("div", "dim wrapany", t("agent.ask.change", { field: t("agent.ask.field." + c.field), old: c.old || t("agent.ask.none"), new: c.new || t("agent.ask.none") }))));
+    if ((it.sens || []).length) { const s = el("div", "agsens"); s.append(icon("alert"), document.createTextNode(it.sens.map((x) => t("agent.reason." + x)).join("; "))); li.append(s); }
+    if (it.nonlatin) li.append(el("div", "dim", t("agent.ask.nonlatin")));
+    ul.append(li);
+  });
+  box.insertBefore(ul, err);
 }
 if (window.icevaultOn) window.icevaultOn("agent-pending", (d) => { if (d && d.count) agentCheck(); });
 if (window.icevaultOn) window.icevaultOn("agent-journal", () => { if (agentRedraw) agentRedraw(); });

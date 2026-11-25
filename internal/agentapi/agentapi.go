@@ -32,11 +32,14 @@ const (
 
 // States of a request that waits for the person at the window.
 const (
-	StatePending = "pending"
-	StateAllowed = "allowed"
-	StateDenied  = "denied"
-	StateExpired = "expired"
-	StateFailed  = "failed"
+	StatePending  = "pending"
+	StateAllowed  = "allowed"
+	StateApplied  = "applied"  // a batch that was applied
+	StateRejected = "rejected" // a batch the person rejected
+	StateOpen     = "open"     // a batch that is still being made
+	StateDenied   = "denied"
+	StateExpired  = "expired"
+	StateFailed   = "failed"
 )
 
 // Request is one line the client sends.

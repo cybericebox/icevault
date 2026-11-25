@@ -268,6 +268,23 @@ func (v *Vault) Path() string { return v.path }
 func (v *Vault) Format() Format { return v.format }
 
 // Close forgets the database and overwrites the key material it can reach. Go cannot promise more: the garbage collector may have copied it.
+// AdoptContent makes the content of o (a copy of this vault, opened with the same key and changed) the content of v and saves it in one write; the file
+// is replaced atomically, so it is either all there or not at all. When the save fails v is as it was. o is left empty (closed).
+func (v *Vault) AdoptContent(o *Vault) error {
+	if v.db == nil || o == nil || o.db == nil {
+		return errors.New("the vault is closed")
+	}
+	old := v.db
+	v.db = o.db
+	if err := v.Save(); err != nil {
+		v.db = old
+		return err
+	}
+	o.db = nil // it must not wipe the credentials that v holds now
+	wipeCreds(old.Credentials)
+	return nil
+}
+
 func (v *Vault) Close() {
 	if v.db == nil {
 		return

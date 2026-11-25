@@ -185,6 +185,24 @@ func (m *modelCore) KeyPlaces(key string) []desktop.KeyPlace {
 	return m.mp.KeyPlaces(key)
 }
 
+func (m *modelCore) BatchScratch() (desktop.Core, func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return nil, nil, errLocked
+	}
+	return m.mp.BatchScratch()
+}
+
+func (m *modelCore) BatchAdopt(scratch desktop.Core) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return errLocked
+	}
+	return m.mp.BatchAdopt(scratch)
+}
+
 func (m *modelCore) Write(op string, args map[string]any) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

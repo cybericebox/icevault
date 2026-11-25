@@ -17,11 +17,11 @@ import (
 // prints the answer as JSON. It never asks for a password, never opens a vault and never unlocks anything: with the window locked or closed there is no
 // socket and the answer is {"ok":false,"code":"no_window"}.
 //
-// A value is never an argument of the command: "value_file" (a path) or "value_stdin" (true) in the JSON says where the value is read from, and it goes
+// A batch of changes is made with batch-begin, write ops that take "batch":ID, and batch-submit, which waits for the window. A value is never an argument of the command: "value_file" (a path) or "value_stdin" (true) in the JSON says where the value is read from, and it goes
 // to the window in the request only. No answer carries a secret value.
 
 const (
-	agentWaitDefault = 150 // seconds; the window drops a request that waits longer than its own limit (two minutes)
+	agentWaitDefault = 600 // seconds; the window drops a batch that waits longer than its own limit (ten minutes)
 	agentPoll        = 600 * time.Millisecond
 	agentCall        = 15 * time.Second
 	agentValueMax    = 64 << 10
@@ -87,7 +87,7 @@ func cmdAgent(args []string, e *Env) error {
 	switch {
 	case !resp.OK:
 		return exitCode(1)
-	case resp.State == agentapi.StateDenied || resp.State == agentapi.StateExpired || resp.State == agentapi.StateFailed:
+	case resp.State == agentapi.StateDenied || resp.State == agentapi.StateRejected || resp.State == agentapi.StateExpired || resp.State == agentapi.StateFailed:
 		return exitCode(exitAgentNotDone)
 	case resp.State == agentapi.StatePending && !noWait:
 		return exitCode(exitAgentNotDone)
@@ -101,7 +101,7 @@ func agentWait(dir, id, as string, limit time.Duration) agentapi.Response {
 	resp := agentapi.Response{OK: true, State: agentapi.StatePending, ID: id}
 	for time.Now().Before(end) {
 		time.Sleep(agentPoll)
-		r, err := agentapi.Call(dir, agentapi.Request{Op: "status", Args: map[string]any{"id": id}, Client: as}, agentCall)
+		r, err := agentapi.Call(dir, agentapi.Request{Op: "batch-status", Args: map[string]any{"id": id}, Client: as}, agentCall)
 		if err != nil { // the window was locked or closed meanwhile: nothing can be allowed any more
 			return agentapi.Response{OK: true, State: agentapi.StateDenied, ID: id, Code: "no_window"}
 		}

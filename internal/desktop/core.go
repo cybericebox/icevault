@@ -118,3 +118,12 @@ type VarProbe interface {
 	// KeyPlaces lists every place a variable of that key lives, in every scope and every group.
 	KeyPlaces(key string) []KeyPlace
 }
+
+// BatchRunner is a Core that can work on a copy of the vault: the agent API validates a batch of changes on the copy and, when every item passes, makes the
+// copy the content of the vault in one save (all or nothing).
+type BatchRunner interface {
+	// BatchScratch makes a copy of the vault in a temporary folder and a Core on it; release removes it.
+	BatchScratch() (scratch Core, release func(), err error)
+	// BatchAdopt makes the content of the scratch Core the content of the vault, in one save.
+	BatchAdopt(scratch Core) error
+}

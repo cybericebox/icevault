@@ -30,9 +30,11 @@ const EventAgentJournal = "agent-journal"
 
 // Limits of the agent API.
 const (
-	AgentTTLDefault = 2 * time.Minute  // a request that waits for the person is dropped after this
+	AgentTTLDefault = 10 * time.Minute // a batch that waits for the person (or is still being made) is dropped after this
 	AgentGapDefault = 10 * time.Second // the least time between two new requests that wait, from the same client
-	agentMaxPending = 4
+	agentMaxPending = 1                // one submitted batch waits at a time
+	agentMaxDrafts  = 4
+	agentMaxItems   = 50
 	agentMaxConns   = 8
 	agentRingSize   = 300
 	agentLogLimit   = 512 << 10
@@ -49,25 +51,47 @@ type AgentEntry struct {
 	Result string `json:"result"`
 }
 
-// agentReq is a request that waits for the person: what it changes, where, who asked, and the closure that does it after Allow. The value it carries lives
-// only in the closure.
-// agentChange is one line of what a relink changes: the field (a word the page translates) and the old and the new names.
+// agentChange is one line of what an item changes: the field (a word the page translates) and the old and the new names.
 type agentChange struct {
 	Field string `json:"field"`
 	Old   string `json:"old"`
 	New   string `json:"new"`
 }
 
-type agentReq struct {
-	changes                                         []agentChange
-	id, op, kind, what, where, from, who, peer, key string
-	asked                                           time.Time
-	apply                                           func(c Core) error
-	stop                                            func()
+// agentItem is one change of a batch: the op and its arguments (the arguments may hold a secret value: they live only in memory and are never answered,
+// shown or logged) and what the window shows of it: names, what changes and why it needs a close look.
+type agentItem struct {
+	op                string
+	args              map[string]any
+	target            string
+	what, where, from string
+	changes           []agentChange
+	sens              []string
+	nonlatin          bool
+}
+
+// agentBatch is a batch: the changes of an agent, validated one by one on a copy of the vault, sent to the window as a whole.
+type agentBatch struct {
+	id, title, who, peer, key string
+	created, asked            time.Time
+	items                     []*agentItem
+	scratch                   Core // the copy the items were validated on (drafts only)
+	release                   func()
+	stop                      func()
+}
+
+// agentResult is what became of an item when the batch was applied.
+type agentResult struct {
+	Index  int    `json:"index"`
+	Op     string `json:"op"`
+	Target string `json:"target"`
+	Result string `json:"result"`
 }
 
 type agentDone struct {
 	state, code string
+	title       string
+	results     []agentResult
 }
 
 type agentHub struct {
@@ -80,7 +104,8 @@ type agentHub struct {
 	conns  map[net.Conn]struct{}
 	gap    time.Duration
 	last   map[string]time.Time
-	pend   map[string]*agentReq
+	drafts map[string]*agentBatch
+	pend   map[string]*agentBatch
 	ord    []string
 	done   map[string]agentDone
 	dord   []string
@@ -96,7 +121,7 @@ func newAgentHub(a *App, dir string, ttl, gap time.Duration) *agentHub {
 	if ttl <= 0 {
 		ttl = AgentTTLDefault
 	}
-	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, pend: map[string]*agentReq{}, done: map[string]agentDone{}}
+	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, drafts: map[string]*agentBatch{}, pend: map[string]*agentBatch{}, done: map[string]agentDone{}}
 }
 
 // hasNonLatin says whether a name has a letter that is not Latin (a Cyrillic or Greek letter can look like a Latin one).
@@ -195,9 +220,11 @@ func (h *agentHub) stop() {
 	h.ln = nil
 	conns := h.conns
 	h.conns = nil
-	pend := h.pend
-	h.pend, h.ord, h.done, h.dord = map[string]*agentReq{}, nil, map[string]agentDone{}, nil
+	pend, drafts := h.pend, h.drafts
+	h.pend, h.drafts, h.ord, h.done, h.dord = map[string]*agentBatch{}, map[string]*agentBatch{}, nil, map[string]agentDone{}, nil
 	h.mu.Unlock()
+	h.a.ops.Lock() // what runs on a copy of a batch ends first
+	defer h.a.ops.Unlock()
 	for c := range conns { // what a client is in the middle of gets no answer: the vault is locked
 		_ = c.Close()
 	}
@@ -206,12 +233,12 @@ func (h *agentHub) stop() {
 		_ = os.Remove(agentapi.SocketPath(h.dir))
 		h.a.say("the agent API is off")
 	}
-	for _, p := range pend {
-		if p.stop != nil {
-			p.stop()
-		}
-		p.apply = nil
-		h.log(p.op, p.what+" in "+p.where, p.who, "dropped: locked")
+	for _, b := range drafts {
+		b.drop()
+	}
+	for _, b := range pend {
+		b.drop()
+		h.log("batch", b.title, b.who, "dropped: locked")
 	}
 	if len(pend) > 0 {
 		h.notifyPending()
@@ -321,168 +348,6 @@ func (h *agentHub) readTail() []AgentEntry {
 		out = out[len(out)-agentRingSize:]
 	}
 	return out
-}
-
-// ---- requests that wait for the person
-
-var (
-	errAgentTooMany = errors.New("too many requests are waiting")
-	errAgentRate    = errors.New("requests wait too often")
-)
-
-// enqueue puts a request in the queue and tells the page. It answers the id.
-func (h *agentHub) enqueue(p *agentReq) (string, error) {
-	h.mu.Lock()
-	if len(h.pend) >= agentMaxPending {
-		h.mu.Unlock()
-		return "", errAgentTooMany
-	}
-	now := time.Now()
-	if h.gap > 0 { // a client that asks again at once is not asked about: the person is not worn down with prompts
-		if t, found := h.last[p.key]; found && now.Sub(t) < h.gap {
-			h.mu.Unlock()
-			return "", errAgentRate
-		}
-		h.last[p.key] = now
-	}
-	p.id, p.asked = newAgentID(), now
-	h.pend[p.id] = p
-	h.ord = append(h.ord, p.id)
-	h.mu.Unlock()
-	id := p.id
-	p.stop = h.a.o.AfterFunc(h.ttl, func() { h.expire(id) })
-	h.notifyPending()
-	return id, nil
-}
-
-func (h *agentHub) take(id string) *agentReq {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	p := h.pend[id]
-	if p == nil {
-		return nil
-	}
-	delete(h.pend, id)
-	for i, x := range h.ord {
-		if x == id {
-			h.ord = append(h.ord[:i:i], h.ord[i+1:]...)
-			break
-		}
-	}
-	return p
-}
-
-func (h *agentHub) finish(id, state, code string) {
-	h.mu.Lock()
-	h.done[id] = agentDone{state, code}
-	h.dord = append(h.dord, id)
-	if len(h.dord) > 100 {
-		delete(h.done, h.dord[0])
-		h.dord = h.dord[1:]
-	}
-	h.mu.Unlock()
-}
-
-func (h *agentHub) expire(id string) {
-	p := h.take(id)
-	if p == nil {
-		return
-	}
-	p.apply = nil
-	h.finish(id, agentapi.StateExpired, "")
-	h.log(p.op, p.what+" in "+p.where, p.who, agentapi.StateExpired)
-	h.notifyPending()
-}
-
-func (h *agentHub) pendingCount() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.pend)
-}
-
-func (h *agentHub) notifyPending() {
-	if h.a.o.Notify != nil {
-		h.a.o.Notify(EventAgentPending, map[string]any{"count": h.pendingCount()})
-	}
-}
-
-// ---- what the window's page calls
-
-// AgentPending lists the requests that wait for the person: what, where, who asked, and when it is dropped. Never a value.
-func (a *App) AgentPending() Response {
-	if _, e := a.store(); e != nil {
-		return answer(e)
-	}
-	list := []map[string]any{}
-	if h := a.agent; h != nil {
-		h.mu.Lock()
-		for _, id := range h.ord {
-			p := h.pend[id]
-			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer, "changes": p.changes, "nonlatin": hasNonLatin(p.what + p.where + p.from),
-				"asked": p.asked.UTC().Format(time.RFC3339), "expires": p.asked.Add(h.ttl).UTC().Format(time.RFC3339)})
-		}
-		h.mu.Unlock()
-	}
-	return ok(map[string]any{"list": list})
-}
-
-// AgentDecide is the person's answer to a request: allow runs it (the same write path as the window's own), anything else drops it.
-func (a *App) AgentDecide(id string, allow bool) Response {
-	c, e := a.store()
-	if e != nil {
-		return answer(e)
-	}
-	h := a.agent
-	if h == nil {
-		return fail(404, "agent_gone")
-	}
-	p := h.take(id)
-	if p == nil {
-		return fail(404, "agent_gone")
-	}
-	if p.stop != nil {
-		p.stop()
-	}
-	target := p.what + " in " + p.where
-	if !allow {
-		p.apply = nil
-		h.finish(id, agentapi.StateDenied, "")
-		h.log(p.op, target, p.who, agentapi.StateDenied)
-		h.notifyPending()
-		return ok(map[string]any{"ok": true})
-	}
-	a.ops.Lock()
-	if c2, e2 := a.store(); e2 != nil || c2 != c { // locked while the person was deciding
-		a.ops.Unlock()
-		p.apply = nil
-		h.finish(id, agentapi.StateFailed, "locked")
-		return fail(404, "agent_gone")
-	}
-	a.mu.Lock()
-	mode := a.mode
-	a.mu.Unlock()
-	if mode != modeEdit { // as for the agent's own writes: nothing is written in view mode, whatever the person answered earlier
-		a.ops.Unlock()
-		p.apply = nil
-		h.finish(id, agentapi.StateFailed, "view_mode")
-		h.log(p.op, target, p.who, agentapi.StateFailed+": view_mode")
-		h.notifyPending()
-		return fail(403, "view_mode")
-	}
-	_, _ = a.syncDisk(false, true)
-	err := p.apply(c)
-	a.ops.Unlock()
-	p.apply = nil
-	h.notifyPending()
-	if err != nil {
-		code, _ := agentCode(err)
-		h.finish(id, agentapi.StateFailed, code)
-		h.log(p.op, target, p.who, agentapi.StateFailed+": "+code)
-		return answer(err)
-	}
-	h.finish(id, agentapi.StateAllowed, "")
-	h.log(p.op, target, p.who, agentapi.StateAllowed)
-	return ok(map[string]any{"ok": true})
 }
 
 // AgentJournal answers the journal (newest first) and whether the socket is served.
