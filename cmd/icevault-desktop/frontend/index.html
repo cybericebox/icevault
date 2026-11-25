@@ -521,7 +521,7 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mcheck { display:grid; grid-template-columns:20px max-content 1fr; align-items:center; gap:8px; min-height:36px; padding:0 8px; border-radius:var(--ib-r); cursor:pointer; }
 .mcheck:hover { background:var(--ib-hover); }
 .mcheck input { width:16px; height:16px; margin:0; accent-color:var(--ib-action); }
-.mchecks.flush .mcheck { padding:0; grid-template-columns:16px 1fr; }
+.mchecks.flush .mcheck { display:flex; align-items:center; gap:8px; padding:0; margin:0; font-weight:400; }
 .mchecks.flush .mcheck:hover { background:none; }
 .broken { font-size:13px; font-weight:500; color:var(--ib-danger); }
 .mtable td:has(.ksub), .mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
