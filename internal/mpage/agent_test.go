@@ -776,3 +776,14 @@ func TestAgentJournalFileIsCleanedWhenRead(t *testing.T) {
 		t.Fatalf("the journal panel got the file as it was: %d bytes", len(raw))
 	}
 }
+
+func TestAgentRenameCannotShadowASecretKey(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "visibility": "plain"})
+	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "new_key": "COOKIE_KEY"}, "shadows_secret")
+	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "ROOMY", "new_key": "ROOMY_TWO"})
+	// a secret may take any name; a plain one may take a plain name
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "visibility": "secret"})
+	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "new_key": "SECRETIVE_TWO"})
+}

@@ -212,8 +212,12 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		}
 		return x.done(x.write("m-var", w))
 	case "var-rename":
-		if r := x.varRow(as(a, keyScope), as(a, keyKey)); r == nil || ab(r, "missing") {
+		r := x.varRow(as(a, keyScope), as(a, keyKey))
+		if r == nil || ab(r, "missing") {
 			return agentRefused("not_found", nil)
+		}
+		if nk := as(a, "new_key"); nk != "" && !isSecretRow(r) && x.secretKeyAnywhere(nk) { // a plain variable must not take the name of a secret one
+			return agentRefused("shadows_secret", nil)
 		}
 		return x.done(x.write("m-var", pick(a, keyScope, keyKey, "new_key")))
 	case "var-delete":
