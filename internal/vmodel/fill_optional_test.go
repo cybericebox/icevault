@@ -10,6 +10,9 @@ import (
 
 func TestFillMissingMakesAnOptionalConnectionWhoseRequiredWhenHolds(t *testing.T) {
 	desc := strings.Replace(string(example.DescriptionDeclaringKind()), "{name: BILLING_ACCOUNT, field: token, secret: true}", "{name: BILLING_ACCOUNT, field: token, secret: true, required-when: \"SIGNUP_MODE=invite\"}", 1)
+	if desc == string(example.DescriptionDeclaringKind()) {
+		t.Fatal("the example changed: the required-when was not added")
+	}
 	d, err := project.Parse([]byte(desc))
 	if err != nil {
 		t.Fatal(err)
@@ -44,5 +47,8 @@ func TestFillMissingMakesAnOptionalConnectionWhoseRequiredWhenHolds(t *testing.T
 	}
 	if errs := m.Check(); len(errs) > 0 {
 		t.Fatal(errs)
+	}
+	if again, _ := FillMissing(m, d, "prod", nil); len(again.Made)+len(again.Linked)+len(again.Added) != 0 {
+		t.Fatalf("a second run changes nothing: %+v", again)
 	}
 }

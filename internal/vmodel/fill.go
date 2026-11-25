@@ -275,6 +275,12 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 // window's "missing for deploy" uses), so fill-missing makes it like a connection that is not optional.
 func neededWhen(use *project.ConnectionUse, get func(string) string) bool {
 	for _, v := range use.Variables {
+		if v.Field == "" {
+			continue
+		}
+		if w, err := project.ParseWhen(v.When); v.When != "" && (err != nil || w == nil || !w.Holds(get)) {
+			continue // a variable that is not used here needs nothing
+		}
 		if cond, err := project.ParseWhen(v.RequiredWhen); err == nil && cond != nil && cond.Holds(get) {
 			return true
 		}
