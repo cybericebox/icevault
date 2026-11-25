@@ -79,3 +79,15 @@ type Clipboard interface {
 	Set(text string) error
 	Get() (string, error)
 }
+
+// VisDefaulter is a Core that knows the visibility a new variable of that name gets (the project description, else the name rule): a variable that is
+// secret by that rule is never made plain through the agent API.
+type VisDefaulter interface {
+	DefaultVisibility(key string) string
+}
+
+// SecretCounter is a Core that can say whether an environment holds a filled secret or a file anywhere, also in the groups of a site kind that no site
+// shows (the answer of "nav" has only the group of the kind in use).
+type SecretCounter interface {
+	EnvHoldsSecrets(env string) bool
+}

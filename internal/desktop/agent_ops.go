@@ -31,6 +31,7 @@ const (
 const (
 	keyKey    = "key"
 	keyScope  = "scope"
+	visPlain  = "plain"
 	opStatus  = "status"
 	modeEdit  = "edit"
 	keyEnv    = "env"
@@ -44,6 +45,7 @@ type agentCtx struct {
 	args map[string]any
 	who  string
 	peer string
+	pkey string // the client the rate limit counts: the program that started the command
 	nav  map[string]any
 }
 
@@ -119,7 +121,11 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 	if req.Op != opStatus && req.Op != "help" {
 		_, _ = a.syncDisk(false, true)
 	}
-	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe()}
+	pk := peer.PPID
+	if pk <= 0 {
+		pk = peer.PID
+	}
+	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(pk)}
 	resp := x.run(req.Op)
 	if req.Op != opStatus { // a client polls status: that is not an action
 		result := "ok"
@@ -204,6 +210,9 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		w := pick(a, keyScope, keyKey, "visibility", "description", "expires")
 		if x.secretKeyAnywhere(as(a, keyKey)) { // a plain variable of that name would shadow a secret one: it is made secret, and its value waits for Allow
 			if v := as(a, "visibility"); v != "" && rank(v) < 1 {
+				if x.secretByModel(as(a, keyKey)) {
+					return agentRefused("no_lowering", nil)
+				}
 				return agentRefused("shadows_secret", nil)
 			}
 			if as(a, "visibility") == "" {
@@ -212,14 +221,7 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		}
 		return x.done(x.write("m-var", w))
 	case "var-rename":
-		r := x.varRow(as(a, keyScope), as(a, keyKey))
-		if r == nil || ab(r, "missing") {
-			return agentRefused("not_found", nil)
-		}
-		if nk := as(a, "new_key"); nk != "" && !isSecretRow(r) && x.secretKeyAnywhere(nk) { // a plain variable must not take the name of a secret one
-			return agentRefused("shadows_secret", nil)
-		}
-		return x.done(x.write("m-var", pick(a, keyScope, keyKey, "new_key")))
+		return x.varRename()
 	case "var-delete":
 		return x.varDelete()
 	case "var-meta":
@@ -288,6 +290,15 @@ func (x *agentCtx) run(op string) agentapi.Response {
 		} else {
 			w["title"] = as(a, "new_title")
 			copyIf(w, a, "expires")
+			if nt := as(a, "new_title"); nt != "" && nt != as(a, "other") && as(o, "state") == stSet { // a filled secret is renamed only after Allow
+				uuid, title := as(o, keyUUID), as(a, "other")
+				return x.queue(op, "other", title+" -> "+nt, "", "", func(nx *agentCtx) error {
+					if o2 := nx.other(title); o2 == nil || as(o2, keyUUID) != uuid {
+						return errGone
+					}
+					return nx.write("m-other", w)
+				})
+			}
 		}
 		return x.done(x.write("m-other", w))
 	}
@@ -345,13 +356,22 @@ func (x *agentCtx) writeAsk(coreOp string, w map[string]any, op, kind, what, whe
 	})
 }
 
-func isSecretRow(r map[string]any) bool { return as(r, "visibility") != "plain" || ab(r, "secret") }
+func isSecretRow(r map[string]any) bool { return as(r, "visibility") != visPlain || ab(r, "secret") }
 
 func filledRow(r map[string]any) bool { return as(r, "state") == stSet }
 
 // secretKeyAnywhere says whether a variable of that name is secret anywhere in the vault (shared, General, a site, a product, or by the description of the
 // project): a plain variable of the same name must not shadow it.
+// secretByModel says whether the project (or the name rule) makes a variable of that name secret.
+func (x *agentCtx) secretByModel(key string) bool {
+	vd, can := x.c.(VisDefaulter)
+	return can && vd.DefaultVisibility(key) != visPlain
+}
+
 func (x *agentCtx) secretKeyAnywhere(key string) bool {
+	if x.secretByModel(key) {
+		return true
+	}
 	has := func(rows []map[string]any) bool {
 		for _, r := range rows {
 			if as(r, keyKey) == key && isSecretRow(r) {
@@ -381,6 +401,33 @@ func (x *agentCtx) secretKeyAnywhere(key string) bool {
 	return false
 }
 
+// varRename renames a variable. A plain one never takes the name of a secret one; a secret or filled one is renamed only after Allow (a rename away and a
+// new plain variable of the old name would be a way round the rules).
+func (x *agentCtx) varRename() agentapi.Response {
+	scope, key, nk := as(x.args, keyScope), as(x.args, keyKey), as(x.args, "new_key")
+	r := x.varRow(scope, key)
+	if r == nil || ab(r, "missing") {
+		return agentRefused("not_found", nil)
+	}
+	if nk != "" && !isSecretRow(r) && x.secretKeyAnywhere(nk) {
+		return agentRefused("shadows_secret", nil)
+	}
+	w := map[string]any{keyScope: scope, keyKey: key, "new_key": nk}
+	if !isSecretRow(r) && !filledRow(r) {
+		return x.done(x.write("m-var", w))
+	}
+	return x.queue("var-rename", kindVar, key+" -> "+nk, scope, "", func(nx *agentCtx) error {
+		r2 := nx.varRow(scope, key)
+		if r2 == nil {
+			return errGone
+		}
+		if nk != "" && !isSecretRow(r2) && nx.secretKeyAnywhere(nk) {
+			return &Error{Status: 409, Code: "shadows_secret"}
+		}
+		return nx.write("m-var", w)
+	})
+}
+
 func (x *agentCtx) varDelete() agentapi.Response {
 	scope, key := as(x.args, keyScope), as(x.args, keyKey)
 	r := x.varRow(scope, key)
@@ -403,7 +450,7 @@ func (x *agentCtx) varDelete() agentapi.Response {
 
 func rank(vis string) int {
 	switch vis {
-	case "plain":
+	case visPlain:
 		return 0
 	case "secret":
 		return 1
@@ -604,7 +651,7 @@ func (t *agentTarget) label() string {
 // what it was about (nav) and refuses with "gone" when that is not the same thing any more.
 func (x *agentCtx) queue(op, kind, what, where, from string, fn func(nx *agentCtx) error) agentapi.Response {
 	h := x.h
-	id, err := h.enqueue(&agentReq{op: op, kind: kind, what: clean(what, 120), where: clean(where, 200), from: clean(from, 200), who: x.who, peer: clean(x.peer, 200),
+	id, err := h.enqueue(&agentReq{op: op, kind: kind, what: clean(what, 120), where: clean(where, 200), from: clean(from, 200), who: x.who, peer: clean(x.peer, 200), key: x.pkey,
 		apply: func(c Core) error {
 			nx := &agentCtx{h: h, c: c}
 			if err := nx.loadNav(); err != nil {
@@ -612,6 +659,9 @@ func (x *agentCtx) queue(op, kind, what, where, from string, fn func(nx *agentCt
 			}
 			return fn(nx)
 		}})
+	if errors.Is(err, errAgentRate) {
+		return agentRefused("rate_limited", nil)
+	}
 	if err != nil {
 		return agentRefused("too_many_pending", nil)
 	}
@@ -767,7 +817,7 @@ func (x *agentCtx) envDelete() agentapi.Response {
 func hasSecrets(e map[string]any) bool {
 	secret := func(rows []map[string]any) bool {
 		for _, r := range rows {
-			if as(r, "state") == stSet && (as(r, "visibility") != "plain" || ab(r, "secret")) {
+			if as(r, "state") == stSet && (as(r, "visibility") != visPlain || ab(r, "secret")) {
 				return true
 			}
 		}
@@ -815,7 +865,11 @@ func (x *agentCtx) envCreate() agentapi.Response {
 		return agentRefused("no_env", map[string]any{keyEnv: from})
 	}
 	w[keyAction], w["from"] = "copy", from
-	if !hasSecrets(src) {
+	secrets := hasSecrets(src)
+	if sc, can := x.c.(SecretCounter); can { // the core also sees the groups of site kinds that no site shows
+		secrets = secrets || sc.EnvHoldsSecrets(from)
+	}
+	if !secrets {
 		return x.done(x.write("m-env", w))
 	}
 	saved := envPrint(src)
@@ -897,6 +951,13 @@ func (x *agentCtx) siteOp(op string) agentapi.Response {
 		}
 	}
 	if op == "site-create" {
+		if e := x.env(as(a, keyEnv)); e != nil { // the core links every product that has no site to a new site: that changes what those products run with
+			for _, p := range alist(e, "products") {
+				if as(p, "site") == "" {
+					return x.queue("site-create", "site", as(a, keyName), as(a, keyEnv), "", func(nx *agentCtx) error { return nx.write("m-site", w) })
+				}
+			}
+		}
 		return x.done(x.write("m-site", w))
 	}
 	cur := x.thing(as(a, keyEnv), "sites", as(a, keyName))
@@ -1063,7 +1124,7 @@ func varOut(scope string, r map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
-	if as(r, "visibility") == "plain" && !ab(r, "secret") && as(r, "state") == stSet {
+	if as(r, "visibility") == visPlain && !ab(r, "secret") && as(r, "state") == stSet {
 		if v, isStr := r["value"].(string); isStr {
 			out["value"] = v
 		}

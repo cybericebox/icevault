@@ -30,7 +30,8 @@ const EventAgentJournal = "agent-journal"
 
 // Limits of the agent API.
 const (
-	AgentTTLDefault = 2 * time.Minute // a request that waits for the person is dropped after this
+	AgentTTLDefault = 2 * time.Minute  // a request that waits for the person is dropped after this
+	AgentGapDefault = 10 * time.Second // the least time between two new requests that wait, from the same client
 	agentMaxPending = 4
 	agentMaxConns   = 8
 	agentRingSize   = 300
@@ -51,10 +52,10 @@ type AgentEntry struct {
 // agentReq is a request that waits for the person: what it changes, where, who asked, and the closure that does it after Allow. The value it carries lives
 // only in the closure.
 type agentReq struct {
-	id, op, kind, what, where, from, who, peer string
-	asked                                      time.Time
-	apply                                      func(c Core) error
-	stop                                       func()
+	id, op, kind, what, where, from, who, peer, key string
+	asked                                           time.Time
+	apply                                           func(c Core) error
+	stop                                            func()
 }
 
 type agentDone struct {
@@ -69,6 +70,8 @@ type agentHub struct {
 	ln     net.Listener
 	err    string // why the socket is not served ("" when it is or when it is simply not up)
 	conns  map[net.Conn]struct{}
+	gap    time.Duration
+	last   map[string]time.Time
 	pend   map[string]*agentReq
 	ord    []string
 	done   map[string]agentDone
@@ -78,11 +81,14 @@ type agentHub struct {
 	logMu  sync.Mutex
 }
 
-func newAgentHub(a *App, dir string, ttl time.Duration) *agentHub {
+func newAgentHub(a *App, dir string, ttl, gap time.Duration) *agentHub {
+	if gap == 0 {
+		gap = AgentGapDefault
+	}
 	if ttl <= 0 {
 		ttl = AgentTTLDefault
 	}
-	return &agentHub{a: a, dir: dir, ttl: ttl, pend: map[string]*agentReq{}, done: map[string]agentDone{}}
+	return &agentHub{a: a, dir: dir, ttl: ttl, gap: gap, last: map[string]time.Time{}, pend: map[string]*agentReq{}, done: map[string]agentDone{}}
 }
 
 // clean makes a name safe for a log line and a dialog: no control characters, at most n runes.
@@ -301,7 +307,10 @@ func (h *agentHub) readTail() []AgentEntry {
 
 // ---- requests that wait for the person
 
-var errAgentTooMany = errors.New("too many requests are waiting")
+var (
+	errAgentTooMany = errors.New("too many requests are waiting")
+	errAgentRate    = errors.New("requests wait too often")
+)
 
 // enqueue puts a request in the queue and tells the page. It answers the id.
 func (h *agentHub) enqueue(p *agentReq) (string, error) {
@@ -310,7 +319,15 @@ func (h *agentHub) enqueue(p *agentReq) (string, error) {
 		h.mu.Unlock()
 		return "", errAgentTooMany
 	}
-	p.id, p.asked = newAgentID(), time.Now()
+	now := time.Now()
+	if h.gap > 0 { // a client that asks again at once is not asked about: the person is not worn down with prompts
+		if t, found := h.last[p.key]; found && now.Sub(t) < h.gap {
+			h.mu.Unlock()
+			return "", errAgentRate
+		}
+		h.last[p.key] = now
+	}
+	p.id, p.asked = newAgentID(), now
 	h.pend[p.id] = p
 	h.ord = append(h.ord, p.id)
 	h.mu.Unlock()

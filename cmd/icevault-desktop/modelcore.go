@@ -136,6 +136,22 @@ func (m *modelCore) Read(op string, args map[string]any) (any, error) {
 	return m.mp.Read(op, args)
 }
 
+// DefaultVisibility and EnvHoldsSecrets are the optional parts of desktop.Core the agent API uses (desktop.VisDefaulter, desktop.SecretCounter).
+func (m *modelCore) DefaultVisibility(key string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return "secret"
+	}
+	return m.mp.DefaultVisibility(key)
+}
+
+func (m *modelCore) EnvHoldsSecrets(env string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.EnvHoldsSecrets(env)
+}
+
 func (m *modelCore) Write(op string, args map[string]any) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

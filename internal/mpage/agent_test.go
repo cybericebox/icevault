@@ -12,6 +12,7 @@ import (
 
 	"github.com/cybericebox/icevault/internal/agentapi"
 	"github.com/cybericebox/icevault/internal/desktop"
+	"github.com/cybericebox/icevault/internal/vmodel"
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
@@ -41,7 +42,9 @@ type agentRig struct {
 	seen   []string // every answer of the API, as text
 }
 
-func newRig(t *testing.T, ttl time.Duration) *agentRig {
+func newRig(t *testing.T, ttl time.Duration) *agentRig { return newRigGap(t, ttl, -1) }
+
+func newRigGap(t *testing.T, ttl, gap time.Duration) *agentRig {
 	t.Helper()
 	c, v := newCore(t)
 	base, err := os.MkdirTemp("/tmp", "ivag")
@@ -50,7 +53,7 @@ func newRig(t *testing.T, ttl time.Duration) *agentRig {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
 	r := &agentRig{t: t, core: c, v: v, dir: filepath.Join(base, agentapi.AppDirName)}
-	r.app = desktop.New(desktop.Options{Unlocker: coreUnlocker{lockCore{c}}, AgentDir: r.dir, AgentTTL: ttl, SyncEvery: -1,
+	r.app = desktop.New(desktop.Options{Unlocker: coreUnlocker{lockCore{c}}, AgentDir: r.dir, AgentTTL: ttl, AgentGap: gap, SyncEvery: -1,
 		Notify: func(event string, _ any) { r.events = append(r.events, event) }})
 	return r
 }
@@ -242,7 +245,7 @@ func TestAgentStructureOps(t *testing.T) {
 		t.Fatalf("plain value not set: %q", got)
 	}
 	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "description": "a label", "expires": "2099-01-02"})
-	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_2"})
+	r.allow("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_2"}) // it holds a value: it waits
 	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_3"}, "not_found")
 	st, _ := json.Marshal(r.ok("structure", nil).Data)
 	if !strings.Contains(string(st), "AGENT_NOTE_2") || !strings.Contains(string(st), "a label") || !strings.Contains(string(st), "plain text") || !strings.Contains(string(st), "2099-01-02") {
@@ -724,7 +727,7 @@ func TestAgentRelinkAndKindChangesWait(t *testing.T) {
 func TestAgentPlainVariableNeverShadowsASecretOne(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()
-	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "visibility": "plain"}, "shadows_secret")
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY", "visibility": "plain"}, "no_lowering") // a name the project rule makes secret
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "COOKIE_KEY"})
 	var vis string
 	for _, v := range r.core.Model().Env("prod").General {
@@ -786,4 +789,92 @@ func TestAgentRenameCannotShadowASecretKey(t *testing.T) {
 	// a secret may take any name; a plain one may take a plain name
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "visibility": "secret"})
 	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "SECRETIVE", "new_key": "SECRETIVE_TWO"})
+}
+
+func TestAgentRenameOfSecretOrFilledWaitsAndNeverShadows(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN", "visibility": "plain"})
+	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN", "new_key": "EMPTY_PLAIN_2"}) // plain and empty: at once
+	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "value": "text"})
+	p := r.call("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "new_key": "FILLED_PLAIN"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a filled variable was renamed at once: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "A_SECRET", "visibility": "secret"})
+	p = r.call("var-rename", map[string]any{"scope": "env/prod/general", "key": "A_SECRET", "new_key": "B_SECRET"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a secret was renamed at once: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, true)
+	// a plain variable never takes a secret name: a model-level one too (the name rule of the project)
+	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "EMPTY_PLAIN_2", "new_key": "DB_PASSWORD"}, "shadows_secret")
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "DB_PASSWORD", "visibility": "plain"}, "no_lowering")
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "DB_PASSWORD"})
+	for _, v := range r.core.Model().Env("prod").General {
+		if v.Key == "DB_PASSWORD" && v.Vis == "plain" {
+			t.Fatal("a variable with a secret name was made plain")
+		}
+	}
+}
+
+func TestAgentSiteCreateThatLinksProductsWaits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.allow("product-update", map[string]any{"env": "prod", "name": "portal", "site": ""})
+	p := r.call("site-create", map[string]any{"env": "prod", "name": "extra", "kind": "google-cluster", "connection": "GCP"})
+	if p.State != agentapi.StatePending || r.core.Model().Env("prod").Site("extra") != nil {
+		t.Fatalf("a site that would take over a product did not wait: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, true)
+	if r.core.Model().Env("prod").Site("extra") == nil {
+		t.Fatal("Allow did not create the site")
+	}
+	r.ok("site-create", map[string]any{"env": "prod", "name": "extra2", "kind": "google-cluster"}) // nothing to link now: at once
+}
+
+func TestAgentEnvCopySeesSecretsInGroupsNoSiteShows(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("env-create", map[string]any{"name": "subby"})
+	e := r.core.Model().Env("subby")
+	e.Products = append(e.Products, &vmodel.Product{Name: "hidden", Enabled: true, Sub: map[string][]*vmodel.Var{"compose": {{Key: "HID_KEY", Value: "hidden-value", Vis: vmodel.VisSecret}}}})
+	p := r.call("env-create", map[string]any{"name": "subby2", "from": "subby"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a copy with a secret in a group no site shows did not wait: %+v", p)
+	}
+}
+
+func TestAgentOtherRenameOfFilledSecretWaits(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	p := r.call("other-update", map[string]any{"other": "wifi", "new_title": "wifi 2"})
+	if p.State != agentapi.StatePending || r.core.Model().Other[0].Title != "wifi" {
+		t.Fatalf("%+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	r.ok("other-create", map[string]any{"title": "empty one"})
+	r.ok("other-update", map[string]any{"other": "empty one", "new_title": "empty two"}) // nothing filled: at once
+}
+
+func TestAgentNewRequestsThatWaitAreRateLimited(t *testing.T) {
+	r := newRigGap(t, 0, 400*time.Millisecond)
+	r.unlock()
+	if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "rate_limited")
+	time.Sleep(500 * time.Millisecond)
+	if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	r.noSecrets()
+}
+
+func TestAgentPlainNameTakenFromASecretRowIsRefused(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "ODDNAME", "visibility": "secret"})
+	r.refused("var-create", map[string]any{"scope": "shared", "key": "ODDNAME", "visibility": "plain"}, "shadows_secret")
 }

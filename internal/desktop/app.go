@@ -78,6 +78,8 @@ type Options struct {
 	AgentDir string
 	// AgentTTL is how long a request waits for the person's answer (0: AgentTTLDefault).
 	AgentTTL time.Duration
+	// AgentGap is the least time between two new requests that wait for the person, from one client (0: AgentGapDefault, below 0: no limit).
+	AgentGap time.Duration
 }
 
 // CLIInstaller is internal/cliinstall as the window needs it.
@@ -156,7 +158,7 @@ func New(o Options) *App {
 	}
 	a := &App{o: o, mode: "view", active: o.Clock(), unlockState: "idle", cur: Target{Unlocker: o.Unlocker, Binding: o.Binding, Confirm: o.Confirm}}
 	if o.AgentDir != "" {
-		a.agent = newAgentHub(a, o.AgentDir, o.AgentTTL)
+		a.agent = newAgentHub(a, o.AgentDir, o.AgentTTL, o.AgentGap)
 	}
 	if o.Vaults != nil && o.Vault != "" {
 		a.selectVault(o.Vault)

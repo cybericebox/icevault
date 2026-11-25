@@ -951,3 +951,42 @@ func (c *Core) resolvedText(pl vmodel.Place, key, value, vis string) (string, er
 	}
 	return pv.Text, nil
 }
+
+// DefaultVisibility is the visibility a new variable of that name gets.
+func (c *Core) DefaultVisibility(key string) string { return c.defaultVis(key) }
+
+// EnvHoldsSecrets says whether the environment holds a filled variable that is not plain (in any group, also the groups of site kinds no site shows) or
+// any kept file.
+func (c *Core) EnvHoldsSecrets(env string) bool {
+	e := c.m.Env(env)
+	if e == nil {
+		return false
+	}
+	held := func(vs []*vmodel.Var) bool {
+		for _, v := range vs {
+			if v.Value != "" && v.Vis != vmodel.VisPlain {
+				return true
+			}
+		}
+		return false
+	}
+	if held(e.General) || len(e.Files) > 0 {
+		return true
+	}
+	for _, s := range e.Sites {
+		if held(s.Vars) || len(s.Files) > 0 {
+			return true
+		}
+	}
+	for _, p := range e.Products {
+		if held(p.Vars) {
+			return true
+		}
+		for _, vs := range p.Sub {
+			if held(vs) {
+				return true
+			}
+		}
+	}
+	return false
+}
