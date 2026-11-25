@@ -1,8 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.8.3
+## Changes since v0.8.4
 
-- Kept files are shown once: a site's files only in its site card; the environment's Files section lists only the environment's own files and is hidden when it has none.
+<!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 ## What is here
 
