@@ -251,7 +251,7 @@ func compatEnv(e *Environment, d *project.Description, o CompatOptions, targets 
 			case "site.provider":
 				derived(x.Name, sk.Provider, join(base, GroupSites, site.Name, EntrySite)+"#"+x.Name, &Target{Site: site})
 			case "site.state-backend":
-				derived(x.Name, site.StateBackend, join(base, GroupSites, site.Name, EntrySite)+"#"+x.Name, &Target{Site: site})
+				derived(x.Name, site.Backend(), join(base, GroupSites, site.Name, EntrySite)+"#"+x.Name, &Target{Site: site})
 			}
 		}
 		isSite := func(h project.Home) bool { return h.Kind == project.HomeSite && h.SiteKind == site.Kind }

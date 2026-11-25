@@ -154,7 +154,9 @@ func (w *Writer) setDerived(t *vmodel.Target, value string) {
 		t.Product.Place = value
 		t.Product.Enabled = value != "none"
 	case t.Site != nil && t.Derived == derivedFrom(w.d, "site.state-backend"):
-		t.Site.StateBackend = value
+		if value != t.Site.Backend() { // the same word as the state connection gives is not pinned onto the site
+			t.Site.StateBackend = value
+		}
 	case t.Site != nil:
 		if k := w.d.SiteKindOf(value); k != "" && k != t.Site.Kind {
 			t.Site.Kind = k

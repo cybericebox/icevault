@@ -105,6 +105,20 @@ type Site struct {
 	Files        []*File
 }
 
+// Backend is the state backend word of the site: the word kept on it, else the kind of the state connection the site uses (a site whose Terraform
+// state is in an hcp connection keeps it in HCP), else "" (the project's default).
+func (s *Site) Backend() string {
+	switch {
+	case s == nil:
+		return ""
+	case s.StateBackend != "":
+		return s.StateBackend
+	case s.State != nil:
+		return s.State.Kind
+	}
+	return ""
+}
+
 // Product is what runs.
 type Product struct {
 	UUID    string

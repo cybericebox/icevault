@@ -349,8 +349,8 @@ func settingsOf(e *Environment, d *project.Description, committed map[string]str
 				case "site.provider":
 					s[x.Name] = sk.Provider
 				case "site.state-backend":
-					if site.StateBackend != "" {
-						s[x.Name] = site.StateBackend
+					if b := site.Backend(); b != "" {
+						s[x.Name] = b
 					}
 				}
 			}
