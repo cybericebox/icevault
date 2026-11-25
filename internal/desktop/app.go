@@ -582,7 +582,7 @@ func (a *App) Read(op string, args map[string]any) Response {
 		args = map[string]any{}
 	}
 	switch op {
-	case "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value", "migrate-plan":
+	case "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value":
 	default:
 		return fail(404, "not_found")
 	}
@@ -721,7 +721,7 @@ var writeOps = func() map[string]bool {
 		"create-group", "rename-group", "generate", "generate-seal", "scope", "make-global", "move-entry", "create-site", "add-site", "pull-globals",
 		"apply-shared", "group-sites", "item-sites", "site-type", "duplicates", "duplicates-apply", "create-entry", "retire-entry", "restore-entry",
 		"retire-group", "create-missing", "retire-item", "retire-file", "create-file", "replace-file", "managed",
-		"m-var", "m-import", "m-connection", "m-field", "m-site", "m-product", "m-env", "m-env-fill", "m-env-adopt", "m-other", "migrate-apply"} {
+		"m-var", "m-import", "m-connection", "m-field", "m-site", "m-product", "m-env", "m-env-fill", "m-env-adopt", "m-other"} {
 		m[op] = true
 	}
 	return m

@@ -42,9 +42,6 @@ func sourceCodes(t *testing.T) map[string]string {
 			if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 				return err
 			}
-			if filepath.ToSlash(p) == "../../internal/migrate/migrate.go" {
-				return nil // the codes of the report lines are words of mig.why.* (internal/migrate/codes_test.go), not refusals
-			}
 			b, rerr := os.ReadFile(p)
 			if rerr != nil {
 				return rerr

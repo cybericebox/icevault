@@ -851,7 +851,7 @@ var (
 	guardRE        = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	prefixRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 	serveRE        = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
-	reservedGuards = []string{"sealed", "env-of-private", "token-file", "plaintext"}
+	reservedGuards = []string{"sealed", "token-file", "plaintext"}
 )
 
 func (d *Description) validateCheckout(add func(string, ...any)) {

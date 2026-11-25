@@ -71,8 +71,6 @@ icevault env adopt-connections --env E [--dry-run]
                                        move values an environment holds as its own into the connection the description now gives them (names only are printed)
 icevault import --env E [--dry-run]    read the plaintext tree of an environment into the vault
 icevault export --env E --to DIR       write the settings files of an environment
-icevault export-app --env E --app A    write the env file of an app into <dir>/.env (the app's dir: of the description,
-                                       relative to the checkout; ../<name> without one; --to DIR names another)
 icevault status --env E                what is set, what is missing, what is still on disk
 icevault view --env E                  the variables of an environment (names only, never a value)
 icevault expiring [--days N]           the values that have expired or expire within N days (default 14): names and dates only
@@ -126,7 +124,7 @@ A vault normally belongs to a project (the folder with `icevault-project.yaml`: 
 
 - `icevault init-vault --no-project --vault PATH` makes such a vault anywhere (`--vault PATH` or `ICEVAULT_VAULT` names the file).
 - In the window, **New vault** offers **Without a project** beside the project folder; a vault that lies in no project (the lock screen asks for a checkout folder) can be opened with **Open without a project**.
-- A command that needs environments (`status`, `view`, `import`, `export`, `export-app`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
+- A command that needs environments (`status`, `view`, `import`, `export`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
 
 ## Development
 

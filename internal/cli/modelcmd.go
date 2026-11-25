@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/cybericebox/icevault/internal/model"
 	"github.com/cybericebox/icevault/internal/project"
@@ -232,90 +231,6 @@ func runExport(e *Env, args []string, out io.Writer, plat *render.Project, snap 
 	return nil
 }
 
-func runExportApp(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot, used func(vaultKeys []string)) error {
-	var app, to string
-	var force, dry bool
-	env, site, err := envFlags("export-app", args, e, func(fs *flag.FlagSet) {
-		fs.StringVar(&app, "app", "", "the app")
-		fs.StringVar(&to, "to", "", "the app's directory")
-		fs.BoolVar(&force, "force", false, "replace an existing file")
-		fs.BoolVar(&dry, "dry-run", false, "print the variable names and where they come from; write nothing")
-	})
-	if err != nil {
-		return err
-	}
-	ec, err := envContext(e, env)
-	if err != nil {
-		return err
-	}
-	if app == "" {
-		return &parseErr{msg: "export-app needs --app"}
-	}
-	d, err := e.description()
-	if err != nil {
-		return err
-	}
-	a := d.App(app)
-	if a == nil {
-		return &parseErr{msg: fmt.Sprintf("unknown app %q: one of %s", app, strings.Join(d.AppNames(), ", "))}
-	}
-	s, err := render.PickSite(snap, ec.name, site)
-	if err != nil {
-		return fail("%v", err)
-	}
-	if !render.Holds(snap, ec.name) {
-		return fail("the vault holds nothing for '%s'", ec.name)
-	}
-	appDir := to
-	if appDir == "" {
-		appDir = appDirOf(d, a)
-	}
-	if !isDir(appDir) {
-		return fail("%s is not a directory (the checkout of %s the project description names; --to DIR names another)", appDir, app)
-	}
-	example := ""
-	if !a.All {
-		ex := filepath.Join(appDir, appExampleOf(a))
-		data, err := os.ReadFile(ex)
-		if err != nil {
-			return fail("%s does not exist: it names the variables the app needs", ex)
-		}
-		example = string(data)
-	}
-	text, report, err := plat.AppFileText(snap, ec.name, a, example, s)
-	if err != nil {
-		return fail("%v", err)
-	}
-	target := filepath.Join(appDir, ".env")
-	if used != nil {
-		var keys []string
-		for _, r := range report {
-			if k, ok := strings.CutPrefix(r.Source, "vault "); ok {
-				keys = append(keys, k)
-			}
-		}
-		used(keys)
-	}
-	for _, r := range report {
-		fmt.Fprintf(out, "  %s  <- %s\n", r.Name, r.Source)
-	}
-	if dry {
-		fmt.Fprintf(out, "would write %d variable(s) to %s (dry run: nothing written)\n", len(report), target)
-		return nil
-	}
-	if _, code, err := e.Exec.Run("git", []string{"-C", appDir, "check-ignore", "-q", ".env"}, nil, 30*time.Second); err != nil || code != 0 {
-		return fail("%s is not git-ignored: refusing to write secrets there (add .env to its .gitignore)", target)
-	}
-	if _, err := os.Lstat(target); err == nil && !force {
-		return fail("%s exists: --force replaces it (it is not read)", target)
-	}
-	if err := writeInto(target, 0o600, []byte(text)); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "wrote %d variable(s) to %s (mode 0600, PLAINTEXT, git-ignored)\n", len(report), target)
-	return nil
-}
-
 // privateRels lists the regular files below a private tree (symbolic links are not followed or listed), sorted.
 func privateRels(dir string) []string {
 	var out []string
@@ -329,23 +244,6 @@ func privateRels(dir string) []string {
 	})
 	sort.Strings(out)
 	return out
-}
-
-// appDirOf is the checkout of an app: its dir in the description (relative to the project checkout), else ../<name>.
-func appDirOf(d *project.Description, a *project.App) string {
-	rel := a.Dir
-	if rel == "" {
-		rel = "../" + a.Name
-	}
-	return filepath.Join(checkoutDir(d), filepath.FromSlash(rel))
-}
-
-// appExampleOf is the example file of an app.
-func appExampleOf(a *project.App) string {
-	if a.Example != "" {
-		return a.Example
-	}
-	return render.AppExample
 }
 
 // confExtra is the committed general settings file of an environment, when the checkout has one.

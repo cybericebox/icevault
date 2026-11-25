@@ -70,7 +70,7 @@ func TestCommandsThatNeedEnvironmentsSayTheVaultHasNoProject(t *testing.T) {
 		t.Fatalf("rc=%d %s", rc, h.errb.String())
 	}
 	for _, args := range [][]string{{"status", "--env", "prod"}, {"view", "--env", "prod"}, {"import", "--env", "prod"}, {"export", "--env", "prod", "--to", filepath.Join(h.dir, "o")},
-		{"export-app", "--env", "prod", "--app", "web-client"}, {"env", "create", "--env", "qa", "--site", "compose", "--products", "portal"}, {"session", "open", "--env", "prod"}} {
+		{"env", "create", "--env", "qa", "--site", "compose", "--products", "portal"}} {
 		h.asked = 0
 		rc := h.run(args...)
 		if rc != 1 || !strings.Contains(h.errb.String(), "this vault has no project") || h.asked != 0 {

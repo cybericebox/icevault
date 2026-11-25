@@ -532,10 +532,6 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 .mtable td:has(.ksub), .mtable td.mk:has(.ksub) { padding-top:8px; padding-bottom:8px; } .mtable td.mk .kcell:has(+ .ksub) { min-height:0; }
 .mtable .ksub { margin-top:2px; font-size:12px; line-height:1.3; color:var(--ib-dim); white-space:normal; overflow-wrap:anywhere; }
 .mtoggle { width:auto; margin-top:4px; }
-.mplan { margin-top:12px; }
-.mplan h3 { margin:0 0 4px; font-size:14px; font-weight:600; color:var(--ib-ink); }
-.mplan ul { margin:0; padding-left:18px; font-size:13px; max-height:180px; overflow:auto; }
-.mplan .mgroup { margin:8px 0 2px; font-size:12px; color:var(--ib-dim); }
 </style>
 </head>
 <body>
@@ -1932,7 +1928,7 @@ function renderMain() {
   tipOff(); closeList(false);
   const main = $("main"); const keep = main.scrollTop; const tree0 = main.querySelector(".gtree"), keepTree = tree0 ? tree0.scrollTop : 0; main.textContent = "";
   const crumb = $("crumb"); crumb.textContent = "";
-  if (!item) { crumb.append(appIcon(), el("b", "", t("app.title"))); renderMigrationBanner(main); main.append(el("p", "dim", t("main.nothing"))); return; }
+  if (!item) { crumb.append(appIcon(), el("b", "", t("app.title"))); main.append(el("p", "dim", t("main.nothing"))); return; }
   const h = item.header;
   const hTitle = dispTitle(h.section, h.name, h.title);
   crumb.append(icon(h.is_env ? "layers" : "package", "lg"), el("b", "", hTitle), el("span", "quiet", (nav.sections.find((x) => x.name === h.section) || null) ? secTitle(nav.sections.find((x) => x.name === h.section)) : h.section));
@@ -1946,7 +1942,6 @@ function renderMain() {
   if (editing()) meta.append(btn(t(h.is_env ? "head.retire_env" : "head.retire_item"), "archive", retireItem, "ghost danger"));
   head.append(meta);
   main.append(head);
-  renderMigrationBanner(main);
   if (h.is_env) { renderSiteSwitch(main, h); renderProvider(main, h); } else renderKindBar(main, h);
   renderWarnings(main, h);
   if (item.checklist) renderChecklist(main);
@@ -3289,51 +3284,6 @@ async function mprojectDialog() {
   if (r.status !== 200) { say(srv(r.data), "err"); return; }
   if (r.data && r.data.cancelled) return;
   panel.close(); nav = null; await loadNav(); say(t("m.desc.saved"), "ok");
-}
-
-function renderMigrationBanner(main) {
-  const mg = nav && nav.migration; if (!mg || !mg.offer) return;
-  const b = el("div", "banner"); b.append(icon("info")); const d = el("div"); d.append(el("div", "", t("mig.banner")));
-  if (!mg.description) d.append(el("div", "dim", t("mig.no_desc")));
-  b.append(d); if (!mg.description) b.append(btn(t("m.desc.choose"), "edit", mprojectDialog)); b.append(btn(t("mig.open"), "move", openMigration)); main.append(b);
-}
-
-async function openMigration() {
-  panel.open(t("mig.title")); const box = panel.box; box.classList.add("wide");
-  const ld = el("div", "vload"); ld.setAttribute("role", "status"); ld.append(el("span", "crest"), el("span", "dim", t("mig.loading"))); box.append(ld);
-  const r = await api("/api/migrate-plan"); ld.remove();
-  if (r.status !== 200) { const e = el("div", "err"); e.append(icon("alert"), document.createTextNode(srv(r.data))); box.append(e); const a0 = el("div", "actions"); a0.append(btn(t("btn.close"), "", () => panel.close(), "lg")); box.append(a0); return; }
-  const p = r.data;
-  if (!p.description || !p.description.found) { box.append(el("div", "note", t("mig.no_desc"))); const a = el("div", "actions"); a.append(btn(t("btn.close"), "", () => panel.close(), "lg"), btn(t("m.desc.choose"), "edit", () => { panel.close(); mprojectDialog(); }, "primary lg")); box.append(a); return; }
-  box.append(el("div", "note", t("mig.intro")));
-  const list = (title, items, fmt) => { if (!items || !items.length) return; const s = el("div", "mplan"); s.append(el("h3", "", t(title, { n: items.length }))); const ul = el("ul"); items.forEach((x) => ul.append(el("li", "", fmt ? fmt(x) : x))); s.append(ul); box.append(s); };
-  // a line of the report in words of the window: the code and its arguments (kinds by their titles), never the English text of the command line
-  const why = (l) => { const a = Object.assign({ key: l.key || "", file: l.file || "", from: l.from || "" }, l.args || {});
-    if (l.code === "conn") a.kind = ckTitle(a.kind); else { if (a.kind) a.kind = skTitle(a.kind); if (a.site_kind) a.site_kind = skTitle(a.site_kind); }
-    if (a.when) a.when = fullTime(a.when);
-    return t("mig.why." + l.code, a); };
-  const keyed = (l) => { const li = el("li"); if (l.key) li.append(el("b", "mono", l.key), document.createTextNode(" ")); li.append(el("span", "dim", why(l))); return li; };
-  // dropped and Other: grouped by the project file the value belonged to (else the item that held it)
-  const grouped = (title, items) => { if (!items || !items.length) return; const s = el("div", "mplan"); s.append(el("h3", "", t(title, { n: items.length })));
-    const groups = new Map(); items.forEach((l) => { const g = l.file || l.from || "-"; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(l); });
-    [...groups.keys()].sort().forEach((g) => { s.append(el("div", "mgroup mono", g)); const ul = el("ul"); groups.get(g).forEach((l) => ul.append(keyed(l))); s.append(ul); });
-    box.append(s); };
-  const lines = (title, items) => { if (!items || !items.length) return; const s = el("div", "mplan"); s.append(el("h3", "", t(title, { n: items.length }))); const ul = el("ul"); items.forEach((l) => ul.append(keyed(l))); s.append(ul); box.append(s); };
-  list("mig.envs", p.envs, (e) => t("mig.env", { name: e.name, kind: skTitle(e.site_kind), products: (e.products || []).length, general: (e.general || []).length + (e.imports || []).length, site: (e.site || []).length }));
-  list("mig.connections", p.connections, (l) => why(l));
-  list("mig.shared", p.shared);
-  lines("mig.flagged", p.flagged);
-  lines("mig.replaced", p.replaced);
-  grouped("mig.dropped", p.dropped);
-  grouped("mig.other", p.other);
-  list("mig.problems", p.problems, (l) => why(l));
-  box.append(el("div", "note", t("mig.copy", { copy: p.copy })));
-  const err = el("div", "err"); err.setAttribute("role", "alert"); const a = el("div", "actions"); const cancel = btn(t("btn.cancel"), "", () => panel.close(), "lg"); const go = btn(t("mig.btn"), "", null, "primary lg"); go.disabled = !p.ok;
-  go.addEventListener("click", () => confirmBox(t("mig.confirm_title"), t("mig.confirm_note", { copy: p.copy }), t("mig.btn_ok"), { onOk: async () => {
-    if (!editing() && !(await setMode("edit"))) return t("err.refused");
-    const x = await api("/api/migrate-apply", {}); if (x.status !== 200) return srv(x.data);
-    panel.close(); sel = null; item = null; nav = null; msel = null; await loadNav(); say(t("mig.done", { copy: x.data.copy || p.copy }), "ok"); return true; } }));
-  a.append(cancel, go); box.append(err, a); cancel.focus();
 }
 </script>
 </body>

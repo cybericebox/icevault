@@ -81,18 +81,17 @@ var specs = map[string]cmdSpec{
 		Args:  []argSpec{{Name: "op", Help: "the operation (agent help lists them)", Complete: completeNone}, {Name: "json", Optional: true, Help: "its arguments as a JSON object, or - to read them from the standard input", Complete: completeNone}}},
 	"trust": {Summary: "Trust the project description (its required-check may run)", Usage: "trust [--forget]\n  Record the SHA-256 of the project description of the checkout as trusted by this user: only then does status run its required-check\n  script. A changed description is not trusted until this runs again. --forget removes the record. Asks no password.",
 		Flags: []flagSpec{sw("forget", "remove the record")}},
-	"guard": {Summary: "The checks the scripts ask before they make secrets", Usage: "guard sealed|WORD|env-of-private|token-file|plaintext [--private DIR] [--dir DIR] [--what TEXT] [--env E] [PATH]\n  The checks the project's scripts ask before they make or read secrets; WORD is a guard word of the description's kept-files. Asks no password.",
+	"guard": {Summary: "The checks the scripts ask before they make secrets", Usage: "guard sealed|WORD|token-file|plaintext [--private DIR] [--dir DIR] [--what TEXT] [--env E] [PATH]\n  The checks the project's scripts ask before they make or read secrets; WORD is a guard word of the description's kept-files. Asks no password.",
 		Flags: []flagSpec{val("private", "dir", "the plaintext tree of an environment", completeDir), val("dir", "dir", "the directory", completeDir), val("what", "text", "what the run wanted to do", completeNone), envFlag()},
 		Actions: []actionSpec{
 			{"sealed", "refuse when the vault holds the environment of the directory", []argSpec{{Name: phPath, Optional: true, Complete: completePath}}},
-			{"env-of-private", "the environment of a plaintext tree (JSON)", []argSpec{{Name: phPath, Optional: true, Complete: completeDir}}},
 			{"token-file", "is the token file safe to hand over", []argSpec{{Name: phPath, Optional: true, Complete: completePath}}},
 			{"plaintext", "the secret-bearing plaintext files of a directory (JSON)", []argSpec{{Name: phPath, Optional: true, Complete: completePath}}}}},
 	"settings": {Summary: "The settings for a run, as JSON, from the vault", Usage: "settings (--all | --env E [--site S]) --out FILE|-\n  The settings of the environments for a run, as JSON, from the vault (asks the password once). Never prints without --out -.",
 		Flags: []flagSpec{sw("all", "every environment"), envFlag(), siteFlag(), val("out", "file", "the file to write; - is stdout", completePath)}},
-	"session": {Summary: "Unlock once, run a command with the files of an environment", Usage: "session open|close|run --env E [--site S] [--base DIR] [-- COMMAND ...]\n  Unlock once, give the files of an environment to a command, write the changes back, remove them.",
+	"session": {Summary: "Unlock once, run a command with the files of an environment", Usage: "session run --env E [--site S] [--base DIR] [-- COMMAND ...]\n  Unlock once, give the files of an environment to a command, write the changes back, remove them (a killed run is written back by recover).",
 		Flags: []flagSpec{envFlag(), siteFlag(), val("base", "dir", "the folder of the session directory", completeDir)},
-		Actions: []actionSpec{{"open", "make the session directory (prints JSON)", nil}, {actClose, "write a session directory back and remove it", nil},
+		Actions: []actionSpec{
 			{"run", "run a command inside a session", []argSpec{{Name: "command", Optional: true, Rest: true, Help: "the command and its arguments, after --", Complete: completePath}}}}},
 	"external": {Summary: "A connection of the vault as a key/value store for a program", Usage: "external serve\n  A connection the project description serves (serve-as) as a key/value store on JSON lines (stdin/stdout): one unlock, values only on the pipes. Refuses a terminal.",
 		Actions: []actionSpec{{"serve", "serve JSON lines on stdin and stdout", nil}}},
@@ -104,14 +103,8 @@ var specs = map[string]cmdSpec{
 		Flags: []flagSpec{val("to", "dir", "the folder that receives the copy", completeDir)}},
 	cmdView: {Summary: "Show variables without their secret values", Usage: "view (--env E [--site S] | --item SECTION/ITEM)\n  Show variables without their secret values (asks the password).",
 		Flags: []flagSpec{envFlag(), siteFlag(), val("item", "section/item", "one item of the vault", completeNone)}},
-	cmdExport: {Summary: "Write an environment as PLAINTEXT files", Usage: "export --env E [--site S] --to DIR [--file F]\n  Write the environment as PLAINTEXT files into a new or empty directory (asks the password).\n" +
-		"export --env E (--site S | --product P | --all) --batches --to DIR\n  A vault of the vault model, per run: one PLAINTEXT file per batch (DIR/<batch>.env: General, the site, the product, each connection they use) and\n" +
-		"  DIR/batches.json (what each batch holds and refers to, never a value). --all: every site and every product that is on.",
-		Flags: []flagSpec{envFlag(), siteFlag(), val("to", "dir", "a new or empty directory: it will hold PLAINTEXT", completeDir), val("file", "file", "one extra file", completeNone),
-			val("product", "product", "one product of the environment (with --batches)", completeNone), sw("all", "every site and product of the environment (with --batches)"),
-			sw("batches", "write the batches of the vault model, not the project's files")}},
-	cmdExportApp: {Summary: "Write the env file of one app", Usage: "export-app --env E [--site S] --app APP [--to DIR] [--force] [--dry-run]\n  Write the env file of one app. --dry-run names the variables only and does not unlock.",
-		Flags: []flagSpec{envFlag(), siteFlag(), val("app", "app", "the app", completeNone), val("to", "dir", "the app's directory", completeDir), sw("force", "replace an existing file"), sw("dry-run", "print the variable names, write nothing")}},
+	cmdExport: {Summary: "Write an environment as PLAINTEXT files", Usage: "export --env E [--site S] --to DIR [--file F]\n  Write the environment as PLAINTEXT files into a new or empty directory (asks the password).",
+		Flags: []flagSpec{envFlag(), siteFlag(), val("to", "dir", "a new or empty directory: it will hold PLAINTEXT", completeDir), val("file", "file", "one extra file", completeNone)}},
 	"status": {Summary: "What the vault holds for an environment", Usage: "status --env E [--site S]\n  What the vault holds for an environment and what is still missing (asks the password).",
 		Flags: []flagSpec{envFlag(), siteFlag()}},
 	cmdExpiring: {Summary: "Values that have expired or expire soon (never values)", Usage: "expiring [--days N]\n  List the values that have expired or expire within N days (default 14) by date: where they live and their names, never a value (asks the password).\n  A date is set in the window; status lists the ones of an environment, export and session warn on stderr about the expired ones they use.",
@@ -128,7 +121,7 @@ var specs = map[string]cmdSpec{
 }
 
 // commandNames is the order of the overview and of the completion.
-var commandNames = []string{"init-vault", "change-password", "keyfile", "ui", "agent", "where", "project", cmdEnv, "trust", "guard", "settings", "session", "external", "touchid", "copies", "copy", cmdView, cmdExport, cmdExportApp,
+var commandNames = []string{"init-vault", "change-password", "keyfile", "ui", "agent", "where", "project", cmdEnv, "trust", "guard", "settings", "session", "external", "touchid", "copies", "copy", cmdView, cmdExport,
 	cmdStatus, cmdExpiring, cmdVisibility, cmdPurge, cmdImport, cmdRecover, cmdImportHCP}
 
 // flagTable is the checkable form of the flags of a command: name -> takes a value. --vault is taken by Run before and is accepted everywhere.

@@ -25,7 +25,7 @@ func TestPageEndpointsAreBound(t *testing.T) {
 		"vaults": true, "vault-select": true, "vault-open": true, "vault-root": true, "vault-forget": true, "project-choose": true,
 		"vault-new-project": true, "vault-new-noproject": true, "vault-no-project": true, "vault-new-place": true, "vault-new-strength": true, "vault-new-generate": true, "vault-new-create": true, "vault-change-info": true, "vault-change": true, "kit-save": true, "kit-discard": true, "kit-held": true,
 		"agent-pending": true, "agent-decide": true, "agent-journal": true, "update": true, "update-check": true, "update-fetch": true, "update-apply": true, "update-auto": true, "update-release": true}
-	reads := map[string]bool{"nav": true, "item": true, "compare": true, "references": true, "pull-candidates": true, "shared": true, "visibility": true, "preview-value": true, "migrate-plan": true}
+	reads := map[string]bool{"nav": true, "item": true, "compare": true, "references": true, "pull-candidates": true, "shared": true, "visibility": true, "preview-value": true}
 	found := map[string]bool{}
 	for _, m := range regexp.MustCompile(`"/api/([a-z-]+)`).FindAllStringSubmatch(string(src), -1) {
 		found[m[1]] = true

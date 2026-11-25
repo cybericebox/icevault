@@ -67,12 +67,7 @@ func (defaultModel) Check(e *Env, cmd string, args []string) (int, bool, error) 
 		_, err := envContext(e, v["env"])
 		return 1, err != nil, err
 	case cmdExport:
-		if rc, done, err := checkBatches(e, v); done || v["batches"] == flagOn {
-			return rc, done, err
-		}
 		return checkExport(e, v)
-	case cmdExportApp:
-		return checkExportApp(e, v)
 	case cmdStatus, cmdVisibility, cmdRecover:
 		_, err := envContext(e, v["env"])
 		return 1, err != nil, err
@@ -107,37 +102,6 @@ func checkExport(e *Env, v map[string]string) (int, bool, error) {
 	}
 	if ents, err := os.ReadDir(v["to"]); err == nil && len(ents) > 0 {
 		return 1, true, fail("%s is not empty", v["to"])
-	}
-	return 0, false, nil
-}
-
-func checkExportApp(e *Env, v map[string]string) (int, bool, error) {
-	if _, err := envContext(e, v["env"]); err != nil {
-		return 1, true, err
-	}
-	app := v["app"]
-	if app == "" {
-		return 2, true, &parseErr{msg: "export-app needs --app"}
-	}
-	d, err := e.description()
-	if err != nil {
-		return 1, true, err
-	}
-	a := d.App(app)
-	if a == nil {
-		return 2, true, &parseErr{msg: fmt.Sprintf("unknown app %q: one of %s", app, strings.Join(d.AppNames(), ", "))}
-	}
-	appDir := v["to"]
-	if appDir == "" {
-		appDir = appDirOf(d, a)
-	}
-	if !isDir(appDir) {
-		return 1, true, fail("%s is not a directory (the checkout of %s the project description names; --to DIR names another)", appDir, app)
-	}
-	if !a.All {
-		if ex := filepath.Join(appDir, appExampleOf(a)); !isFile(ex) {
-			return 1, true, fail("%s does not exist: it names the variables the app needs", ex)
-		}
 	}
 	return 0, false, nil
 }

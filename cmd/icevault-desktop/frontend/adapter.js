@@ -2,7 +2,7 @@
 // The bridge of the window: the page's api(path, body) calls become calls of the bound Go methods (internal/desktop App). It answers the same
 // {status, data} the page logic got from fetch. No network, no storage, no value kept here.
 (function () {
-  const GETS = new Set(["nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value", "migrate-plan"]);
+  const GETS = new Set(["nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value"]);
   function bridge() {
     const a = window.go && window.go.desktop && window.go.desktop.App;
     if (!a) throw new Error("the window bridge is not available");

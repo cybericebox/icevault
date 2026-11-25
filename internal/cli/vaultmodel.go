@@ -1,11 +1,8 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/cybericebox/icevault/internal/bridge"
@@ -16,10 +13,10 @@ import (
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
-// The commands on a vault of the vault model (internal/vmodel). The read commands (export, export-app, view, status, purge-plaintext,
+// The commands on a vault of the vault model (internal/vmodel). The read commands (export, view, status, purge-plaintext,
 // settings) read the projection of the model (vmodel.CompatWith), which lays the project's files out; the commands that write (import,
 // recover, import-hcp, visibility --apply, the session, external serve) write through bridge.Writer, which puts each write into the model and
-// saves it with vmodel.Sync; export --batches writes the batches of a run.
+// saves it with vmodel.Sync.
 
 // descriptionOf is the project description of this process.
 func descriptionOf(e *Env) (*project.Description, error) { return e.description() }
@@ -134,25 +131,18 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		refreshInfo(path, plat, snap)
 	}
 	if env := flagVals(cmd, args)["env"]; env != "" {
-		if err := mv.skipped(env); err != nil && (cmd != cmdExport || !hasFlag(args, "batches")) {
+		if err := mv.skipped(env); err != nil {
 			return 1, err
 		}
 	}
 	if env := flagVals(cmd, args)["env"]; env != "" && cmd == cmdExport {
-		warnExpired(e, mv.m, env, nil)
+		warnExpired(e, mv.m, env)
 	}
 	switch cmd {
 	case cmdView:
 		return 0, runView(e, args, out, plat, snap)
 	case cmdExport:
-		if hasFlag(args, "batches") {
-			return 0, runBatches(e, args, out, mv)
-		}
 		return 0, runExport(e, args, out, plat, snap)
-	case cmdExportApp:
-		return 0, runExportApp(e, args, out, plat, snap, func(keys []string) {
-			warnExpired(e, mv.m, flagVals(cmd, args)["env"], &appUse{keys: keys, d: mv.d})
-		})
 	case cmdStatus:
 		if err := runStatus(e, args, out, plat, snap); err != nil {
 			return 0, err
@@ -169,105 +159,4 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		return 0, runPurge(e, args, out, plat, snap)
 	}
 	return notPortedCmd(e, cmd, "the vault model")
-}
-
-// batchSelection reads the selection of export --batches.
-func batchSelection(v map[string]string) (vmodel.Selection, error) {
-	sel := vmodel.Selection{Site: v["site"], Product: v["product"], All: v["all"] == flagOn}
-	n := 0
-	for _, x := range []bool{sel.Site != "", sel.Product != "", sel.All} {
-		if x {
-			n++
-		}
-	}
-	if n != 1 {
-		return sel, &parseErr{msg: "export --batches names one of --site S, --product P, --all"}
-	}
-	return sel, nil
-}
-
-// runBatches writes the batches of a run: DIR/<batch>.env (mode 0600, the quoting of the settings files) and DIR/batches.json (no value).
-func runBatches(e *Env, args []string, out io.Writer, mv *modelView) error {
-	vals := flagVals(cmdExport, args)
-	sel, err := batchSelection(vals)
-	if err != nil {
-		return err
-	}
-	to := vals["to"]
-	ec, err := envContext(e, vals["env"])
-	if err != nil {
-		return err
-	}
-	if ents, err := os.ReadDir(to); err == nil && len(ents) > 0 {
-		return fail("%s is not empty", to)
-	}
-	bs, err := vmodel.Batches(mv.m, mv.d, ec.name, sel)
-	if err != nil {
-		return fail("%v", err)
-	}
-	var misfits []string
-	for _, b := range bs {
-		for _, x := range b.Vars {
-			if rule := mv.d.ValueProblem(x.Key, x.Value); rule != "" {
-				misfits = append(misfits, render.TypeProblem{File: b.Name, Name: x.Key, Rule: rule}.String())
-			}
-		}
-	}
-	if len(misfits) > 0 {
-		return fail("a value does not fit its type, nothing is written: %s", strings.Join(misfits, "; "))
-	}
-	if err := os.MkdirAll(to, 0o700); err != nil {
-		return err
-	}
-	_ = os.Chmod(to, 0o700)
-	type index struct {
-		Format      int               `json:"format"`
-		Environment string            `json:"environment"`
-		Batches     []*vmodel.Batch   `json:"batches"`
-		Files       map[string]string `json:"files"`
-	}
-	idx := index{Format: vmodel.Format, Environment: ec.name, Batches: bs, Files: map[string]string{}}
-	for _, b := range bs {
-		var sb strings.Builder
-		for _, x := range b.Vars {
-			sb.WriteString(x.Key + "=" + render.QuoteEnv(x.Value) + "\n")
-		}
-		name := b.Name + ".env"
-		if err := writeInto(filepath.Join(to, name), 0o600, []byte(sb.String())); err != nil {
-			return err
-		}
-		idx.Files[b.Name] = name
-	}
-	data, err := json.MarshalIndent(idx, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := writeInto(filepath.Join(to, "batches.json"), 0o600, append(data, '\n')); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "WARNING: %s now holds %d batch file(s) in PLAINTEXT (batches.json names them). Delete it when you are done (rm -rf %s).\n", to, len(bs), to)
-	return nil
-}
-
-// checkBatches refuses a wrong export --batches before the password.
-func checkBatches(e *Env, v map[string]string) (int, bool, error) {
-	if v["batches"] != flagOn {
-		if v["product"] != "" || v["all"] == flagOn {
-			return 2, true, &parseErr{msg: "--product and --all name batches: add --batches"}
-		}
-		return 0, false, nil
-	}
-	if v["file"] != "" {
-		return 2, true, &parseErr{msg: "--file is a file of the export of the project's files, not of --batches"}
-	}
-	if _, err := batchSelection(v); err != nil {
-		return 2, true, err
-	}
-	if _, err := envContext(e, v["env"]); err != nil {
-		return 1, true, err
-	}
-	if ents, err := os.ReadDir(v["to"]); err == nil && len(ents) > 0 {
-		return 1, true, fail("%s is not empty", v["to"])
-	}
-	return 0, false, nil
 }

@@ -25,12 +25,9 @@ func TestRefusalsAndAnswersComeBeforeThePasswordPrompt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nonEmpty, "x"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	emptyApp := filepath.Join(h.dir, "app")
-	mustMkdir(emptyApp)
 	noHome := filepath.Join(h.dir, "home")
 	mustMkdir(noHome)
 	h.env["HOME"] = noHome
-	app := "web-client"
 	// the info file says the vault holds prod (as after an import)
 	inf := readInfo(h.env["ICEVAULT_VAULT"])
 	if inf == nil {
@@ -58,16 +55,6 @@ func TestRefusalsAndAnswersComeBeforeThePasswordPrompt(t *testing.T) {
 		{"export: no --to", []string{"export", "--env", "prod"}, 2, "export needs --to DIR"},
 		{"export: bad name", []string{"export", "--env", "Bad", "--to", filepath.Join(h.dir, "o")}, 1, "is not an environment name"},
 		{"export: target not empty", []string{"export", "--env", "prod", "--to", nonEmpty}, 1, "is not empty"},
-		{"export --batches: no selection", []string{"export", "--env", "prod", "--batches", "--to", filepath.Join(h.dir, "o")}, 2, "names one of --site S, --product P, --all"},
-		{"export --batches: two selections", []string{"export", "--env", "prod", "--batches", "--all", "--product", "portal", "--to", filepath.Join(h.dir, "o")}, 2, "names one of"},
-		{"export --batches: --file", []string{"export", "--env", "prod", "--batches", "--all", "--file", "x", "--to", filepath.Join(h.dir, "o")}, 2, "--file is a file"},
-		{"export --batches: target not empty", []string{"export", "--env", "prod", "--batches", "--all", "--to", nonEmpty}, 1, "is not empty"},
-		{"export --batches: bad name", []string{"export", "--env", "Bad", "--batches", "--all", "--to", filepath.Join(h.dir, "o")}, 1, "is not an environment name"},
-		{"export: --product without --batches", []string{"export", "--env", "prod", "--product", "portal", "--to", filepath.Join(h.dir, "o")}, 2, "add --batches"},
-		{"export-app: no app", []string{"export-app", "--env", "prod"}, 2, "export-app needs --app"},
-		{"export-app: unknown app", []string{"export-app", "--env", "prod", "--app", "nope"}, 2, "unknown app"},
-		{"export-app: no directory", []string{"export-app", "--env", "prod", "--app", "worker-cli", "--to", filepath.Join(h.dir, "missing")}, 1, "is not a directory"},
-		{"export-app: no example", []string{"export-app", "--env", "prod", "--app", app, "--to", emptyApp}, 1, "does not exist"},
 		{"status: bad name", []string{"status", "--env", "Bad"}, 1, "is not an environment name"},
 		{"visibility: bad name", []string{"visibility", "--env", "Bad"}, 1, "is not an environment name"},
 		{"recover: bad name", []string{"recover", "--env", "Bad"}, 1, "is not an environment name"},
@@ -77,7 +64,6 @@ func TestRefusalsAndAnswersComeBeforeThePasswordPrompt(t *testing.T) {
 		{"import-hcp: no token file", []string{"import-hcp"}, 1, "has no token for app.terraform.io"},
 		{"session: unknown action", []string{"session", "bogus", "--env", "prod"}, 2, "session: unknown bogus"},
 		{"session run: no command", []string{"session", "run", "--env", "prod"}, 2, "session run needs -- COMMAND"},
-		{"session: bad name", []string{"session", "open", "--env", "Bad"}, 1, "is not an environment name"},
 		{"settings: no --out", []string{"settings", "--all"}, 2, "settings needs --out"},
 		{"copy: no --to", []string{"copy"}, 2, "copy needs --to DIR"},
 		{"init-vault: exists", []string{"init-vault"}, 1, "already exists"},
@@ -117,7 +103,7 @@ func TestRefusalsAndAnswersComeBeforeThePasswordPrompt(t *testing.T) {
 func TestNoVaultFileNoPrompt(t *testing.T) {
 	h := newHarness(t) // no initVault: the vault does not exist
 	for _, args := range [][]string{{"import", "--env", "staging"}, {"status", "--env", "staging"}, {"view", "--env", "staging"}, {"export", "--env", "staging", "--to", filepath.Join(h.dir, "o")},
-		{"visibility", "--env", "staging"}, {"recover", "--env", "staging"}, {"settings", "--all", "--out", "-"}, {"session", "open", "--env", "staging"}, {"external", "serve"}} {
+		{"visibility", "--env", "staging"}, {"recover", "--env", "staging"}, {"settings", "--all", "--out", "-"}, {"external", "serve"}} {
 		h.asked = 0
 		if rc := h.run(args...); rc == 0 || !strings.Contains(h.errb.String(), "no vault at") && !strings.Contains(h.errb.String(), "needs") && !strings.Contains(h.errb.String(), "first message") {
 			t.Errorf("%v: rc=%d %q", args, rc, h.errb.String())

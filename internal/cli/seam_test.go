@@ -141,24 +141,8 @@ func TestGuardWord(t *testing.T) {
 	}
 }
 
-func TestGuardEnvOfPrivateAndPlaintext(t *testing.T) {
+func TestGuardPlaintext(t *testing.T) {
 	h := newHarness(t)
-	check := func(path, root, env string, match bool) {
-		t.Helper()
-		if rc := h.run("guard", "env-of-private", path); rc != 0 {
-			t.Fatal(h.errb.String())
-		}
-		var got map[string]any
-		if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
-			t.Fatal(err)
-		}
-		if got["match"] != match || (match && (got["root"] != root || got["env"] != env)) {
-			t.Fatalf("%s: %v", path, got)
-		}
-	}
-	check(filepath.Join(h.root, "plain", "staging"), h.root, "staging", true)
-	check(filepath.Join(h.root, "plain"), "", "", false)
-	check("/r/other/dir", "", "", false)
 	priv := filepath.Join(h.root, "plain", "prod")
 	if rc := h.run("guard", "plaintext", "--private", priv); rc != 0 || !strings.Contains(h.out.String(), "services/portal.env") || strings.Contains(h.out.String(), "notes.txt") {
 		t.Fatalf("%s", h.out.String())
@@ -517,9 +501,6 @@ func TestGuardsRefuseWithoutTheDescription(t *testing.T) {
 	}
 	if rc := h.run("guard", "release", "--dir", filepath.Join(h.root, "plain", "staging", "keys", "compose", "release")); rc != 1 || !strings.Contains(h.errb.String(), "so this run is refused") {
 		t.Fatalf("guard word: %d %s", rc, h.errb.String())
-	}
-	if rc := h.run("guard", "env-of-private", filepath.Join(h.root, "plain", "staging")); rc != 1 {
-		t.Fatalf("env-of-private: %d %s", rc, h.out.String())
 	}
 	// the switch that says there is no vault still lets a run through
 	h.env[noVaultVar] = "1"
