@@ -2,7 +2,8 @@ IceVault {{VERSION}}
 
 ## Changes since v0.8.1
 
-- `env fill-missing` (and **Create missing entries** in the window) now makes an optional connection when a `required-when` of one of its variables holds in the environment, the same rule as **Missing for deploy**. Before, every optional connection was skipped, so its fields could only be filled after adding the connection by hand.
+- A site whose Terraform state is in an HCP connection now gives `STATE_BACKEND=hcp` (the derived setting of the site): before, the setting came only from a word kept on the site that the window never sets, so such a site ran on the project's default.
+- The update chip says "{version} available" (without the product name) and its Update button stands out; the checkbox of the update panel lines up with the text.
 
 ## What is here
 
