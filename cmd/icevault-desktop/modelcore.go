@@ -158,6 +158,12 @@ func (m *modelCore) BoundConnectionName(name string) bool {
 	return m.v == nil || m.mp.BoundConnectionName(name)
 }
 
+func (m *modelCore) ConnectionKindNeeded(kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.ConnectionKindNeeded(kind)
+}
+
 func (m *modelCore) Write(op string, args map[string]any) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

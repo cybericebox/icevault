@@ -1001,14 +1001,35 @@ func (c *Core) BoundConnectionName(name string) bool {
 		uses = append(uses, p.Connections...)
 	}
 	uses = append(uses, c.d.VaultConnections...)
+	same := strings.EqualFold
 	for _, u := range uses {
-		if u.Name == name || u.ServeAs == name {
+		if same(u.Name, name) || same(u.ServeAs, name) || same(u.Kind, name) {
 			return true
 		}
 		if u.Name == "" {
-			if k, known := c.kinds().Kind(u.Kind); known && k.Title == name {
+			if k, known := c.kinds().Kind(u.Kind); known && same(k.Title, name) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// ConnectionKindNeeded says whether a use of the project description needs a connection of that kind.
+func (c *Core) ConnectionKindNeeded(kind string) bool {
+	if c.d == nil {
+		return false
+	}
+	for _, p := range c.d.Products {
+		for _, u := range p.Connections {
+			if u.Kind == kind {
+				return true
+			}
+		}
+	}
+	for _, u := range c.d.VaultConnections {
+		if u.Kind == kind {
+			return true
 		}
 	}
 	return false

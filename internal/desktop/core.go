@@ -96,4 +96,6 @@ type SecretCounter interface {
 // program asks for): a connection made or renamed to such a name is linked by the commands that fill an environment, so it changes where they link.
 type ConnNameBinder interface {
 	BoundConnectionName(name string) bool
+	// ConnectionKindNeeded says whether a use of the project description needs a connection of that kind (the commands that fill an environment link the only one of a kind).
+	ConnectionKindNeeded(kind string) bool
 }

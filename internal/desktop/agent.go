@@ -51,7 +51,15 @@ type AgentEntry struct {
 
 // agentReq is a request that waits for the person: what it changes, where, who asked, and the closure that does it after Allow. The value it carries lives
 // only in the closure.
+// agentChange is one line of what a relink changes: the field (a word the page translates) and the old and the new names.
+type agentChange struct {
+	Field string `json:"field"`
+	Old   string `json:"old"`
+	New   string `json:"new"`
+}
+
 type agentReq struct {
+	changes                                         []agentChange
 	id, op, kind, what, where, from, who, peer, key string
 	asked                                           time.Time
 	apply                                           func(c Core) error
@@ -400,7 +408,7 @@ func (a *App) AgentPending() Response {
 		h.mu.Lock()
 		for _, id := range h.ord {
 			p := h.pend[id]
-			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer,
+			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer, "changes": p.changes,
 				"asked": p.asked.UTC().Format(time.RFC3339), "expires": p.asked.Add(h.ttl).UTC().Format(time.RFC3339)})
 		}
 		h.mu.Unlock()

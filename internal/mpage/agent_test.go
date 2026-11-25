@@ -904,3 +904,95 @@ func TestAgentConnectionNameBoundByTheProjectWaits(t *testing.T) {
 	}
 	r.ok("connection-update", map[string]any{"connection": "Blob store", "new_name": "Blob store 2"}) // an ordinary rename of a used connection goes the usual way (core may ask)
 }
+
+func TestAgentBoundNamesAreNormalizedAndKindIdsCount(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	bound, kind := "", ""
+	for _, p := range r.core.d.Products {
+		for _, u := range p.Connections {
+			if u.Name != "" && r.core.BoundConnectionName(u.Name) && r.core.Model().Connection(u.Name) == nil {
+				bound = u.Name
+			}
+			if kind == "" && r.core.Model().Connection(u.Kind) == nil && u.Kind != "" {
+				kind = u.Kind
+			}
+		}
+	}
+	if bound == "" || kind == "" {
+		t.Skip("the example project binds no connection name")
+	}
+	p := r.call("connection-update", map[string]any{"connection": "Blob store", "new_name": "  " + strings.ToUpper(bound) + "  "})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a rename to a bound name in other case and with spaces did not wait: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+	c := r.call("connection-create", map[string]any{"name": kind, "kind": "s3"})
+	if c.State != agentapi.StatePending {
+		t.Fatalf("a connection named like a kind id did not wait: %+v", c)
+	}
+}
+
+func TestAgentFirstAndLastButOneConnectionOfANeededKindWait(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	count := map[string]int{}
+	for _, c := range r.core.Model().Connections {
+		count[c.Kind]++
+	}
+	one, none := "", ""
+	for _, p := range r.core.d.Products {
+		for _, u := range p.Connections {
+			if count[u.Kind] == 1 && one == "" {
+				one = u.Kind
+			}
+			if count[u.Kind] == 0 && none == "" {
+				none = u.Kind
+			}
+		}
+	}
+	if one == "" || none == "" {
+		t.Fatalf("the example has no needed kind with one connection (%q) or with none (%q)", one, none)
+	}
+	// the first connection of a needed kind waits
+	if p := r.call("connection-create", map[string]any{"name": "First of its kind", "kind": none}); p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	// a second one of a kind is made at once; deleting it would leave exactly one: that waits
+	r.ok("connection-create", map[string]any{"name": "Second of its kind", "kind": one})
+	p := r.call("connection-delete", map[string]any{"connection": "Second of its kind"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("a delete that leaves one connection of a needed kind did not wait: %+v", p)
+	}
+	r.app.AgentDecide(p.ID, false)
+}
+
+func TestAgentOtherWithNotesCountsAsFilled(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("other-create", map[string]any{"title": "only notes"})
+	for _, o := range r.core.Model().Other {
+		if o.Title == "only notes" {
+			o.Notes = "a note"
+		}
+	}
+	if p := r.call("other-delete", map[string]any{"other": "only notes"}); p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestAgentRelinkDialogShowsOldAndNew(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("connection-create", map[string]any{"name": "Other cloud", "kind": "google"})
+	p := r.call("site-update", map[string]any{"env": "prod", "name": "main", "connection": "Other cloud"})
+	if p.State != agentapi.StatePending {
+		t.Fatalf("%+v", p)
+	}
+	raw, _ := json.Marshal(r.app.AgentPending())
+	for _, want := range []string{"\"field\":\"connection\"", "\"old\":\"GCP\"", "\"new\":\"Other cloud\""} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("the pending list lacks %s: %s", want, raw)
+		}
+	}
+}
