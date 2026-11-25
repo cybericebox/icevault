@@ -26,9 +26,9 @@ func sample() *Vault {
 	aws := &Connection{Name: "GCP main", Kind: "google", Fields: []*Field{{Name: "credentials", Value: "creds/gcp.json"}, {Name: "project", Value: "lumen-1"}}}
 	second := &Connection{Name: "GCP second", Kind: "google", Fields: []*Field{{Name: "project", Value: "lumen-2"}}}
 	cf := &Connection{Name: "Blob store", Kind: "s3", Fields: []*Field{{Name: "secret_access_key", Value: "blob-sec", Secret: true}, {Name: "bucket", Value: ""}}}
-	hcp := &Connection{Name: "TFC", Kind: "hcp", Fields: []*Field{{Name: "organization", Value: "org1"}}}
+	hcp := &Connection{Name: "State store", Kind: "hcp", Fields: []*Field{{Name: "organization", Value: "org1"}}}
 	admin := &Var{Key: "CONTACT_ADDRESS", Value: "help@example.org", Vis: VisPlain}
-	main := &Site{Name: "main", Kind: "google-cluster", Connection: aws, State: hcp, StateBackend: "tfc", Vars: []*Var{{Key: "GKE_POOL", Value: "c1", Vis: VisPlain}},
+	main := &Site{Name: "main", Kind: "google-cluster", Connection: aws, State: hcp, StateBackend: "remote", Vars: []*Var{{Key: "GKE_POOL", Value: "c1", Vis: VisPlain}},
 		Files: []*File{{Rel: "creds/gcp.kubeconfig", Data: []byte("kc\x00\x01"), Mode: 0o600}}}
 	other := &Site{Name: "indexer-host", Kind: "google-cluster", Connection: second}
 	prod := &Environment{Name: "prod", Title: "Production", General: []*Var{{Key: "PUBLIC_HOST", Value: "example.org", Vis: VisPlain}}, Imports: []*Var{admin},
@@ -81,7 +81,7 @@ func TestWriteLoadRoundTrip(t *testing.T) {
 		t.Fatalf("env %+v", e)
 	}
 	s := e.Site("main")
-	if s.Kind != "google-cluster" || s.Connection != m.Connection("GCP main") || s.State != m.Connection("TFC") || s.StateBackend != "tfc" || len(s.Files) != 1 || string(s.Files[0].Data) != "kc\x00\x01" {
+	if s.Kind != "google-cluster" || s.Connection != m.Connection("GCP main") || s.State != m.Connection("State store") || s.StateBackend != "remote" || len(s.Files) != 1 || string(s.Files[0].Data) != "kc\x00\x01" {
 		t.Fatalf("site %+v", s)
 	}
 	pl := e.Product("portal")
@@ -130,11 +130,11 @@ func TestBatches(t *testing.T) {
 	for _, b := range bs {
 		got = append(got, b.Name+"("+strings.Join(b.Variables, ",")+")")
 	}
-	want := "general(PUBLIC_HOST,CONTACT_ADDRESS) product-portal(COOKIE_KEY,EXPORT_BUCKET) site-main(GKE_POOL) connection-gcp-main(GCP_PROJECT_ID,GCP_KEY_PATH) connection-tfc(TFC_ORG) connection-blob-store(BLOB_KEY_SECRET,BLOB_BUCKET)"
+	want := "general(PUBLIC_HOST,CONTACT_ADDRESS) product-portal(COOKIE_KEY,EXPORT_BUCKET) site-main(GKE_POOL) connection-gcp-main(GCP_PROJECT_ID,GCP_KEY_PATH) connection-state-store(STATE_ORG) connection-blob-store(BLOB_KEY_SECRET,BLOB_BUCKET)"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got  %s\nwant %s", strings.Join(got, " "), want)
 	}
-	if bs[1].Site != "site-main" || bs[1].Connections[0] != "connection-blob-store" || bs[2].Connections[0] != "connection-gcp-main" || bs[2].State != "connection-tfc" {
+	if bs[1].Site != "site-main" || bs[1].Connections[0] != "connection-blob-store" || bs[2].Connections[0] != "connection-gcp-main" || bs[2].State != "connection-state-store" {
 		t.Fatalf("references %+v %+v", bs[1], bs[2])
 	}
 	// two sites on two Google Cloud projects: each site has its own connection batch, nothing collides
@@ -179,7 +179,7 @@ func TestCompatSkipsTwoSites(t *testing.T) {
 	for _, e := range it.Entries {
 		keys = append(keys, e.Key+"="+e.Value)
 	}
-	want := "PUBLIC_HOST=example.org CONTACT_ADDRESS=help@example.org HOSTING=gcp STATE_STORE=tfc GKE_POOL=c1 GCP_PROJECT_ID=lumen-1 GCP_KEY_PATH=creds/gcp.json TFC_ORG=org1 PORTAL=cluster COOKIE_KEY=sig EXPORT_BUCKET=b1 BLOB_KEY_SECRET=blob-sec BLOB_BUCKET="
+	want := "PUBLIC_HOST=example.org CONTACT_ADDRESS=help@example.org HOSTING=gcp STATE_STORE=remote GKE_POOL=c1 GCP_PROJECT_ID=lumen-1 GCP_KEY_PATH=creds/gcp.json STATE_ORG=org1 PORTAL=cluster COOKIE_KEY=sig EXPORT_BUCKET=b1 BLOB_KEY_SECRET=blob-sec BLOB_BUCKET="
 	if strings.Join(keys, " ") != want {
 		t.Fatalf("got  %s\nwant %s", strings.Join(keys, " "), want)
 	}

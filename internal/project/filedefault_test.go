@@ -14,7 +14,7 @@ func TestFileDefaultIsValidated(t *testing.T) {
 		t.Fatal("the example changed")
 	}
 	for name, tc := range map[string]struct{ pat, want string }{
-		"ok":        {"generated/*/account/credentials.json", ""},
+		"ok":        {"creds/*.json", ""},
 		"absolute":  {"/etc/key", "file-default"},
 		"parent":    {"../key", "file-default"},
 		"unclean":   {"a//b", "file-default"},

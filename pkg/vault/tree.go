@@ -23,7 +23,7 @@ var ErrNotFound = errors.New("not found")
 const RecycleBinName = "Recycle Bin"
 
 // binaryBytes is the content of an attachment. The library's GetContentBytes tries base64 on every binary "for KDBX 3.1" and, when the bytes happen to be valid
-// base64, returns the DECODED bytes even in a KDBX 4 file: a key file of 64 hex characters or the base64 of 32 bytes (a master key, an etcd key) came back as other
+// base64, returns the DECODED bytes even in a KDBX 4 file: a key file of 64 hex characters or the base64 of 32 bytes (a signing key, a ring key) came back as other
 // bytes. In KDBX 4 the content is stored as it is (the inner header never compresses it), so it is returned as it is; only a 3.x file, which Open refuses, takes
 // the library's way.
 func binaryBytes(db *gokeepasslib.Database, b *gokeepasslib.Binary) ([]byte, error) {

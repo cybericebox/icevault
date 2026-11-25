@@ -26,14 +26,14 @@ func mustRefuseTree(t *testing.T, what string, tr tree) {
 
 func TestImportRefusesFileNamesThatWouldInjectNotes(t *testing.T) {
 	for name, rel := range map[string]string{
-		"a line break and a machine line": "made/a\ntype=aws/keys/x",
-		"U+2028 in a directory":           "made/dir\u2028state=retired/keys/x",
-		"U+0085":                          "made/x\u0085labels/keys/x",
-		"a zero-width space":              "made/x/keys/\u200bstate=retired",
-		"a carriage return":               "made/x/keys/a\rtitle=evil",
-		"a BOM":                           "made/x/keys/\ufeffstate=x",
-		"a space":                         "made/x/keys/a b",
-		"a quote":                         "made/x/keys/a\"b",
+		"a line break and a machine line": "built/a\ntype=aws/keys/x",
+		"U+2028 in a directory":           "built/dir\u2028state=retired/keys/x",
+		"U+0085":                          "built/x\u0085labels/keys/x",
+		"a zero-width space":              "built/x/keys/\u200bstate=retired",
+		"a carriage return":               "built/x/keys/a\rtitle=evil",
+		"a BOM":                           "built/x/keys/\ufeffstate=x",
+		"a space":                         "built/x/keys/a b",
+		"a quote":                         "built/x/keys/a\"b",
 	} {
 		tr := populate()
 		tr.put(rel, "A=1\n", 0o600)
@@ -44,12 +44,12 @@ func TestImportRefusesFileNamesThatWouldInjectNotes(t *testing.T) {
 	}
 	// a key file name too (the rule's .+ takes U+2028 but not a line break)
 	tr := populate()
-	tr.put("made/google/keys/x\u2028y", "k", 0o600)
+	tr.put("built/google/keys/x\u2028y", "k", 0o600)
 	mustRefuseTree(t, "a key file with U+2028", tr)
 	// a name the rules do not keep is not imported at all
 	r := newRun(t)
 	tr2 := populate()
-	tr2.put("made/google/keys/x\ny=z", "k", 0o600)
+	tr2.put("built/google/keys/x\ny=z", "k", 0o600)
 	out := r.mustImport("staging", tr2, nil)
 	if strings.Contains(out, "x\ny") || !strings.Contains(out, `x\ny=z`) {
 		t.Errorf("an unkept name is reported escaped:\n%s", out)

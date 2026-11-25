@@ -380,13 +380,13 @@ func TestWritesAskBeforeTouchingWhatIsUsed(t *testing.T) {
 	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "value": "id-1", "visibility": "plain"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "GOOGLE_CLIENT_ID", "value": "${{ shared.OAUTH_ID }}", "visibility": "plain"}); err != nil {
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "SOCIAL_CLIENT_ID", "value": "${{ shared.OAUTH_ID }}", "visibility": "plain"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "delete": true}); code(err) != "confirm_shared_used" {
 		t.Fatalf("a shared value used by a reference: %v", err)
 	}
-	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "GOOGLE_CLIENT_ID", "delete": true}); err != nil {
+	if _, err := c.Write("m-var", map[string]any{"scope": "env/prod/general", "key": "SOCIAL_CLIENT_ID", "delete": true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Write("m-var", map[string]any{"scope": "shared", "key": "OAUTH_ID", "delete": true}); err != nil {
@@ -489,7 +489,7 @@ func TestTypedVariables(t *testing.T) {
 	}
 }
 
-// "Needed for deploy" follows required-when over the place of the product (BRAIN=cluster needs its tag and keys, BRAIN=none does not) and the
+// "Needed for deploy" follows required-when over the place of the product (INDEXER=cluster needs its broker, INDEXER=none does not) and the
 // defaults of the description; a product that is off needs nothing.
 func TestRequiredWhenFollowsThePlaceOfTheProduct(t *testing.T) {
 	c, _ := newCore(t)

@@ -9,7 +9,7 @@ import (
 )
 
 func TestAnEmptyFieldNamesTheFileOfTheSiteThatCoversIt(t *testing.T) {
-	desc := strings.Replace(string(example.Description()), "{name: GCP_KEY_PATH, field: credentials}", "{name: GCP_KEY_PATH, field: credentials, file-default: 'generated/*/account/credentials.json'}", 1)
+	desc := strings.Replace(string(example.Description()), "{name: GCP_KEY_PATH, field: credentials}", "{name: GCP_KEY_PATH, field: credentials, file-default: 'creds/*.json'}", 1)
 	c, _ := newCoreWith(t, []byte(desc))
 	e := c.Model().Envs[0]
 	gcp := e.Sites[0].Connection
@@ -26,8 +26,8 @@ func TestAnEmptyFieldNamesTheFileOfTheSiteThatCoversIt(t *testing.T) {
 	if field()["file_used"] != nil {
 		t.Fatal("no file yet")
 	}
-	e.Sites[0].Files = []*vmodel.File{{Rel: "generated/google-cluster/account/credentials.json", Data: []byte("TOPSECRET"), Vis: vmodel.VisSealed}}
-	if got := field()["file_used"]; got != "generated/google-cluster/account/credentials.json" {
+	e.Sites[0].Files = []*vmodel.File{{Rel: "creds/gcp.json", Data: []byte("TOPSECRET"), Vis: vmodel.VisSealed}}
+	if got := field()["file_used"]; got != "creds/gcp.json" {
 		t.Fatalf("file_used: %v", got)
 	}
 	gcp.Field("credentials").Value = "filled"

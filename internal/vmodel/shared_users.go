@@ -8,7 +8,7 @@ import (
 )
 
 // SharedUsers lists what uses the shared variable x, in the order of the environments: an environment that imports it ("prod"), or holds
-// values that refer to it as ${{ shared.KEY }} in General, a site or a product ("prod (GOOGLE_CLIENT_ID, MAIL_FROM)"; an import under the same
+// values that refer to it as ${{ shared.KEY }} in General, a site or a product ("prod (SOCIAL_CLIENT_ID, MAIL_FROM)"; an import under the same
 // key and a reference in the same environment give one line, with the keys of the values), then the other shared variables ("shared (KEY)") and
 // the connection fields ("Connection (field)") that refer to it. A value that refers to another value which refers to x is not listed: the
 // holder of the reference itself is.
