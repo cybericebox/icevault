@@ -405,7 +405,7 @@ func runStatus(e *Env, args []string, out io.Writer, plat *render.Project, snap 
 			extra += fmt.Sprintf(", %d from linked items", f.FromLinks)
 		}
 		if len(f.Empty) > 0 {
-			extra += fmt.Sprintf(", %d empty", len(f.Empty))
+			extra += fmt.Sprintf(", %d empty (%s)", len(f.Empty), strings.Join(f.Empty, ", "))
 		}
 		fmt.Fprintf(out, "  %s: %d variable(s)%s\n", f.Rel, f.Variables, extra)
 		for _, v := range f.Vars {

@@ -4,6 +4,8 @@ IceVault {{VERSION}}
 
 - The environment screen lists the files the environment and each site keep (path, site, sealed mark, last change; never the content).
 - A connection field that is empty but covered by a kept file of the site (new `file-default` key of the description) says so instead of "not set".
+- `icevault status` names the empty variables of each settings file, after the count (names only).
+- The reference picker counts the values that refer to the edited key when it checks the depth limit of a chain.
 
 ## What is here
 

@@ -447,13 +447,36 @@ func (g *refGraph) unusable(own string) map[string]bool {
 		depth[n] = best + 1
 		return best + 1
 	}
+	// the referrers of own: a value that refers to own starts a longer chain, so the chain above own (the most links from a node that reaches own) counts too
+	above := map[string]int{}
+	seen := map[string]bool{}
+	var up func(n string) int
+	up = func(n string) int {
+		if v, ok := above[n]; ok {
+			return v
+		}
+		if seen[n] {
+			return 0
+		}
+		seen[n] = true
+		best := 0
+		for _, from := range rev[n] {
+			if from != own {
+				best = max(best, 1+up(from))
+			}
+		}
+		seen[n] = false
+		above[n] = best
+		return best
+	}
+	over := up(own)
 	for n := range g.edges {
-		if longest(n) > model.MaxRefDepth {
+		if longest(n)+over > model.MaxRefDepth {
 			out[n] = true
 		}
 	}
 	for n := range rev { // a target that is only ever referred to (no value of its own) is one link deep
-		if longest(n) > model.MaxRefDepth {
+		if longest(n)+over > model.MaxRefDepth {
 			out[n] = true
 		}
 	}
