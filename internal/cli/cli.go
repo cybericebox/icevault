@@ -263,6 +263,8 @@ func runCommand(cmd string, rest []string, e *Env) int {
 		err = cmdKeyfile(rest, e)
 	case "ui":
 		err = cmdUI(rest, e)
+	case "agent":
+		err = cmdAgent(rest, e)
 	default:
 		fmt.Fprintf(e.Err, "icevault: unknown command %q\n", cmd)
 		usage(e.Err)

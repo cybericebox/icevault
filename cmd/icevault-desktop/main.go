@@ -24,6 +24,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/cybericebox/icevault/internal/agentapi"
 	"github.com/cybericebox/icevault/internal/appbundle"
 	"github.com/cybericebox/icevault/internal/cliinstall"
 	"github.com/cybericebox/icevault/internal/desktop"
@@ -154,7 +155,11 @@ func main() {
 		}
 		return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{Title: title, Filters: []runtime.FileFilter{{DisplayName: "YAML (*.yaml, *.yml)", Pattern: "*.yaml;*.yml"}}})
 	}
-	app := desktop.New(desktop.Options{Vaults: vaults, Vault: first, Pick: pick, PickSave: pickSave, Maker: makerFor(vaults), PickDescription: pickDescription, Focus: *focus, Clipboard: clip, CLI: cliInst,
+	agentDir := ""
+	if !*demo { // the demo must not take the socket of a real window
+		agentDir = agentapi.Dir(os.Getenv)
+	}
+	app := desktop.New(desktop.Options{AgentDir: agentDir, Vaults: vaults, Vault: first, Pick: pick, PickSave: pickSave, Maker: makerFor(vaults), PickDescription: pickDescription, Focus: *focus, Clipboard: clip, CLI: cliInst,
 		Update: updater, OpenURL: func(url string) {
 			if ctx != nil {
 				runtime.BrowserOpenURL(ctx, url)

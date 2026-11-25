@@ -74,6 +74,10 @@ type Options struct {
 	// Maker and PickSave make "New vault" possible (newvault.go): both are needed, and the list of Vaults; nil: the page offers no new vault.
 	Maker    VaultMaker
 	PickSave SavePicker
+	// AgentDir is the folder of the agent socket and journal (agentapi.Dir); "" switches the agent API off. The socket exists only while the vault is unlocked.
+	AgentDir string
+	// AgentTTL is how long a request waits for the person's answer (0: AgentTTLDefault).
+	AgentTTL time.Duration
 }
 
 // CLIInstaller is internal/cliinstall as the window needs it.
@@ -108,6 +112,8 @@ type App struct {
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 	changeWrong int          // wrong current passwords in a row in the change-password dialog (changepw.go)
 	changing    sync.Mutex   // one password change at a time
+	agent       *agentHub    // the agent API (agent.go); nil when it is off
+	ops         sync.Mutex   // one operation on the core at a time: the window's own and the agents'
 
 	unlocking  sync.Mutex // one unlock at a time
 	confirming sync.Mutex // never two Touch ID dialogs at once
@@ -149,6 +155,9 @@ func New(o Options) *App {
 		}
 	}
 	a := &App{o: o, mode: "view", active: o.Clock(), unlockState: "idle", cur: Target{Unlocker: o.Unlocker, Binding: o.Binding, Confirm: o.Confirm}}
+	if o.AgentDir != "" {
+		a.agent = newAgentHub(a, o.AgentDir, o.AgentTTL)
+	}
 	if o.Vaults != nil && o.Vault != "" {
 		a.selectVault(o.Vault)
 	}
@@ -309,6 +318,7 @@ func (a *App) Refresh() Response {
 }
 
 func (a *App) quit() {
+	a.agentStop()
 	if a.o.Quit != nil {
 		a.o.Quit()
 	}
@@ -341,6 +351,7 @@ func (a *App) lock() {
 	c := a.core
 	a.core, a.mode = nil, "view"
 	a.mu.Unlock()
+	a.agentStop()
 	a.clearClipboardIfOurs()
 	if c != nil {
 		c.Lock()
@@ -376,7 +387,7 @@ func (a *App) status() map[string]any {
 		left = 0
 	}
 	return map[string]any{"locked": a.core == nil, "mode": a.mode, keyTouchID: a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
-		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword()}
+		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword(), "agent": a.agent != nil}
 }
 
 // Status is the lock state and the mode.
@@ -387,7 +398,11 @@ func (a *App) Ping(active bool) Response {
 	a.touch(active)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return ok(map[string]any{"ok": true, "locked": a.core == nil, "mode": a.mode, "rev": a.rev})
+	agent := 0
+	if a.agent != nil {
+		agent = a.agent.pendingCount()
+	}
+	return ok(map[string]any{"ok": true, "locked": a.core == nil, "mode": a.mode, "rev": a.rev, "agent": agent})
 }
 
 // ---- unlock: the only place a password is read
@@ -405,6 +420,7 @@ func (a *App) attach(c Core) map[string]any {
 	a.active = a.o.Clock()
 	a.mu.Unlock()
 	a.say("unlocked")
+	a.agentStart()
 	a.opened()
 	return out
 }
@@ -570,7 +586,9 @@ func (a *App) Read(op string, args map[string]any) Response {
 	default:
 		return fail(404, "not_found")
 	}
+	a.ops.Lock()
 	data, err := c.Read(op, args)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}
@@ -597,7 +615,9 @@ func str(args map[string]any, k string) string {
 }
 
 func (a *App) reveal(c Core, args map[string]any) (string, *Response) {
+	a.ops.Lock()
 	value, err := c.Reveal(str(args, "section"), str(args, "name"), str(args, "group"), str(args, "key"))
+	a.ops.Unlock()
 	if err != nil {
 		r := answer(err)
 		return "", &r
@@ -666,8 +686,10 @@ func (a *App) Write(op string, args map[string]any) Response {
 		}
 	}
 	// what another writer saved since the last check is read first, so this write lands on it instead of failing with "changed on disk"
+	a.ops.Lock()
 	_, _ = a.syncDisk(false, true)
 	data, err := c.Write(op, args)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}

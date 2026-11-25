@@ -47,6 +47,9 @@
       case "kit-discard": return app.DiscardRecoveryKit();
       case "kit-held": return app.KitHeld();
       case "project-choose": return app.ChooseProject(String(b.title || ""));
+      case "agent-pending": return app.AgentPending();
+      case "agent-decide": return app.AgentDecide(String(b.id || ""), !!b.allow);
+      case "agent-journal": return app.AgentJournal();
       case "update": return app.UpdateStatus();
       case "update-check": return app.UpdateCheck();
       case "update-fetch": return app.UpdateFetch();

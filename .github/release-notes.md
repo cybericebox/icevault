@@ -4,6 +4,10 @@ IceVault {{VERSION}}
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
+- **Agent API.** While the window is unlocked it serves a local socket (mode 0600, in the user's own configuration folder; gone when the window locks or closes) that `icevault agent OP [JSON]` talks to: programs of the user can read the structure of the vault (names, states, plain values, never a secret value) and create, rename and delete variables, connections, fields, sites, products and environments, set labels, expiry and visibility (only upwards), and move or copy a value inside the vault. Deleted things go to the recycle bin.
+- Setting a secret value through the API waits for the window: a confirmation shows what, where and who asked (**Deny** has the focus), and the client gets pending, then allowed, denied or expired. The value comes from a file or the standard input of the client, never an argument, and is never echoed or logged.
+- A **Journal** panel in the window (the robot button) lists every API action (time, operation, names, who asked, result; no values); the same lines are kept in `agent-journal.log` in the configuration folder.
+
 ## What is here
 
 - `IceVault-{{VERSION}}-macos.dmg`: **the recommended way on macOS**. Open it and drag IceVault to Applications. One application for Apple silicon and Intel (the settings window, with the `icevault` command inside it).

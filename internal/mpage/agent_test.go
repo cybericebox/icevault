@@ -1,0 +1,475 @@
+package mpage
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cybericebox/icevault/internal/agentapi"
+	"github.com/cybericebox/icevault/internal/desktop"
+	"github.com/cybericebox/icevault/pkg/vault"
+)
+
+// The agent API over a throwaway vault: the window (desktop.App) with the real model core, a client on its socket.
+
+// lockCore is the model core with the Lock the window asks of every core (the window's own wrapper drops the password it holds; here nothing is held).
+type lockCore struct{ *Core }
+
+func (lockCore) Lock() {}
+
+type coreUnlocker struct{ c desktop.Core }
+
+func (u coreUnlocker) Open([]byte) (desktop.Core, error) { return u.c, nil }
+func (coreUnlocker) Touch() ([]byte, error)              { return nil, nil }
+func (coreUnlocker) HasKeyFile() bool                    { return false }
+
+// every secret the fixture holds, and the ones the tests send: none may ever show in an answer or in the journal
+var agentSecrets = []string{"gkey-secret-1", "blob-secret-1", "sig-secret-1", "wifi-secret-1", "new-secret-value-77", "other-secret-value-88", "moved-secret-value-99"}
+
+type agentRig struct {
+	t      *testing.T
+	app    *desktop.App
+	core   *Core
+	v      *vault.Vault
+	dir    string
+	events []string
+	seen   []string // every answer of the API, as text
+}
+
+func newRig(t *testing.T, ttl time.Duration) *agentRig {
+	t.Helper()
+	c, v := newCore(t)
+	base, err := os.MkdirTemp("/tmp", "ivag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	r := &agentRig{t: t, core: c, v: v, dir: filepath.Join(base, agentapi.AppDirName)}
+	r.app = desktop.New(desktop.Options{Unlocker: coreUnlocker{lockCore{c}}, AgentDir: r.dir, AgentTTL: ttl, SyncEvery: -1,
+		Notify: func(event string, _ any) { r.events = append(r.events, event) }})
+	return r
+}
+
+func (r *agentRig) unlock() {
+	r.t.Helper()
+	if resp := r.app.Unlock("password", "throwaway-window-pw"); resp.Status != 200 {
+		r.t.Fatalf("unlock: %v", resp)
+	}
+}
+
+func (r *agentRig) call(op string, args map[string]any) agentapi.Response {
+	r.t.Helper()
+	resp, err := agentapi.Call(r.dir, agentapi.Request{Op: op, Args: args, Client: "test agent", PID: 4242}, 5*time.Second)
+	if err != nil {
+		r.t.Fatalf("%s: %v", op, err)
+	}
+	raw, _ := json.Marshal(resp)
+	r.seen = append(r.seen, string(raw))
+	return resp
+}
+
+func (r *agentRig) ok(op string, args map[string]any) agentapi.Response {
+	r.t.Helper()
+	resp := r.call(op, args)
+	if !resp.OK {
+		r.t.Fatalf("%s %v refused: %s %v", op, args, resp.Code, resp.Params)
+	}
+	return resp
+}
+
+func (r *agentRig) refused(op string, args map[string]any, code string) {
+	r.t.Helper()
+	resp := r.call(op, args)
+	if resp.OK || resp.Code != code {
+		r.t.Fatalf("%s %v: want refusal %s, got %+v", op, args, code, resp)
+	}
+}
+
+func (r *agentRig) status(id string) agentapi.Response {
+	return r.ok("status", map[string]any{"id": id})
+}
+
+func (r *agentRig) reveal(name, key string) string {
+	r.t.Helper()
+	v, err := r.core.Reveal("m", name, "", key)
+	if err != nil {
+		r.t.Fatalf("reveal %s %s: %v", name, key, err)
+	}
+	return v
+}
+
+func (r *agentRig) connUUID(name string) string {
+	return r.core.Model().Connection(name).UUID
+}
+
+// noSecrets scans every answer the API gave and the journal (the window's and the file) for the secrets.
+func (r *agentRig) noSecrets() {
+	r.t.Helper()
+	all := strings.Join(r.seen, "\n")
+	j, _ := json.Marshal(r.app.AgentJournal())
+	all += string(j)
+	if b, err := os.ReadFile(filepath.Join(r.dir, agentapi.JournalName)); err == nil {
+		all += string(b)
+	}
+	pend, _ := json.Marshal(r.app.AgentPending())
+	all += string(pend)
+	for _, s := range agentSecrets {
+		if strings.Contains(all, s) {
+			r.t.Fatalf("a secret value (%s...) is in an answer or in the journal", s[:6])
+		}
+	}
+}
+
+func TestAgentSocketOnlyWhileUnlockedAndPrivate(t *testing.T) {
+	r := newRig(t, 0)
+	if _, err := agentapi.Call(r.dir, agentapi.Request{Op: "help"}, time.Second); err == nil {
+		t.Fatal("a locked window answered")
+	}
+	r.unlock()
+	sock := agentapi.SocketPath(r.dir)
+	st, err := os.Lstat(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode()&os.ModeSocket == 0 || st.Mode().Perm() != 0o600 {
+		t.Fatalf("socket mode %v", st.Mode())
+	}
+	if d, _ := os.Stat(r.dir); d.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("folder mode %v", d.Mode())
+	}
+	if resp := r.ok("help", nil); resp.Data == nil {
+		t.Fatal("help is empty")
+	}
+	r.app.Lock()
+	if _, err := os.Lstat(sock); err == nil {
+		t.Fatal("the socket stays after the lock")
+	}
+	if _, err := agentapi.Call(r.dir, agentapi.Request{Op: "structure"}, time.Second); err == nil {
+		t.Fatal("a locked window answered")
+	}
+	r.unlock()
+	r.ok("structure", nil) // unlocking again brings it back
+	r.app.Close()
+	if _, err := os.Lstat(sock); err == nil {
+		t.Fatal("the socket stays after closing")
+	}
+}
+
+func TestAgentRefusesAFolderOthersCanWrite(t *testing.T) {
+	r := newRig(t, 0)
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(r.dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	r.unlock()
+	if _, err := os.Lstat(agentapi.SocketPath(r.dir)); err == nil {
+		t.Fatal("a socket was made in a folder others can write into")
+	}
+	if _, err := agentapi.Call(r.dir, agentapi.Request{Op: "help"}, time.Second); err == nil {
+		t.Fatal("the client used an open folder")
+	}
+	j, _ := json.Marshal(r.app.AgentJournal())
+	if !strings.Contains(string(j), "agent_dir") || strings.Contains(string(j), "\"active\":true") {
+		t.Fatalf("the window does not say the API is off: %s", j)
+	}
+}
+
+func TestAgentStructureHasNamesAndPlainValuesOnly(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	resp := r.ok("structure", nil)
+	raw, _ := json.Marshal(resp.Data)
+	text := string(raw)
+	for _, want := range []string{"prod", "main", "portal", "GCP", "Blob store", "credentials", "wifi", "CONTACT_ADDRESS", "COOKIE_KEY", "hello@example.net", "example.org", "lumen-prod"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the structure lacks %q", want)
+		}
+	}
+	var s struct {
+		Connections []struct {
+			Name   string
+			Fields []map[string]any
+		}
+	}
+	_ = json.Unmarshal(raw, &s)
+	for _, c := range s.Connections {
+		for _, f := range c.Fields {
+			if f["secret"] == true && f["value"] != nil {
+				t.Errorf("secret field %s.%v has a value", c.Name, f["name"])
+			}
+		}
+	}
+	one := r.ok("structure", map[string]any{"env": "nope"})
+	if raw, _ := json.Marshal(one.Data); strings.Contains(string(raw), "PUBLIC_HOST") {
+		t.Error("the env filter does not filter")
+	}
+	r.noSecrets()
+}
+
+func TestAgentStructureOps(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	// variables: create, set a plain value, rename, label and expiry, delete (to the recycle bin)
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "visibility": "plain", "description": "made by an agent"})
+	r.refused("var-create", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE"}, "name_exists")
+	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "value": "plain text"})
+	if got := r.reveal("env/prod/general", "AGENT_NOTE"); got != "plain text" {
+		t.Fatalf("plain value not set: %q", got)
+	}
+	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "description": "a label", "expires": "2099-01-02"})
+	r.ok("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_2"})
+	r.refused("var-rename", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE", "new_key": "AGENT_NOTE_3"}, "not_found")
+	st, _ := json.Marshal(r.ok("structure", nil).Data)
+	if !strings.Contains(string(st), "AGENT_NOTE_2") || !strings.Contains(string(st), "a label") || !strings.Contains(string(st), "plain text") || !strings.Contains(string(st), "2099-01-02") {
+		t.Fatalf("the structure lacks the new variable: %s", st)
+	}
+	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "AGENT_NOTE_2"})
+	if x := r.core.Model().Env("prod"); x != nil {
+		for _, v := range x.General {
+			if v.Key == "AGENT_NOTE_2" {
+				t.Fatal("deleted variable is still in the model")
+			}
+		}
+	}
+	bin, err := r.v.Entries(vault.RecycleBinName)
+	if err != nil || len(bin) == 0 {
+		t.Fatalf("the deleted variable is not in the recycle bin: %v %d", err, len(bin))
+	}
+	// connections and fields
+	r.ok("connection-create", map[string]any{"name": "Mail relay", "kind": "s3", "description": "x"})
+	r.refused("connection-create", map[string]any{"name": "Mail relay", "kind": "s3"}, "name_exists")
+	r.ok("field-create", map[string]any{"connection": "Mail relay", "field": "region"})
+	r.ok("set-value", map[string]any{"connection": "Mail relay", "field": "region", "value": "eu-1"})
+	r.ok("field-update", map[string]any{"connection": "Mail relay", "field": "region", "expires": "2099-05-05"})
+	r.ok("connection-update", map[string]any{"connection": "Mail relay", "new_name": "Mail relay 2"})
+	// sites, products, links
+	r.ok("site-create", map[string]any{"env": "prod", "name": "edge", "kind": "google-cluster", "connection": "GCP"})
+	r.ok("product-create", map[string]any{"env": "prod", "name": "wiki", "site": "edge", "connections": []any{"Blob store"}})
+	r.ok("product-update", map[string]any{"env": "prod", "name": "wiki", "new_name": "wiki2", "enabled": false})
+	r.refused("product-delete", map[string]any{"env": "prod", "name": "wiki2"}, "confirm_delete_product")
+	r.ok("product-delete", map[string]any{"env": "prod", "name": "wiki2", "confirm": true})
+	r.ok("site-update", map[string]any{"env": "prod", "name": "edge", "new_name": "edge2"})
+	r.ok("site-delete", map[string]any{"env": "prod", "name": "edge2"})
+	r.refused("site-create", map[string]any{"env": "prod", "name": "x", "kind": "google-cluster", "connection": "Nope"}, "not_found")
+	r.ok("field-delete", map[string]any{"connection": "Mail relay 2", "field": "region"})
+	r.ok("connection-delete", map[string]any{"connection": "Mail relay 2"})
+	// environments
+	r.ok("env-create", map[string]any{"name": "stage", "from": "prod", "title": "Stage"})
+	r.ok("env-update", map[string]any{"name": "stage", "new_name": "stage2"})
+	r.refused("env-delete", map[string]any{"name": "stage2"}, "confirm_delete_env")
+	r.ok("env-delete", map[string]any{"name": "stage2", "confirm": true})
+	// other secrets
+	r.ok("other-create", map[string]any{"title": "gate code"})
+	r.ok("other-update", map[string]any{"other": "gate code", "new_title": "gate code 2"})
+	r.ok("other-delete", map[string]any{"other": "gate code 2"})
+	r.refused("other-delete", map[string]any{"other": "gate code 2"}, "not_found")
+	r.refused("nonsense", nil, "unknown_op")
+	// the vault on disk holds what the window holds (Save ran)
+	if _, err := vault.Open(r.v.Path(), vault.Credentials{Password: []byte("pw-throwaway-1")}); err != nil {
+		t.Fatalf("the saved vault does not open: %v", err)
+	}
+	r.noSecrets()
+}
+
+func TestAgentVisibilityOnlyGoesUp(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.refused("var-meta", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "visibility": "secret"}, "no_lowering") // sealed never lowers
+	r.refused("var-meta", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "visibility": "plain"}, "no_lowering")
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "secret"})
+	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "plain"}, "no_lowering")
+	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "sealed"})
+	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "secret"}, "no_lowering")
+	r.refused("var-meta", map[string]any{"scope": "env/prod/general", "key": "LEVEL_UP", "visibility": "loud"}, "bad_request")
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "RISING"})
+	r.ok("set-value", map[string]any{"scope": "env/prod/general", "key": "RISING", "value": "was plain"})
+	r.ok("var-meta", map[string]any{"scope": "env/prod/general", "key": "RISING", "visibility": "secret"})
+	if raw, _ := json.Marshal(r.ok("structure", nil).Data); strings.Contains(string(raw), "was plain") {
+		t.Fatal("a variable made secret still shows its value")
+	}
+}
+
+func TestAgentSecretWriteWaitsForTheWindow(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	set := map[string]any{"connection": "GCP", "field": "credentials", "value": "new-secret-value-77"}
+	first := r.call("set-value", set)
+	if !first.OK || first.State != agentapi.StatePending || first.ID == "" {
+		t.Fatalf("a secret write must wait: %+v", first)
+	}
+	if got := r.reveal("conn/"+r.connUUID("GCP"), "credentials"); got != "gkey-secret-1" {
+		t.Fatalf("the secret changed before the person said Allow: %q", got)
+	}
+	if st := r.status(first.ID); st.State != agentapi.StatePending {
+		t.Fatalf("status %+v", st)
+	}
+	// the window shows what, where and who; never the value
+	pend, _ := json.Marshal(r.app.AgentPending())
+	for _, want := range []string{"credentials", "GCP", "test agent", "set-value", first.ID} {
+		if !strings.Contains(string(pend), want) {
+			t.Errorf("the pending list lacks %q: %s", want, pend)
+		}
+	}
+	if !contains(r.events, desktop.EventAgentPending) {
+		t.Error("the page was not told")
+	}
+	if resp := r.app.AgentDecide(first.ID, true); resp.Status != 200 {
+		t.Fatalf("allow: %+v", resp)
+	}
+	if st := r.status(first.ID); st.State != agentapi.StateAllowed {
+		t.Fatalf("after Allow: %+v", st)
+	}
+	if got := r.reveal("conn/"+r.connUUID("GCP"), "credentials"); got != "new-secret-value-77" {
+		t.Fatalf("Allow did not set the value: %q", got)
+	}
+	if resp := r.app.AgentDecide(first.ID, true); resp.Status == 200 {
+		t.Fatal("a request was allowed twice")
+	}
+	// Deny leaves it
+	second := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	if second.State != agentapi.StatePending {
+		t.Fatalf("%+v", second)
+	}
+	r.app.AgentDecide(second.ID, false)
+	if st := r.status(second.ID); st.State != agentapi.StateDenied {
+		t.Fatalf("after Deny: %+v", st)
+	}
+	if got := r.reveal("other/"+r.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
+		t.Fatalf("Deny changed the secret: %q", got)
+	}
+	// a secret variable waits too, and the sealed one is system-managed and refused
+	third := r.call("set-value", map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY", "value": "other-secret-value-88"})
+	if third.OK {
+		t.Fatalf("a sealed system variable took a value: %+v", third)
+	}
+	// the journal knows all of it, by names
+	j, _ := json.Marshal(r.app.AgentJournal())
+	for _, want := range []string{"set-value", "allowed", "denied", "pending", "GCP"} {
+		if !strings.Contains(string(j), want) {
+			t.Errorf("the journal lacks %q", want)
+		}
+	}
+	r.noSecrets()
+}
+
+func TestAgentPendingExpiresAndDiesWithTheLock(t *testing.T) {
+	r := newRig(t, 80*time.Millisecond)
+	r.unlock()
+	a := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	time.Sleep(250 * time.Millisecond)
+	if st := r.status(a.ID); st.State != agentapi.StateExpired {
+		t.Fatalf("not expired: %+v", st)
+	}
+	if resp := r.app.AgentDecide(a.ID, true); resp.Status == 200 {
+		t.Fatal("an expired request was allowed")
+	}
+	if got := r.reveal("other/"+r.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
+		t.Fatalf("an expired request changed the secret")
+	}
+	r2 := newRig(t, 0)
+	r2.unlock()
+	b := r2.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"})
+	r2.app.Lock()
+	r2.unlock()
+	if resp := r2.app.AgentDecide(b.ID, true); resp.Status == 200 {
+		t.Fatal("a request survived the lock")
+	}
+	if got := r2.reveal("other/"+r2.core.Model().Other[0].UUID, ""); got != "wifi-secret-1" {
+		t.Fatal("a request survived the lock and changed the secret")
+	}
+	r.noSecrets()
+	r2.noSecrets()
+}
+
+func TestAgentCopyAndMoveStayInsideTheVault(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	cred := "conn/" + r.connUUID("GCP")
+	// a secret never lands in a plain place: it would show in the list
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT", "visibility": "plain"})
+	r.refused("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}}, "would_expose")
+	// a secret into an empty secret place: at once, and the value is not in the answer
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT", "visibility": "secret"})
+	resp := r.ok("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}})
+	if resp.State != "" || r.reveal("env/prod/general", "SECRET_SPOT") != "gkey-secret-1" || r.reveal(cred, "credentials") != "gkey-secret-1" {
+		t.Fatalf("copy: %+v", resp)
+	}
+	// move: the source is emptied
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT", "visibility": "secret"})
+	r.ok("move-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}})
+	if r.reveal("env/prod/general", "MOVED_SPOT") != "gkey-secret-1" || r.reveal("env/prod/general", "SECRET_SPOT") != "" {
+		t.Fatal("move did not move")
+	}
+	// plain to plain, plain to secret
+	r.ok("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}})
+	if r.reveal("env/prod/general", "PLAIN_SPOT") != "hello@example.net" {
+		t.Fatal("plain copy")
+	}
+	// replacing a filled secret waits for the window
+	pend := r.call("copy-value", map[string]any{"from": map[string]any{"connection": "Blob store", "field": "secret_access_key"}, "to": map[string]any{"connection": "GCP", "field": "credentials"}})
+	if pend.State != agentapi.StatePending {
+		t.Fatalf("overwrite of a filled secret must wait: %+v", pend)
+	}
+	if r.reveal(cred, "credentials") != "gkey-secret-1" {
+		t.Fatal("overwritten before Allow")
+	}
+	r.app.AgentDecide(pend.ID, true)
+	if r.reveal(cred, "credentials") != "blob-secret-1" {
+		t.Fatal("Allow did not copy")
+	}
+	// a sealed value is never moved, an empty source is refused, the same place is refused
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/product/portal", "key": "COOKIE_KEY"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}, "sealed")
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}, "empty_source")
+	r.refused("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}}, "same_target")
+	r.noSecrets()
+}
+
+func TestAgentSetPlainValueOnlyWherePlain(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "ops@example.net"})
+	r.ok("set-value", map[string]any{"connection": "GCP", "field": "project", "value": "lumen-stage"})
+	if r.reveal("shared", "CONTACT_ADDRESS") != "ops@example.net" || r.reveal("conn/"+r.connUUID("GCP"), "project") != "lumen-stage" {
+		t.Fatal("plain values not set")
+	}
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "bad_request") // no value
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "NOPE", "value": "x"}, "not_found")
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "a\nb"}, "line_break")
+	if n := len(r.core.Model().Shared); n != 1 {
+		t.Fatalf("shared has %d entries", n)
+	}
+}
+
+func TestAgentJournalIsKeptInAFileWithoutValues(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("structure", nil)
+	r.refused("set-value", map[string]any{"scope": "shared", "key": "NOPE", "value": "moved-secret-value-99"}, "not_found")
+	p := r.call("set-value", map[string]any{"connection": "GCP", "field": "credentials", "value": "moved-secret-value-99"})
+	r.app.AgentDecide(p.ID, true)
+	b, err := os.ReadFile(filepath.Join(r.dir, agentapi.JournalName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(filepath.Join(r.dir, agentapi.JournalName)); st.Mode().Perm() != 0o600 {
+		t.Fatalf("journal mode %v", st.Mode())
+	}
+	for _, want := range []string{"structure", "set-value", "connection=GCP", "field=credentials", "allowed", "refused: not_found", "test agent (pid 4242)"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the journal file lacks %q:\n%s", want, b)
+		}
+	}
+	// a second window run reads the earlier entries
+	r.app.Lock()
+	h := r.app
+	h.Unlock("password", "x")
+	if j, _ := json.Marshal(h.AgentJournal()); !strings.Contains(string(j), "structure") {
+		t.Errorf("the journal panel lost the earlier entries: %s", j)
+	}
+	r.noSecrets()
+}

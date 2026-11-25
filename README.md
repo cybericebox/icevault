@@ -80,10 +80,25 @@ icevault session run --env E -- CMD    run CMD with a private tree of the enviro
 icevault purge-plaintext --env E       remove the plaintext files the vault holds
 icevault copies | copy --to DIR        copies of the vault on other volumes
 icevault ui                            the window (macOS)
+icevault agent OP [JSON]               ask the unlocked window to read or change the vault (see "The agent API"; JSON answer, never a secret value)
 icevault help [COMMAND]                every command and flag
 ```
 
 Environment variables: `ICEVAULT_ROOT` (the checkout; otherwise the nearest folder above the working directory with `icevault-project.yaml`), `ICEVAULT_PROJECT` (another description file), `ICEVAULT_VAULT` (the vault file; `--vault PATH` wins), `ICEVAULT_KEYFILE`, `ICEVAULT_NO_VAULT=1`, `ICEVAULT_NO_TOUCHID=1`.
+
+## The agent API
+
+While the window is **unlocked** it serves a local unix socket (`agent.sock` in the application folder of the user's configuration directory: mode 0600, in a folder owned by the user and closed to the group and the others; a folder others can write into switches the API off). Locked or closed means no socket and no access. `icevault agent OP [JSON]` is the client: it asks no password, unlocks nothing and prints one JSON line (exit 0 done, 1 refused or no window, 2 usage, 3 not allowed or timed out). `icevault agent help` lists the operations.
+
+- **Read**: `structure` lists environments, sites, products, variables, connections with their fields, shared values, other secrets (names), files and who uses what: names, states (`filled`), expiry dates and the values of plain places. A secret or sealed value is never in any answer.
+- **Change**: create, rename and delete variables, environments, connections, connection fields, sites, products and other secrets; set labels, expiry dates and visibility (visibility only goes up: a secret is never made plain, a sealed one never lowered); link products to sites and connections; move or copy a value from one place of the vault to another (the value never leaves the program; a secret is never copied into a plain place). The window's own write paths do the work, so validation, the model check and the save are the same. What is deleted goes to the vault's recycle bin.
+- **Values**: a value is set at once only in a plain place. A secret place (secret or sealed variable, secret field, other secret), and a move or copy that would replace a secret that is already there, waits: the window shows a confirmation (what, where, who asked; **Deny** has the focus) and the client gets `pending`, then `allowed`, `denied` or `expired` (a request is dropped after two minutes or when the window locks). A value is never an argument of the command: put `"value_file": "/path"` or `"value_stdin": true` in the JSON.
+- **Journal**: every request (time, operation, names, who asked, result; never a value) is shown in the window (the robot button) and kept in `agent-journal.log` next to the socket.
+
+```
+echo -n 'new value' | icevault agent set-value '{"connection":"Mail relay","field":"password","value_stdin":true}'
+icevault agent structure '{"env":"prod"}'
+```
 
 ## The master password
 

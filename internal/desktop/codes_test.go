@@ -255,6 +255,10 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 		t.Errorf("CLIStatus: %+v", r)
 	}
 	covered["CLIStatus"] = true
+	assertCoded(t, "AgentPending locked", l.AgentPending())
+	assertCoded(t, "AgentJournal locked", l.AgentJournal())
+	assertCoded(t, "AgentDecide locked", l.AgentDecide("x", true))
+	covered["AgentPending"], covered["AgentJournal"], covered["AgentDecide"] = true, true, true
 	assertCoded(t, "Unlock bad method", l.Unlock("nope", ""))
 	assertCoded(t, "Unlock no unlocker", l.Unlock("touch", ""))
 	// the choice of the vault: every step fails with each error
