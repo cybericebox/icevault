@@ -3091,8 +3091,7 @@ function mEnv(main) {
   if (!e.sites.length) s.append(mempty(t("m.empty.sites")));
   e.sites.forEach((x) => msite(s, e, x));
   // Files: what the environment keeps (names and dates only, never the content)
-  const fl = mblock(main, t("m.env.files"), "file", [], t("m.env.files_note"));
-  mfiles(fl, e.file_list);
+  if (e.file_list.length) { const fl = mblock(main, t("m.env.files"), "file", [], t("m.env.files_note")); mfiles(fl, e.file_list); }   // the files of the sites are shown once, in their site cards
   // Products: what runs
   const p = mblock(main, t("m.env.products"), "package", [editing() ? btn(t("m.product.new"), "plus", () => mproductDialog(e, null)) : null], t("m.env.products_note"));
   if (!e.products.length) p.append(mempty(t("m.empty.products")));
