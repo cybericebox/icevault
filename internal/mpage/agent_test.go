@@ -2,8 +2,10 @@ package mpage
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +60,9 @@ func (r *agentRig) unlock() {
 	if resp := r.app.Unlock("password", "throwaway-window-pw"); resp.Status != 200 {
 		r.t.Fatalf("unlock: %v", resp)
 	}
+	if resp := r.app.SetMode("edit"); resp.Status != 200 { // the agent's writes need the window in edit mode
+		r.t.Fatalf("edit mode: %v", resp)
+	}
 }
 
 func (r *agentRig) call(op string, args map[string]any) agentapi.Response {
@@ -85,6 +90,21 @@ func (r *agentRig) refused(op string, args map[string]any, code string) {
 	resp := r.call(op, args)
 	if resp.OK || resp.Code != code {
 		r.t.Fatalf("%s %v: want refusal %s, got %+v", op, args, code, resp)
+	}
+}
+
+// allow runs an op that waits for the person and answers Allow.
+func (r *agentRig) allow(op string, args map[string]any) {
+	r.t.Helper()
+	resp := r.call(op, args)
+	if !resp.OK || resp.State != agentapi.StatePending {
+		r.t.Fatalf("%s %v must wait for the window: %+v", op, args, resp)
+	}
+	if d := r.app.AgentDecide(resp.ID, true); d.Status != 200 {
+		r.t.Fatalf("%s: allow: %+v", op, d)
+	}
+	if st := r.status(resp.ID); st.State != agentapi.StateAllowed {
+		r.t.Fatalf("%s: %+v", op, st)
 	}
 }
 
@@ -251,18 +271,16 @@ func TestAgentStructureOps(t *testing.T) {
 	r.ok("site-create", map[string]any{"env": "prod", "name": "edge", "kind": "google-cluster", "connection": "GCP"})
 	r.ok("product-create", map[string]any{"env": "prod", "name": "wiki", "site": "edge", "connections": []any{"Blob store"}})
 	r.ok("product-update", map[string]any{"env": "prod", "name": "wiki", "new_name": "wiki2", "enabled": false})
-	r.refused("product-delete", map[string]any{"env": "prod", "name": "wiki2"}, "confirm_delete_product")
-	r.ok("product-delete", map[string]any{"env": "prod", "name": "wiki2", "confirm": true})
+	r.allow("product-delete", map[string]any{"env": "prod", "name": "wiki2"})
 	r.ok("site-update", map[string]any{"env": "prod", "name": "edge", "new_name": "edge2"})
-	r.ok("site-delete", map[string]any{"env": "prod", "name": "edge2"})
+	r.allow("site-delete", map[string]any{"env": "prod", "name": "edge2"})
 	r.refused("site-create", map[string]any{"env": "prod", "name": "x", "kind": "google-cluster", "connection": "Nope"}, "not_found")
 	r.ok("field-delete", map[string]any{"connection": "Mail relay 2", "field": "region"})
 	r.ok("connection-delete", map[string]any{"connection": "Mail relay 2"})
 	// environments
-	r.ok("env-create", map[string]any{"name": "stage", "from": "prod", "title": "Stage"})
+	r.allow("env-create", map[string]any{"name": "stage", "from": "prod", "title": "Stage"}) // prod holds secrets: a copy of it waits
 	r.ok("env-update", map[string]any{"name": "stage", "new_name": "stage2"})
-	r.refused("env-delete", map[string]any{"name": "stage2"}, "confirm_delete_env")
-	r.ok("env-delete", map[string]any{"name": "stage2", "confirm": true})
+	r.allow("env-delete", map[string]any{"name": "stage2", "confirm": true})
 	// other secrets
 	r.ok("other-create", map[string]any{"title": "gate code"})
 	r.ok("other-update", map[string]any{"other": "gate code", "new_title": "gate code 2"})
@@ -395,13 +413,13 @@ func TestAgentCopyAndMoveStayInsideTheVault(t *testing.T) {
 	r.refused("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "PLAIN_SPOT"}}, "would_expose")
 	// a secret into an empty secret place: at once, and the value is not in the answer
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT", "visibility": "secret"})
-	resp := r.ok("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}})
-	if resp.State != "" || r.reveal("env/prod/general", "SECRET_SPOT") != "gkey-secret-1" || r.reveal(cred, "credentials") != "gkey-secret-1" {
-		t.Fatalf("copy: %+v", resp)
+	r.allow("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}})
+	if r.reveal("env/prod/general", "SECRET_SPOT") != "gkey-secret-1" || r.reveal(cred, "credentials") != "gkey-secret-1" {
+		t.Fatal("copy")
 	}
 	// move: the source is emptied
 	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT", "visibility": "secret"})
-	r.ok("move-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}})
+	r.allow("move-value", map[string]any{"from": map[string]any{"scope": "env/prod/general", "key": "SECRET_SPOT"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}})
 	if r.reveal("env/prod/general", "MOVED_SPOT") != "gkey-secret-1" || r.reveal("env/prod/general", "SECRET_SPOT") != "" {
 		t.Fatal("move did not move")
 	}
@@ -459,7 +477,7 @@ func TestAgentJournalIsKeptInAFileWithoutValues(t *testing.T) {
 	if st, _ := os.Stat(filepath.Join(r.dir, agentapi.JournalName)); st.Mode().Perm() != 0o600 {
 		t.Fatalf("journal mode %v", st.Mode())
 	}
-	for _, want := range []string{"structure", "set-value", "connection=GCP", "field=credentials", "allowed", "refused: not_found", "test agent (pid 4242)"} {
+	for _, want := range []string{"structure", "set-value", "connection=GCP", "field=credentials", "allowed", "refused: not_found", "test agent (pid " + strconv.Itoa(os.Getpid()) + ")"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("the journal file lacks %q:\n%s", want, b)
 		}
@@ -472,4 +490,165 @@ func TestAgentJournalIsKeptInAFileWithoutValues(t *testing.T) {
 		t.Errorf("the journal panel lost the earlier entries: %s", j)
 	}
 	r.noSecrets()
+}
+
+func TestAgentWritesNeedEditMode(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.app.SetMode("view")
+	r.refused("var-create", map[string]any{"scope": "shared", "key": "VIEWONLY"}, "view_mode")
+	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "view_mode")
+	r.ok("structure", nil) // reads work
+	r.ok("help", nil)
+	if len(r.core.Model().Shared) != 1 {
+		t.Fatal("a write got through in view mode")
+	}
+	r.app.SetMode("edit")
+	r.ok("var-create", map[string]any{"scope": "shared", "key": "EDITOK"})
+}
+
+func TestAgentCannotLowerASecretField(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
+	r.refused("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": "no"}, "bad_request")
+	r.refused("field-create", map[string]any{"connection": "GCP", "field": "credentials", "secret": false}, "no_lowering")
+	r.ok("field-update", map[string]any{"connection": "GCP", "field": "credentials", "secret": true})
+	if raw, _ := json.Marshal(r.ok("structure", nil).Data); strings.Contains(string(raw), "gkey-secret-1") {
+		t.Fatal("the structure shows a secret field")
+	}
+	if !r.core.Model().Connection("GCP").Field("credentials").Secret {
+		t.Fatal("the field was lowered")
+	}
+	r.noSecrets()
+}
+
+func TestAgentQueuedRequestIsNotReaimed(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "visibility": "secret"})
+	set := r.call("set-value", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "value": "new-secret-value-77"})
+	cp := r.call("copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT"}})
+	if set.State != agentapi.StatePending || cp.State != agentapi.StatePending {
+		t.Fatalf("%+v %+v", set, cp)
+	}
+	// while they wait, the place is deleted and made again as a plain one
+	r.ok("var-delete", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT"})
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "AIM_SPOT", "visibility": "plain"})
+	for _, id := range []string{set.ID, cp.ID} {
+		if d := r.app.AgentDecide(id, true); d.Status == 200 {
+			t.Fatalf("a re-aimed request was applied: %+v", d)
+		}
+		if st := r.status(id); st.State != agentapi.StateFailed || st.Code != "gone" {
+			t.Fatalf("%+v", st)
+		}
+	}
+	if got := r.reveal("env/prod/general", "AIM_SPOT"); got != "" {
+		t.Fatalf("a value landed in the plain place: %q", got)
+	}
+	r.noSecrets()
+}
+
+func TestAgentEveryWriteIntoASecretNeedsAllow(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	// a plain value into an empty secret place
+	r.ok("var-create", map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET", "visibility": "secret"})
+	r.ok("set-value", map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS", "value": "ops@example.net"})
+	p := r.call("copy-value", map[string]any{"from": map[string]any{"scope": "shared", "key": "CONTACT_ADDRESS"}, "to": map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET"}})
+	if p.State != agentapi.StatePending || r.reveal("env/prod/general", "EMPTY_SECRET") != "" {
+		t.Fatalf("a copy into an empty secret did not wait: %+v", p)
+	}
+	// a move that empties a secret
+	m := r.call("move-value", map[string]any{"from": map[string]any{"connection": "Blob store", "field": "secret_access_key"}, "to": map[string]any{"scope": "env/prod/general", "key": "EMPTY_SECRET"}})
+	if m.State != agentapi.StatePending || r.reveal("conn/"+r.connUUID("Blob store"), "secret_access_key") != "blob-secret-1" {
+		t.Fatalf("a move out of a secret did not wait: %+v", m)
+	}
+	r.app.AgentDecide(p.ID, false)
+	r.app.AgentDecide(m.ID, false)
+	// a copy of an environment that holds secrets waits; an empty one is copied at once
+	c := r.call("env-create", map[string]any{"name": "copy1", "from": "prod"})
+	if c.State != agentapi.StatePending || r.core.Model().Env("copy1") != nil {
+		t.Fatalf("%+v", c)
+	}
+	r.app.AgentDecide(c.ID, false)
+	r.ok("env-create", map[string]any{"name": "bare"})
+	r.ok("env-create", map[string]any{"name": "bare2", "from": "bare"})
+	r.noSecrets()
+}
+
+func TestAgentDeletesWaitForAllow(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	for _, c := range []struct {
+		op   string
+		args map[string]any
+	}{
+		{"env-delete", map[string]any{"name": "prod", "confirm": true}},
+		{"site-delete", map[string]any{"env": "prod", "name": "main", "confirm": true}},
+		{"product-delete", map[string]any{"env": "prod", "name": "portal", "confirm": true}},
+		{"connection-delete", map[string]any{"connection": "GCP", "confirm": true}}, // used by a site
+	} {
+		p := r.call(c.op, c.args)
+		if p.State != agentapi.StatePending {
+			t.Fatalf("%s did not wait: %+v", c.op, p)
+		}
+		r.app.AgentDecide(p.ID, false)
+	}
+	m := r.core.Model()
+	if m.Env("prod") == nil || m.Env("prod").Site("main") == nil || m.Env("prod").Product("portal") == nil || m.Connection("GCP") == nil {
+		t.Fatal("something was deleted without Allow")
+	}
+	r.ok("connection-create", map[string]any{"name": "Spare", "kind": "s3"})
+	r.ok("connection-delete", map[string]any{"connection": "Spare"}) // nothing uses it: at once
+	r.allow("connection-delete", map[string]any{"connection": "Blob store"})
+	if r.core.Model().Connection("Blob store") != nil {
+		t.Fatal("Allow did not delete")
+	}
+}
+
+func TestAgentPendingIsCappedAndShowsTheRealPeer(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	for i := 0; i < 4; i++ {
+		if p := r.call("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}); p.State != agentapi.StatePending {
+			t.Fatalf("%d: %+v", i, p)
+		}
+	}
+	r.refused("set-value", map[string]any{"other": "wifi", "value": "other-secret-value-88"}, "too_many_pending")
+	pend, _ := json.Marshal(r.app.AgentPending())
+	if !strings.Contains(string(pend), "pid "+strconv.Itoa(os.Getpid())) || !strings.Contains(string(pend), "\"peer\":\"") || strings.Contains(string(pend), "pid 4242") {
+		t.Fatalf("the pending list does not name the real peer: %s", pend)
+	}
+	r.noSecrets()
+}
+
+func TestAgentFolderMustBeExactly0700(t *testing.T) {
+	r := newRig(t, 0)
+	if err := os.MkdirAll(r.dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(r.dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	r.unlock()
+	if _, err := os.Lstat(agentapi.SocketPath(r.dir)); err == nil {
+		t.Fatal("a socket was made in a folder open to the group")
+	}
+}
+
+func TestAgentLockDropsConnectionsAndPending(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	conn, err := net.Dial("unix", agentapi.SocketPath(r.dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	time.Sleep(100 * time.Millisecond)
+	r.app.Lock()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("an open connection survived the lock")
+	}
 }

@@ -2,7 +2,10 @@
 
 package agentapi
 
-import "errors"
+import (
+	"errors"
+	"net"
+)
 
 var errUnsupported = errors.New("the agent API is not available on this system")
 
@@ -16,3 +19,6 @@ func MakeDir(string) error { return errUnsupported }
 
 // CheckSocketFile is not available here.
 func CheckSocketFile(string) error { return errUnsupported }
+
+// Listen is not available here.
+func Listen(string) (net.Listener, error) { return nil, errUnsupported }

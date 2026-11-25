@@ -31,7 +31,7 @@ const EventAgentJournal = "agent-journal"
 // Limits of the agent API.
 const (
 	AgentTTLDefault = 2 * time.Minute // a request that waits for the person is dropped after this
-	agentMaxPending = 16
+	agentMaxPending = 4
 	agentMaxConns   = 8
 	agentRingSize   = 300
 	agentLogLimit   = 512 << 10
@@ -51,10 +51,10 @@ type AgentEntry struct {
 // agentReq is a request that waits for the person: what it changes, where, who asked, and the closure that does it after Allow. The value it carries lives
 // only in the closure.
 type agentReq struct {
-	id, op, kind, what, where, from, who string
-	asked                                time.Time
-	apply                                func(c Core) error
-	stop                                 func()
+	id, op, kind, what, where, from, who, peer string
+	asked                                      time.Time
+	apply                                      func(c Core) error
+	stop                                       func()
 }
 
 type agentDone struct {
@@ -68,6 +68,7 @@ type agentHub struct {
 	mu     sync.Mutex // guards the fields below
 	ln     net.Listener
 	err    string // why the socket is not served ("" when it is or when it is simply not up)
+	conns  map[net.Conn]struct{}
 	pend   map[string]*agentReq
 	ord    []string
 	done   map[string]agentDone
@@ -139,7 +140,7 @@ func (h *agentHub) start() {
 		}
 		_ = os.Remove(path) // left behind by a program that did not end cleanly
 	}
-	ln, err := net.Listen("unix", path)
+	ln, err := agentapi.Listen(path)
 	if err != nil {
 		h.err = "agent_listen"
 		h.a.say("the agent API is off: the socket could not be opened")
@@ -152,6 +153,7 @@ func (h *agentHub) start() {
 		return
 	}
 	h.ln = ln
+	h.conns = map[net.Conn]struct{}{}
 	if !h.loaded {
 		h.loaded = true
 		h.ring = h.readTail()
@@ -165,9 +167,14 @@ func (h *agentHub) stop() {
 	h.mu.Lock()
 	ln := h.ln
 	h.ln = nil
+	conns := h.conns
+	h.conns = nil
 	pend := h.pend
 	h.pend, h.ord, h.done, h.dord = map[string]*agentReq{}, nil, map[string]agentDone{}, nil
 	h.mu.Unlock()
+	for c := range conns { // what a client is in the middle of gets no answer: the vault is locked
+		_ = c.Close()
+	}
 	if ln != nil {
 		_ = ln.Close()
 		_ = os.Remove(agentapi.SocketPath(h.dir))
@@ -206,6 +213,22 @@ func (h *agentHub) accept(ln net.Listener) {
 
 func (h *agentHub) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+	peer, err := agentapi.PeerOf(conn) // who is there, as the system says: another user is not answered
+	if err != nil || !peer.SameUser() {
+		return
+	}
+	h.mu.Lock()
+	if h.conns == nil {
+		h.mu.Unlock()
+		return
+	}
+	h.conns[conn] = struct{}{}
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.conns, conn)
+		h.mu.Unlock()
+	}()
 	_ = conn.SetDeadline(time.Now().Add(agentReadWait))
 	line, err := bufio.NewReader(io.LimitReader(conn, agentapi.MaxRequest)).ReadBytes('\n')
 	if err != nil && len(line) == 0 {
@@ -216,7 +239,7 @@ func (h *agentHub) serve(conn net.Conn) {
 	if json.Unmarshal(line, &req) != nil || req.Op == "" {
 		resp = agentapi.Response{Code: "bad_request"}
 	} else {
-		resp = h.handle(req)
+		resp = h.handle(req, peer)
 	}
 	out, _ := json.Marshal(resp)
 	_, _ = conn.Write(append(out, '\n'))
@@ -357,7 +380,7 @@ func (a *App) AgentPending() Response {
 		h.mu.Lock()
 		for _, id := range h.ord {
 			p := h.pend[id]
-			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who,
+			list = append(list, map[string]any{"id": p.id, "op": p.op, keyKind: p.kind, "what": p.what, "where": p.where, "from": p.from, "who": p.who, "peer": p.peer,
 				"asked": p.asked.UTC().Format(time.RFC3339), "expires": p.asked.Add(h.ttl).UTC().Format(time.RFC3339)})
 		}
 		h.mu.Unlock()
@@ -391,6 +414,12 @@ func (a *App) AgentDecide(id string, allow bool) Response {
 		return ok(map[string]any{"ok": true})
 	}
 	a.ops.Lock()
+	if c2, e2 := a.store(); e2 != nil || c2 != c { // locked while the person was deciding
+		a.ops.Unlock()
+		p.apply = nil
+		h.finish(id, agentapi.StateFailed, "locked")
+		return fail(404, "agent_gone")
+	}
 	_, _ = a.syncDisk(false, true)
 	err := p.apply(c)
 	a.ops.Unlock()

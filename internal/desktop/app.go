@@ -354,7 +354,9 @@ func (a *App) lock() {
 	a.agentStop()
 	a.clearClipboardIfOurs()
 	if c != nil {
+		a.ops.Lock() // an operation of the window or of an agent in the middle of the core ends first
 		c.Lock()
+		a.ops.Unlock()
 		a.say("locked")
 		if a.o.Notify != nil {
 			a.o.Notify(EventVaultLocked, map[string]any{})

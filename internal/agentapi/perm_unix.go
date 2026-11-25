@@ -5,6 +5,7 @@ package agentapi
 import (
 	"errors"
 	"io/fs"
+	"net"
 	"os"
 	"syscall"
 )
@@ -21,8 +22,8 @@ func CheckDir(dir string) error {
 	if err != nil {
 		return err
 	}
-	if !st.IsDir() || !ownedByMe(st) || st.Mode().Perm()&0o022 != 0 {
-		return errors.New("the agent socket folder is not a directory of this user closed to the group and the others")
+	if !st.IsDir() || !ownedByMe(st) || st.Mode().Perm()&0o077 != 0 {
+		return errors.New("the agent socket folder is not a directory of this user with mode 0700")
 	}
 	return nil
 }
@@ -49,3 +50,10 @@ func MakeDir(dir string) error {
 
 // CheckSocketFile is checkSocketFile for the window, after it made the socket.
 func CheckSocketFile(path string) error { return checkSocketFile(path) }
+
+// Listen opens the socket with a umask that leaves it no access for the group and the others from the first moment.
+func Listen(path string) (net.Listener, error) {
+	old := syscall.Umask(0o077)
+	defer syscall.Umask(old)
+	return net.Listen("unix", path)
+}
