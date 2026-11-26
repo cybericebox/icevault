@@ -508,8 +508,10 @@ button.tg.legacy:hover { background:var(--ib-hover); color:var(--ib-ink); }
 .mtable .kname { white-space:normal; overflow-wrap:anywhere; flex:0 1 auto; min-width:0; } .mtable .ktitle { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }   /* narrow: the key is cut, the name stays */
 .mtable .islot { display:inline-block; width:32px; height:1px; }
 .mblock > .empty.block, main > .empty.block { min-height:min(50vh, 360px); justify-content:center; padding:24px 0; }
+main:not(.hidden):has(> .empty.block) { display:flex; flex-direction:column; } main > .empty.block { flex:1; }
+.mblock.solo > .mblock-h > .ibtn.fold { display:none; }
 .mtable td.mk { padding-top:6px; padding-bottom:6px; } .mtable td.mk .kcell { min-height:36px; }
-.mblock-h .grow, .mcard-h .grow, .msub-h .grow { flex:1; }
+.mblock-h .grow, .mcard-h .grow, .msub-h .grow, .head .meta .grow { flex:1; }
 .mblock.folded > :not(.mblock-h), .mcard.folded > :not(.mcard-h), .msub.folded > :not(.msub-h) { display:none; }
 .mblock.folded { margin-top:12px; }
 /* the design system's control height on the model page: selects, buttons, chips, icon buttons and the checkbox in one row are alike */
@@ -2956,7 +2958,7 @@ function mempty(text, action) { const e = el("div", "empty block"); e.append(ico
 
 function mhead(main, iconName, title, sub, actions) {
   const crumb = $("crumb"); crumb.textContent = ""; crumb.append(icon(iconName, "lg"), el("b", "", title));
-  const head = el("div", "head"); head.append(el("h1", "", title)); const meta = el("div", "meta"); if (sub) meta.append(el("span", "", sub)); (actions || []).forEach((a) => meta.append(a)); head.append(meta); main.append(head);
+  const head = el("div", "head"); head.append(el("h1", "", title)); const meta = el("div", "meta"); if (sub) meta.append(el("span", "", sub)); if (actions && actions.length) { meta.append(el("span", "grow")); actions.forEach((a) => meta.append(a)); } head.append(meta); main.append(head);
   // a vault without a project has no description on purpose: no warning, but the header button lets one be attached to a project later
   $("descbtn").classList.toggle("hidden", !(nav.description && !nav.description.found && nav.description.no_project));
   if (nav.description && !nav.description.found && !nav.description.no_project) { const b = el("div", "banner warn"); b.append(icon("alert"), el("div", "", nav.description.error ? t("m.desc.invalid", { path: nav.description.path }) : t("m.desc.missing")), btn(t("m.desc.choose"), "edit", mprojectDialog)); main.append(b); }
@@ -3152,6 +3154,8 @@ function renderMMain() {
   const main = $("main"); const keep = main.scrollTop; main.textContent = "";
   if (!msel || (msel.kind === "env" && !envOf(msel.id))) { const e = (nav.envs || [])[0]; msel = e ? { kind: "env", id: e.name } : { kind: "shared", id: "" }; }
   ({ shared: mShared, connections: mConnections, other: mOther, expiring: mExpiring, env: mEnv })[msel.kind](main);
+  // one section on the page: it does not fold (there is nothing else to make room for)
+  const top = main.querySelectorAll(":scope > .mblock"); if (top.length === 1) { top[0].classList.add("solo"); top[0].classList.remove("folded"); }
   main.scrollTop = keep;
 }
 
