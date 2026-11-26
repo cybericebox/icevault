@@ -26,14 +26,20 @@ func TestCleanHidesInvisibleCharacters(t *testing.T) {
 	}
 }
 
-func TestADraftBelongsToTheClientThatBeganIt(t *testing.T) {
+func TestADraftBelongsToTheHolderOfItsToken(t *testing.T) {
 	h := newAgentHub(nil, "", 0, -1)
-	h.drafts["x"] = &agentBatch{id: "x", owner: "1000:42"}
-	if h.draftOf("x", "1000:42") == nil {
-		t.Fatal("the owner does not get its draft")
+	h.drafts["x"] = &agentBatch{id: "x", token: "abcdef"}
+	if h.draftWith("x", "abcdef") == nil {
+		t.Fatal("the holder does not get its draft")
 	}
-	if h.draftOf("x", "1000:43") != nil || h.draftOf("x", "1001:42") != nil {
-		t.Fatal("another client got the draft")
+	for _, other := range []string{"", "abcdeg", "abcde", "abcdefg"} {
+		if h.draftWith("x", other) != nil {
+			t.Fatalf("the token %q opened the draft", other)
+		}
+	}
+	h.drafts["y"] = &agentBatch{id: "y"} // a draft without a token is never open
+	if h.draftWith("y", "") != nil {
+		t.Fatal("an empty token opened a draft")
 	}
 }
 

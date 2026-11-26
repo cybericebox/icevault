@@ -40,7 +40,8 @@ type agentRig struct {
 	v      *vault.Vault
 	dir    string
 	events []string
-	seen   []string // every answer of the API, as text
+	seen   []string          // every answer of the API, as text
+	tokens map[string]string // the token of every batch that was begun: the test client adds it, as the real one would
 }
 
 func newRig(t *testing.T, ttl time.Duration) *agentRig { return newRigGap(t, ttl, -1) }
@@ -53,7 +54,7 @@ func newRigGap(t *testing.T, ttl, gap time.Duration) *agentRig {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
-	r := &agentRig{t: t, core: c, v: v, dir: filepath.Join(base, agentapi.AppDirName)}
+	r := &agentRig{t: t, core: c, v: v, dir: filepath.Join(base, agentapi.AppDirName), tokens: map[string]string{}}
 	r.app = desktop.New(desktop.Options{Unlocker: coreUnlocker{lockCore{c}}, AgentDir: r.dir, AgentTTL: ttl, AgentGap: gap, SyncEvery: -1,
 		Notify: func(event string, _ any) { r.events = append(r.events, event) }})
 	return r
@@ -71,6 +72,24 @@ func (r *agentRig) unlock() {
 
 func (r *agentRig) call(op string, args map[string]any) agentapi.Response {
 	r.t.Helper()
+	a := map[string]any{}
+	for k, v := range args {
+		a[k] = v
+	}
+	if _, has := a["token"]; !has {
+		id, _ := a["batch"].(string)
+		if id == "" && (op == "batch-submit" || op == "batch-discard" || op == "batch-status") {
+			id, _ = a["id"].(string)
+		}
+		if tok := r.tokens[id]; tok != "" {
+			a["token"] = tok
+		}
+	}
+	return r.rawCall(op, a)
+}
+
+func (r *agentRig) rawCall(op string, args map[string]any) agentapi.Response {
+	r.t.Helper()
 	resp, err := agentapi.Call(r.dir, agentapi.Request{Op: op, Args: args, Client: "test agent", PID: 4242}, 10*time.Second)
 	if err != nil {
 		r.t.Fatalf("%s: %v", op, err)
@@ -86,7 +105,9 @@ func (r *agentRig) begin(title string) string {
 	if !resp.OK {
 		r.t.Fatalf("batch-begin: %+v", resp)
 	}
-	return resp.Data.(map[string]any)["id"].(string)
+	d := resp.Data.(map[string]any)
+	r.tokens[d["id"].(string)] = d["token"].(string)
+	return d["id"].(string)
 }
 
 func (r *agentRig) item(id, op string, args map[string]any) agentapi.Response {
@@ -1015,9 +1036,10 @@ func TestAgentNonLatinClientNameIsMarked(t *testing.T) {
 		}
 		return resp
 	}
-	id := call("batch-begin", map[string]any{"title": "t"}).Data.(map[string]any)["id"].(string)
-	call("var-create", map[string]any{"batch": id, "scope": "shared", "key": "ABC"})
-	call("batch-submit", map[string]any{"id": id})
+	begun := call("batch-begin", map[string]any{"title": "t"}).Data.(map[string]any)
+	id, tok := begun["id"].(string), begun["token"].(string)
+	call("var-create", map[string]any{"batch": id, "token": tok, "scope": "shared", "key": "ABC"})
+	call("batch-submit", map[string]any{"id": id, "token": tok})
 	if raw := mustJSON(r.app.AgentPending()); !strings.Contains(raw, "\"nonlatin\":true") {
 		t.Fatalf("%s", raw)
 	}
@@ -1033,5 +1055,57 @@ func TestAgentSubmitKeepsTheBatchPastTheDeadlineOfTheDraft(t *testing.T) {
 	time.Sleep(1500 * time.Millisecond) // past the deadline of the draft, before the deadline of the batch
 	if st := r.status(id); st.State != agentapi.StatePending {
 		t.Fatalf("the timer of the draft expired the batch: %+v", st)
+	}
+}
+
+func TestAgentDraftNeedsItsToken(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	id := r.begin("with a key")
+	tok := r.tokens[id]
+	if len(tok) != 64 {
+		t.Fatalf("the token is %d characters", len(tok))
+	}
+	for _, c := range []struct {
+		op   string
+		args map[string]any
+	}{
+		{"var-create", map[string]any{"batch": id, "scope": "shared", "key": "NOKEY"}},
+		{"var-create", map[string]any{"batch": id, "token": "wrong", "scope": "shared", "key": "NOKEY"}},
+		{"var-create", map[string]any{"batch": id, "token": strings.Repeat("0", 64), "scope": "shared", "key": "NOKEY"}},
+		{"batch-submit", map[string]any{"id": id}},
+		{"batch-discard", map[string]any{"id": id, "token": "wrong"}},
+	} {
+		if resp := r.rawCall(c.op, c.args); resp.OK || resp.Code != "not_found" {
+			t.Fatalf("%s without the right token: %+v", c.op, resp)
+		}
+	}
+	if resp := r.rawCall("batch-status", map[string]any{"id": id}); resp.OK {
+		t.Fatalf("the status of a draft without its token: %+v", resp)
+	}
+	if resp := r.rawCall("var-create", map[string]any{"batch": id, "token": tok, "scope": "shared", "key": "WITHKEY", "visibility": "plain"}); !resp.OK {
+		t.Fatalf("%+v", resp)
+	}
+	if resp := r.rawCall("batch-submit", map[string]any{"id": id, "token": tok}); !resp.OK || resp.State != agentapi.StatePending {
+		t.Fatalf("%+v", resp)
+	}
+	// once submitted, the status needs it too, and so does the answer after the end
+	if resp := r.rawCall("batch-status", map[string]any{"id": id}); resp.OK {
+		t.Fatalf("the status of a batch without its token: %+v", resp)
+	}
+	r.app.AgentDecide(id, true)
+	if resp := r.rawCall("batch-status", map[string]any{"id": id}); resp.OK {
+		t.Fatalf("the result of a batch without its token: %+v", resp)
+	}
+	if st := r.status(id); st.State != agentapi.StateApplied {
+		t.Fatalf("%+v", st)
+	}
+	// the token is nowhere: not in the journal, not in the dialog data, not in the items
+	all := mustJSON(r.app.AgentPending()) + mustJSON(r.app.AgentJournal())
+	if b, err := os.ReadFile(filepath.Join(r.dir, agentapi.JournalName)); err == nil {
+		all += string(b)
+	}
+	if strings.Contains(all, tok) {
+		t.Fatal("the token of a batch is shown or logged")
 	}
 }

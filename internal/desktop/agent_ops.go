@@ -57,7 +57,6 @@ type agentCtx struct {
 	changes []agentChange // what the item changes (names old and new), for the dialog
 	rec     *agentItem    // the item that is being recorded (nil when it is replayed)
 	pkey    string        // the client the rate limit counts: the program that started the command
-	owner   string        // the client that began the batch
 	by      string        // who is running this item, as the dialog names the contributor
 	extra   []agentDetail // what the rules add to the arguments (a visibility that is forced)
 	nav     map[string]any

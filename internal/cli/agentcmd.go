@@ -81,7 +81,8 @@ func cmdAgent(args []string, e *Env) error {
 		return fail("%v", err)
 	}
 	if resp.OK && resp.State == agentapi.StatePending && !noWait {
-		resp = agentWait(dir, resp.ID, as, time.Duration(wait)*time.Second)
+		tok, _ := call["token"].(string)
+		resp = agentWait(dir, resp.ID, tok, as, time.Duration(wait)*time.Second)
 	}
 	printAgentJSON(e.Out, resp)
 	switch {
@@ -96,12 +97,12 @@ func cmdAgent(args []string, e *Env) error {
 }
 
 // agentWait asks for the state of a pending request until the person has answered or the time is over.
-func agentWait(dir, id, as string, limit time.Duration) agentapi.Response {
+func agentWait(dir, id, token, as string, limit time.Duration) agentapi.Response {
 	end := time.Now().Add(limit)
 	resp := agentapi.Response{OK: true, State: agentapi.StatePending, ID: id}
 	for time.Now().Before(end) {
 		time.Sleep(agentPoll)
-		r, err := agentapi.Call(dir, agentapi.Request{Op: "batch-status", Args: map[string]any{"id": id}, Client: as}, agentCall)
+		r, err := agentapi.Call(dir, agentapi.Request{Op: "batch-status", Args: map[string]any{"id": id, "token": token}, Client: as}, agentCall)
 		if err != nil { // the window was locked or closed meanwhile: nothing can be allowed any more
 			return agentapi.Response{OK: true, State: agentapi.StateDenied, ID: id, Code: "no_window"}
 		}

@@ -1,6 +1,9 @@
 package desktop
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -152,9 +155,9 @@ func (h *agentHub) takePending(id string) *agentBatch {
 	return b
 }
 
-func (h *agentHub) finish(id, title, state, code string, results []agentResult) {
+func (h *agentHub) finish(id, title, token, state, code string, results []agentResult) {
 	h.mu.Lock()
-	h.done[id] = agentDone{state: state, code: code, title: title, results: results}
+	h.done[id] = agentDone{state: state, code: code, token: token, title: title, results: results}
 	h.dord = append(h.dord, id)
 	if len(h.dord) > 100 {
 		delete(h.done, h.dord[0])
@@ -168,7 +171,7 @@ func (h *agentHub) expire(id string) {
 	defer h.a.ops.Unlock()
 	if b := h.dropDraft(id); b != nil {
 		b.drop()
-		h.finish(id, b.title, agentapi.StateExpired, "", nil)
+		h.finish(id, b.title, b.token, agentapi.StateExpired, "", nil)
 		h.log("batch", b.title, b.who, agentapi.StateExpired)
 		return
 	}
@@ -177,7 +180,7 @@ func (h *agentHub) expire(id string) {
 		return
 	}
 	b.drop()
-	h.finish(id, b.title, agentapi.StateExpired, "", nil)
+	h.finish(id, b.title, b.token, agentapi.StateExpired, "", nil)
 	h.log("batch", b.title, b.who, agentapi.StateExpired)
 	h.notifyPending()
 }
@@ -236,13 +239,13 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 	if args == nil {
 		args = map[string]any{}
 	}
-	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(peer.UID), owner: ownerOf(peer), by: byOf(who, peer)} // one bucket for the user: new processes do not get round the limit
+	x := &agentCtx{h: h, c: c, args: args, who: who, peer: peer.Describe(), pkey: strconv.Itoa(peer.UID), by: byOf(who, peer)} // one bucket for the user: new processes do not get round the limit
 	var resp agentapi.Response
 	switch req.Op {
 	case "help":
 		resp = okData(map[string]any{"ops": agentOps})
 	case "batch-status":
-		resp = h.batchStatus(as(args, "id"))
+		resp = h.batchStatus(as(args, "id"), as(args, "token"))
 	case "structure":
 		_, _ = a.syncDisk(false, true)
 		resp = x.run("structure")
@@ -268,15 +271,6 @@ func (h *agentHub) handle(req agentapi.Request, peer agentapi.Peer) agentapi.Res
 	return resp
 }
 
-// ownerOf names the program that began a batch: the user and the process that started the client (the client itself is a new process at every call).
-func ownerOf(p agentapi.Peer) string {
-	pid := p.PPID
-	if pid <= 0 {
-		pid = p.PID
-	}
-	return strconv.Itoa(p.UID) + ":" + strconv.Itoa(pid)
-}
-
 func byOf(who string, p agentapi.Peer) string {
 	s := who
 	if p.Parent != "" {
@@ -285,13 +279,27 @@ func byOf(who string, p agentapi.Peer) string {
 	return clean(s, 200)
 }
 
-// draftOf is the open batch of that id when this client began it; for any other client there is none.
-func (h *agentHub) draftOf(id, owner string) *agentBatch {
+// sameToken compares two draft tokens in constant time; an empty token is never right.
+func sameToken(a, b string) bool {
+	return a != "" && len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// draftWith is the open batch of that id for the client that holds its token (the capability batch-begin gave); for anyone else there is none. Who
+// the client says it is, and which program started it, are shown to the person but never decide.
+func (h *agentHub) draftWith(id, token string) *agentBatch {
 	b := h.draft(id)
-	if b == nil || b.owner != owner {
+	if b == nil || !sameToken(b.token, token) {
 		return nil
 	}
 	return b
+}
+
+func newAgentToken() string {
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		panic("no random source: " + err.Error())
+	}
+	return hex.EncodeToString(k)
 }
 
 func (x *agentCtx) editing() bool {
@@ -324,16 +332,16 @@ func (h *agentHub) batchBegin(x *agentCtx) agentapi.Response {
 	if title == "" {
 		title = "batch"
 	}
-	b := &agentBatch{title: title, who: x.who, peer: clean(x.peer, 200), key: x.pkey, owner: x.owner, scratch: sc, release: release}
+	b := &agentBatch{title: title, who: x.who, peer: clean(x.peer, 200), key: x.pkey, token: newAgentToken(), scratch: sc, release: release}
 	if err := h.begin(b); err != nil {
 		release()
 		return agentRefused("too_many_batches", nil)
 	}
-	return okData(map[string]any{"id": b.id})
+	return okData(map[string]any{"id": b.id, "token": b.token})
 }
 
 func (h *agentHub) batchDiscard(x *agentCtx) agentapi.Response {
-	if h.draftOf(as(x.args, "id"), x.owner) == nil {
+	if h.draftWith(as(x.args, "id"), as(x.args, "token")) == nil {
 		return agentRefused("not_found", nil)
 	}
 	b := h.dropDraft(as(x.args, "id"))
@@ -341,7 +349,7 @@ func (h *agentHub) batchDiscard(x *agentCtx) agentapi.Response {
 		return agentRefused("not_found", nil)
 	}
 	b.drop()
-	h.finish(b.id, b.title, agentapi.StateRejected, "discarded", nil)
+	h.finish(b.id, b.title, b.token, agentapi.StateRejected, "discarded", nil)
 	return okData(map[string]any{"ok": true})
 }
 
@@ -354,7 +362,7 @@ func (h *agentHub) batchItem(x *agentCtx, op string) agentapi.Response {
 	if id == "" {
 		return agentRefused("batch_required", nil)
 	}
-	b := h.draftOf(id, x.owner)
+	b := h.draftWith(id, as(x.args, "token"))
 	if b == nil {
 		return agentRefused("not_found", nil)
 	}
@@ -366,6 +374,7 @@ func (h *agentHub) batchItem(x *agentCtx, op string) agentapi.Response {
 	}
 	args := copyMap(x.args)
 	delete(args, "batch")
+	delete(args, "token") // a capability: it is not an argument of the item, and is never shown or logged
 	ex := &agentCtx{h: h, c: b.scratch, args: args, who: x.who, peer: x.peer, pkey: x.pkey, by: x.by, rec: &agentItem{op: op}}
 	resp := ex.run(op)
 	if !resp.OK {
@@ -381,7 +390,7 @@ func (h *agentHub) batchSubmit(x *agentCtx) agentapi.Response {
 	if !x.editing() {
 		return agentRefused("view_mode", nil)
 	}
-	b := h.draftOf(as(x.args, "id"), x.owner)
+	b := h.draftWith(as(x.args, "id"), as(x.args, "token"))
 	if b == nil {
 		return agentRefused("not_found", nil)
 	}
@@ -397,16 +406,16 @@ func (h *agentHub) batchSubmit(x *agentCtx) agentapi.Response {
 	return agentapi.Response{OK: true, State: agentapi.StatePending, ID: b.id}
 }
 
-func (h *agentHub) batchStatus(id string) agentapi.Response {
+func (h *agentHub) batchStatus(id, token string) agentapi.Response {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if b := h.drafts[id]; b != nil {
+	if b := h.drafts[id]; b != nil && sameToken(b.token, token) {
 		return agentapi.Response{OK: true, State: agentapi.StateOpen, ID: id, Data: map[string]any{keyTitle: b.title, "items": len(b.items)}}
 	}
-	if b := h.pend[id]; b != nil {
+	if b := h.pend[id]; b != nil && sameToken(b.token, token) {
 		return agentapi.Response{OK: true, State: agentapi.StatePending, ID: id, Data: map[string]any{keyTitle: b.title, "items": len(b.items)}}
 	}
-	if d, found := h.done[id]; found {
+	if d, found := h.done[id]; found && sameToken(d.token, token) {
 		return agentapi.Response{OK: true, State: d.state, ID: id, Code: d.code, Data: map[string]any{keyTitle: d.title, "results": d.results}}
 	}
 	return agentRefused("not_found", nil)
@@ -491,11 +500,11 @@ func (a *App) AgentDecide(id string, allow bool) Response {
 		b.stop()
 		b.stop = nil
 	}
-	title := b.title
+	title, tok := b.title, b.token
 	h.notifyPending()
 	if !allow {
 		b.drop()
-		h.finish(id, title, agentapi.StateRejected, "", nil)
+		h.finish(id, title, tok, agentapi.StateRejected, "", nil)
 		h.log("batch", title, b.who, agentapi.StateRejected)
 		return ok(map[string]any{"ok": true})
 	}
@@ -503,55 +512,55 @@ func (a *App) AgentDecide(id string, allow bool) Response {
 	a.ops.Lock()
 	defer a.ops.Unlock()
 	if c2, e2 := a.store(); e2 != nil || c2 != c { // locked while the person was deciding
-		h.finish(id, title, agentapi.StateFailed, "locked", nil)
+		h.finish(id, title, tok, agentapi.StateFailed, "locked", nil)
 		return fail(404, "agent_gone")
 	}
 	a.mu.Lock()
 	mode := a.mode
 	a.mu.Unlock()
 	if mode != modeEdit { // nothing is written in view mode, whatever the person answered
-		h.finish(id, title, agentapi.StateFailed, "view_mode", nil)
+		h.finish(id, title, tok, agentapi.StateFailed, "view_mode", nil)
 		h.log("batch", title, b.who, agentapi.StateFailed+": view_mode")
 		return fail(403, "view_mode")
 	}
 	runner, can := c.(BatchRunner)
 	if !can {
-		h.finish(id, title, agentapi.StateFailed, "no_batch", nil)
+		h.finish(id, title, tok, agentapi.StateFailed, "no_batch", nil)
 		return fail(409, "no_batch")
 	}
 	_, _ = a.syncDisk(false, true)
 	sc, release, err := runner.BatchScratch() // a fresh copy of what the vault is now
 	if err != nil {
-		h.finish(id, title, agentapi.StateFailed, "batch_copy", nil)
+		h.finish(id, title, tok, agentapi.StateFailed, "batch_copy", nil)
 		return answer(err)
 	}
 	defer release()
 	abort := func() bool { c2, e2 := a.store(); return e2 != nil || c2 != c }
 	results, failed, code := h.replay(sc, b.items, abort)
 	if failed >= 0 {
-		h.finishBatch(id, title, b.who, agentapi.StateFailed, code, results)
+		h.finishBatch(id, title, tok, b.who, agentapi.StateFailed, code, results)
 		return Response{409, map[string]any{keyCode: "batch_failed", keyParams: map[string]any{"n": failed + 1, "op": results[failed].Op, "why": code}}}
 	}
 	if abort() { // locked while the items were run: the copy is dropped
-		h.finishBatch(id, title, b.who, agentapi.StateFailed, "locked", results)
+		h.finishBatch(id, title, tok, b.who, agentapi.StateFailed, "locked", results)
 		return fail(404, "agent_gone")
 	}
 	if err := runner.BatchAdopt(sc); err != nil {
 		if errors.Is(err, ErrBatchSaved) { // it is on disk; the window reads the vault again
-			h.finishBatch(id, title, b.who, agentapi.StateApplied, "reload_failed", results)
+			h.finishBatch(id, title, tok, b.who, agentapi.StateApplied, "reload_failed", results)
 			return ok(map[string]any{"ok": true, "warning": "reload_failed"})
 		}
 		code, _ := agentCode(err)
-		h.finishBatch(id, title, b.who, agentapi.StateFailed, code, results)
+		h.finishBatch(id, title, tok, b.who, agentapi.StateFailed, code, results)
 		return answer(err)
 	}
-	h.finishBatch(id, title, b.who, agentapi.StateApplied, "", results)
+	h.finishBatch(id, title, tok, b.who, agentapi.StateApplied, "", results)
 	return ok(map[string]any{"ok": true})
 }
 
 // finishBatch records the end of a batch and writes it, and each of its items, to the journal.
-func (h *agentHub) finishBatch(id, title, who, state, code string, results []agentResult) {
-	h.finish(id, title, state, code, results)
+func (h *agentHub) finishBatch(id, title, tok, who, state, code string, results []agentResult) {
+	h.finish(id, title, tok, state, code, results)
 	r := state
 	if code != "" {
 		r += ": " + code

@@ -83,7 +83,7 @@ type agentDetail struct {
 
 // agentBatch is a batch: the changes of an agent, validated one by one on a copy of the vault, sent to the window as a whole.
 type agentBatch struct {
-	id, title, who, peer, key, owner string
+	id, title, who, peer, key, token string
 	created, asked                   time.Time
 	items                            []*agentItem
 	scratch                          Core // the copy the items were validated on (drafts only)
@@ -101,6 +101,7 @@ type agentResult struct {
 
 type agentDone struct {
 	state, code string
+	token       string
 	title       string
 	results     []agentResult
 }
@@ -141,7 +142,7 @@ func newAgentHub(a *App, dir string, ttl, gap time.Duration) *agentHub {
 func sweepScratch() {
 	list, _ := filepath.Glob(filepath.Join(os.TempDir(), "icevault-batch-*"))
 	for _, p := range list {
-		if st, err := os.Lstat(p); err == nil && st.IsDir() && time.Since(st.ModTime()) > time.Hour {
+		if st, err := os.Lstat(p); err == nil && st.IsDir() && ownedByMe(st) && time.Since(st.ModTime()) > time.Hour {
 			_ = os.RemoveAll(p)
 		}
 	}

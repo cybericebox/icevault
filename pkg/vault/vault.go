@@ -267,7 +267,6 @@ func (v *Vault) Path() string { return v.path }
 // Format tells the KDBX version and the key derivation function of the file as it was read (or made).
 func (v *Vault) Format() Format { return v.format }
 
-// Close forgets the database and overwrites the key material it can reach. Go cannot promise more: the garbage collector may have copied it.
 // Identity says which file a Vault stands for and which credentials open it: the path, the hash of the file as last read or written, and a hash of the
 // credentials. A copy made now can be told from a vault that was replaced or whose password changed since.
 type Identity struct {
@@ -313,6 +312,7 @@ func (v *Vault) AdoptContent(o *Vault) error {
 	return nil
 }
 
+// Close forgets the database and overwrites the key material it can reach. Go cannot promise more: the garbage collector may have copied it.
 func (v *Vault) Close() {
 	if v.db == nil {
 		return
