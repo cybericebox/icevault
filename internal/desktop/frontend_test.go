@@ -355,12 +355,12 @@ func TestModelTablesShowResolvedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(src)
-	for _, want := range []string{"function mvaluecell(", `"← " + rv.refs.join(", ")`, `t("state.broken")`, `t("m.var.varies")`, `"resolved" : ""`, "mvaluecell(vc, w, r, k)", `t("vis.word." + mvis(r))`} {
+	for _, want := range []string{"function mvaluecell(", `"← " + rv.refs.join(", ")`, `t("state.broken")`, `t("m.var.varies")`, `"resolved" : ""`, "mvaluecell(vc, w, r, k,", "function mcopyable(", `window.icevaultCopySecret({ section: "m"`, `t("flash.copied")`, `t("vis.word." + mvis(r))`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the page lacks %s", want)
 		}
 	}
-	if n := strings.Count(s, "mvaluecell(vc, w, r, k)"); n < 2 {
+	if n := strings.Count(s, "mvaluecell(vc, w, r, k,"); n < 2 {
 		t.Errorf("variables and connection fields must both use mvaluecell, found %d", n)
 	}
 	raw, _ := fs.ReadFile(frontend(t), "messages.json")
@@ -369,7 +369,7 @@ func TestModelTablesShowResolvedValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, lang := range []string{"en", "uk", "ru"} {
-		for _, k := range []string{"m.var.varies", "srv.ref_broken", "srv.ref_varies", "state.broken"} {
+		for _, k := range []string{"m.var.varies", "srv.ref_broken", "srv.ref_varies", "state.broken", "m.copy_value", "flash.copied"} {
 			if strings.TrimSpace(tables[lang][k]) == "" {
 				t.Errorf("no %s in %s", k, lang)
 			}

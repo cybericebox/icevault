@@ -1126,7 +1126,8 @@
   "m.adopt.title": "Move {n} values into connections?",
   "m.adopt.note": "The values move as they are (a reference stays a reference), the product selects the connection, and the own values are removed from this environment. A value the connection already holds differently stays where it is.",
   "m.adopt.done": "Moved into connections: {n}",
-  "m.conn.unknown_kind": "A kind this project description does not declare: shown as it is, not editable",
+  "m.conn.unknown_kind": "A kind this project description does not declare: shown as it is, not editable (it can only be deleted)",
+  "m.copy_value": "Copy the value",
   "m.adopt.sealed": "Stay as they are, sealed (a sealed value never moves): {list}"
  },
  "uk": {
@@ -2256,7 +2257,8 @@
   "m.adopt.title": "Перенести значень у підключення: {n}?",
   "m.adopt.note": "Значення переносяться як є (посилання лишається посиланням), продукт вибирає підключення, а власні значення прибираються з цього середовища. Значення, яке в підключенні вже інше, лишається на місці.",
   "m.adopt.done": "Перенесено в підключення: {n}",
-  "m.conn.unknown_kind": "Вид, якого немає в цьому описі проєкту: показано як є, змінювати не можна",
+  "m.conn.unknown_kind": "Вид, якого немає в цьому описі проєкту: показано як є, змінювати не можна (можна лише видалити)",
+  "m.copy_value": "Скопіювати значення",
   "m.adopt.sealed": "Лишаються як є, запечатані (запечатане значення не переноситься): {list}"
  },
  "ru": {
@@ -3386,7 +3388,8 @@
   "m.adopt.title": "Перенести значений в подключения: {n}?",
   "m.adopt.note": "Значения переносятся как есть (ссылка остаётся ссылкой), продукт выбирает подключение, а собственные значения убираются из этого окружения. Значение, которое в подключении уже другое, остаётся на месте.",
   "m.adopt.done": "Перенесено в подключения: {n}",
-  "m.conn.unknown_kind": "Вид, которого нет в этом описании проекта: показан как есть, менять нельзя",
+  "m.conn.unknown_kind": "Вид, которого нет в этом описании проекта: показан как есть, менять нельзя (можно только удалить)",
+  "m.copy_value": "Скопировать значение",
   "m.adopt.sealed": "Остаются как есть, запечатаны (запечатанное значение не переносится): {list}"
  }
 }

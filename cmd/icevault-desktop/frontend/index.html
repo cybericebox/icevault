@@ -209,6 +209,8 @@ td.v { overflow:hidden; }
 .revcd { flex:none; min-width:3ch; padding:0 6px; border-radius:var(--ib-r-sm); background:var(--ib-soft); color:var(--ib-dim); font:500 12px/20px var(--ib-font); font-variant-numeric:tabular-nums; text-align:center; }   /* the seconds a shown secret has left */
 .val { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:400 13px/1.4 var(--ib-mono); color:var(--ib-body); cursor:pointer; }
 .val.open { white-space:normal; overflow-wrap:anywhere; }
+.mcopy { cursor:copy; } .mcopy:focus-visible { outline:2px solid var(--ib-focus, currentColor); outline-offset:2px; }
+.mcopied { flex:none; white-space:nowrap; font-size:12px; font-weight:500; color:var(--ib-ok); }
 .mask { font:400 13px/1 var(--ib-mono); letter-spacing:2px; color:var(--ib-dim); }
 .notset { color:var(--ib-faint); font-size:13px; }
 .needed { white-space:nowrap; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500; color:var(--ib-warn); }
@@ -2879,15 +2881,33 @@ function mblock(main, title, iconName, buttons, note) {
 const MT_ICON = 32, MT_GAP = 8, MT_PAD = 8;
 // the value of a row. A value that holds references shows what it resolves to (the strictest visibility of its parts decides the mask), with a second line
 // of small text that says where it comes from; a broken reference shows the state in red, never a value. Editing still works on the raw text.
-function mvaluecell(vc, w, r, k) {
+// a click on a value copies it: a plain value or a shown secret as the page has it; a secret that is not shown is read and put on the clipboard in Go (the page never gets it).
+// The clipboard is cleared by the program after 30 seconds if it still holds that value. src = {name, key}: where the program finds the value again.
+const mcopied = new Set();
+function mcopyable(node, src, k, text) {
+  node.classList.add("mcopy"); node.tabIndex = 0; node.setAttribute("role", "button"); node.setAttribute("aria-label", t("m.copy_value"));
+  const go = async (e) => {
+    e.stopPropagation(); let x;
+    try {
+      if (text !== null) x = await window.icevaultCopyText(text);
+      else { if (status.touchid) { $("waittext").textContent = t("wait.touch"); $("wait").classList.add("on"); } x = await window.icevaultCopySecret({ section: "m", name: src.name, group: src.group || "", key: src.key }); $("wait").classList.remove("on"); }
+    } catch (err) { $("wait").classList.remove("on"); say(t("flash.copy_failed"), "err"); return; }
+    if (x.status === 200) { mcopied.add(k); renderMMain(); setTimeout(() => { if (mcopied.delete(k)) renderMMain(); }, 2000); }
+    else if (x.status === 423) await loadStatus(); else say(t("flash.refused", { why: srv(x.data) }), "err");
+  };
+  node.addEventListener("click", go); node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } });
+  return node;
+}
+function mvaluecell(vc, w, r, k, src) {
   const rv = r.resolved, vis = rv ? rv.vis : r.visibility;
   if (r.state === "empty") return false;
   if (rv && rv.broken) w.append(el("span", "broken", t("state.broken")));
   else if (rv && rv.varies) w.append(el("span", "notset", t("m.var.varies")));
-  else if (vis === "plain") w.append(el("span", "val", rv ? rv.value : (r.value || "")));
+  else if (vis === "plain") { const shown = rv ? rv.value : (r.value || ""); w.append(src ? mcopyable(el("span", "val", shown), src, k, shown) : el("span", "val", shown)); }
   else if (vis === "sealed") w.append(withIcon("lock", t("val.sealed"), "sealed"));
-  else if (mrevealed.has(k)) w.append(el("span", "val", mrevealed.get(k)));
-  else w.append(el("span", "mask", "••••••"));
+  else if (mrevealed.has(k)) { const shown = mrevealed.get(k); w.append(src ? mcopyable(el("span", "val", shown), src, k, shown) : el("span", "val", shown)); }
+  else { const m = el("span", "mask", "••••••"); w.append(src ? mcopyable(m, Object.assign({ group: rv ? "resolved" : "" }, src), k, null) : m); }
+  if (mcopied.has(k)) w.append(el("span", "mcopied", t("flash.copied")));
   vc.append(w);
   if (rv && rv.refs && rv.refs.length) vc.append(el("div", "ksub mono", "← " + rv.refs.join(", ")));
   return true;
@@ -2930,7 +2950,7 @@ function mvars(parent, rows, scope, opts) {
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, mtext(r.help) || r.description, opts.users ? (r.users && r.users.length ? t("m.shared.users", { list: r.users.join(", ") }) : t("m.shared.no_users")) : "");
     const vc = el("td"); const w = el("div", "vcell");
     if (r.state === "empty") w.append(r.required && r.active !== false ? withIcon("alert", t("m.var.required"), "needed") : el("span", "notset", r.missing ? t("m.var.missing") : t("val.notset")));
-    if (r.state !== "empty") mvaluecell(vc, w, r, k); else vc.append(w);
+    if (r.state !== "empty") mvaluecell(vc, w, r, k, r.imported ? null : { name: scope, key: r.key }); else vc.append(w);
     const kc = el("td"); const tags = el("div", "mtags");
     if (r.imported) tags.append(el("span", "tag", r.overridden ? t("m.env.overridden") : t("m.env.imported")));
     if (r.system) tags.append(el("span", "tag", t("m.var.system")));
@@ -3068,7 +3088,7 @@ function mfields(parent, rows, c) {
     const tr = el("tr"); const k = "conn/" + c.uuid + "|" + r.key;
     const nc = mnamecell(mlabel(r), mlabel(r) !== r.key ? r.key : "", true, r.help ? mtext(r.help) : "");
     const vc = el("td"); const w = el("div", "vcell");
-    if (r.state === "empty") { w.append(el("span", "notset", r.file_used ? t("m.var.file_used", { name: r.file_used }) : r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k);
+    if (r.state === "empty") { w.append(el("span", "notset", r.file_used ? t("m.var.file_used", { name: r.file_used }) : r.missing ? t("m.var.missing") : t("val.notset"))); vc.append(w); } else mvaluecell(vc, w, r, k, { name: "conn/" + c.uuid, key: r.key });
     const kc = el("td"); if (!r.missing) kc.append(el("span", "quiet", t("vis.word." + mvis(r))));
     { const xt = mexptag(r); if (xt) kc.append(" ", xt); }
     const [ac, ab] = mactcell();
