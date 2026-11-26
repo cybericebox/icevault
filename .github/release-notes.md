@@ -1,11 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.9.2
+## Changes since v0.9.3
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
-
-- **Session owner:** a session directory records the process that owns it (a small file next to the directory). A second run of the same environment while the first is alive is refused with "a run is in progress (PID, since)" and no advice to recover or delete; `recover` refuses while the owner is alive; the directory is made atomically. Only a dead owner (or an old directory with no owner file) gives the "left over from a run that was killed" message.
-- **Read-only sessions:** `session run --read-only --env E -- COMMAND` renders the files into a directory of its own, runs beside any other session, sets `ICEVAULT_READ_ONLY=1` (the description's `session: variables: read-only` renames it), writes nothing back and removes its directory (the count of changed files is said once).
 
 ## What is here
 
