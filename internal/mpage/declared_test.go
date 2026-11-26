@@ -95,7 +95,7 @@ func TestAConnectionOfAnUnknownKindIsReadOnlyAndKept(t *testing.T) {
 			t.Fatalf("a field of an unknown kind is not deleted: %v", err)
 		}
 	}
-	for _, a := range []map[string]any{{"action": "update", "uuid": u, "name": "Renamed"}, {"action": "delete", "uuid": u}} {
+	for _, a := range []map[string]any{{"action": "update", "uuid": u, "name": "Renamed"}} {
 		if _, err := bare.Write("m-connection", a); code(err) != "unknown_kind" {
 			t.Fatalf("%v: %v", a, err)
 		}
@@ -106,6 +106,19 @@ func TestAConnectionOfAnUnknownKindIsReadOnlyAndKept(t *testing.T) {
 	m, _ := vmodel.Load(v)
 	if f := m.Connection("S").Field("token"); m.Connection("S").Kind != "stats" || f == nil || f.Value != "t-1" {
 		t.Fatal("the connection was dropped or changed")
+	}
+	// the only changes allowed: empty a value (the end of a move), and delete the whole connection
+	if _, err := bare.Write("m-field", map[string]any{"uuid": u, "field": "token", "value": "", "expires": ""}); err != nil {
+		t.Fatalf("a value of an unknown kind may be emptied: %v", err)
+	}
+	if f := bare.Model().Connection("S").Field("token"); f == nil || f.Value != "" {
+		t.Fatal("the value was not emptied")
+	}
+	if _, err := bare.Write("m-connection", map[string]any{"action": "delete", "uuid": u}); err != nil {
+		t.Fatalf("a connection of an unknown kind may be deleted: %v", err)
+	}
+	if bare.Model().Connection("S") != nil {
+		t.Fatal("the connection is still there")
 	}
 }
 

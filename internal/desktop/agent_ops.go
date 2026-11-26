@@ -586,6 +586,7 @@ type agentTarget struct {
 	scope, key, field, name string // name: the connection or the other secret
 	uuid                    string
 	secret, filled, system  bool
+	expires                 string // the date of the place (YYYY-MM-DD), "" = none
 }
 
 func (t *agentTarget) what() string {
@@ -615,7 +616,7 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 		if o == nil {
 			return nil, &Error{Status: 404, Code: "not_found"}
 		}
-		return &agentTarget{kind: "other", name: as(m, "other"), uuid: as(o, keyUUID), secret: true, filled: as(o, keyState) == stSet}, nil
+		return &agentTarget{kind: "other", name: as(m, "other"), uuid: as(o, keyUUID), secret: true, filled: as(o, keyState) == stSet, expires: as(o, "expires")}, nil
 	case as(m, keyConn) != "":
 		cn := x.conn(as(m, keyConn))
 		if cn == nil {
@@ -623,7 +624,7 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 		}
 		for _, f := range alist(cn, "fields") {
 			if as(f, keyName) == as(m, keyField) {
-				return &agentTarget{kind: keyField, name: as(m, keyConn), field: as(m, keyField), uuid: as(cn, keyUUID), secret: ab(f, visSecret), filled: as(f, keyState) == stSet}, nil
+				return &agentTarget{kind: keyField, name: as(m, keyConn), field: as(m, keyField), uuid: as(cn, keyUUID), secret: ab(f, visSecret), filled: as(f, keyState) == stSet, expires: as(f, "expires")}, nil
 			}
 		}
 		return nil, &Error{Status: 404, Code: "not_found"}
@@ -633,18 +634,33 @@ func (x *agentCtx) target(m map[string]any) (*agentTarget, error) {
 			return nil, &Error{Status: 404, Code: "not_found"}
 		}
 		return &agentTarget{kind: kindVar, scope: as(m, keyScope), key: as(m, keyKey), secret: isSecretRow(r) || x.secretKeyAnywhere(as(m, keyKey)), filled: as(r, keyState) == stSet,
-			system: ab(r, "system") || as(r, "managed") == "system"}, nil
+			system: ab(r, "system") || as(r, "managed") == "system", expires: as(r, "expires")}, nil
 	}
 }
 
-func (t *agentTarget) put(x *agentCtx, value string) error {
+func (t *agentTarget) put(x *agentCtx, value string) error { return t.putExp(x, value, nil) }
+
+// putExp is put with the date of the place: a non-nil expires is written with the value ("" clears the date).
+func (t *agentTarget) putExp(x *agentCtx, value string, expires *string) error {
+	var w map[string]any
 	switch t.kind {
 	case kindVar:
-		return x.write("m-var", map[string]any{keyScope: t.scope, keyKey: t.key, keyValue: value})
+		w = map[string]any{keyScope: t.scope, keyKey: t.key, keyValue: value}
 	case keyField:
-		return x.write("m-field", map[string]any{keyUUID: t.uuid, keyField: t.field, keyValue: value})
+		w = map[string]any{keyUUID: t.uuid, keyField: t.field, keyValue: value}
+	default:
+		w = map[string]any{keyAction: actUpd, keyUUID: t.uuid, keyValue: value}
 	}
-	return x.write("m-other", map[string]any{keyAction: actUpd, keyUUID: t.uuid, keyValue: value})
+	if expires != nil {
+		w["expires"] = *expires
+	}
+	switch t.kind {
+	case kindVar:
+		return x.write("m-var", w)
+	case keyField:
+		return x.write("m-field", w)
+	}
+	return x.write("m-other", w)
 }
 
 func (t *agentTarget) read(c Core) (string, error) {
@@ -760,11 +776,20 @@ func (x *agentCtx) copyValue(move bool) agentapi.Response {
 		if v == "" {
 			return &Error{Status: 409, Code: "empty_source"}
 		}
-		if err := t.put(nx, v); err != nil {
+		var exp *string // the date travels with the value (a source without a date leaves the target's date as it is)
+		if f.expires != "" {
+			exp = &f.expires
+		}
+		if err := t.putExp(nx, v, exp); err != nil {
 			return err
 		}
 		if move {
-			return f.put(nx, "")
+			var none *string
+			if f.expires != "" {
+				empty := ""
+				none = &empty
+			}
+			return f.putExp(nx, "", none)
 		}
 		return nil
 	}

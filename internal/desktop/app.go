@@ -20,7 +20,7 @@ const (
 	WrongDelay     = 800 * time.Millisecond
 	MaxPassword    = 1024
 	MaxTouchFails  = 3 // failed, cancelled or timed-out Touch ID requests in one run; then only the password field
-	ClipboardClear = 45 * time.Second
+	ClipboardClear = 30 * time.Second
 	SyncDefault    = 2 * time.Second // how often an unlocked window looks whether another writer changed the vault file
 	maxFileBytes   = 20_000_000
 )

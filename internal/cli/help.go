@@ -157,6 +157,9 @@ func checkArgs(cmd string, args []string, e *Env) (rc int, done bool) {
 		return 0, false
 	}
 	for i := 0; i < len(args) && args[i] != "--"; i++ { // after -- comes the command of `session run`
+		if cmd == "agent" && args[i] == "help" { // the word is the op "help" of the agent API; "icevault help agent" prints the usage
+			continue
+		}
 		if isHelp(args[i]) { // help wins over every other flag
 			printCommandUsage(e.Out, cmd)
 			return 0, true

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cybericebox/icevault/internal/agentapi"
 )
@@ -147,6 +148,53 @@ func TestAgentCommandNoWaitAndRefusals(t *testing.T) {
 	}
 	if rc := Run([]string{"agent"}, e); rc != 2 {
 		t.Fatalf("rc=%d", rc)
+	}
+}
+
+func TestAgentHelpIsTheOpOfTheWindow(t *testing.T) {
+	e, out, _, dir := agentEnv(t, "")
+	got, stop := fakeWindow(t, dir, agentapi.StateAllowed)
+	defer stop()
+	for _, args := range [][]string{{"agent", "help"}, {"agent", "help", "{}"}} {
+		out.Reset()
+		if rc := Run(args, e); rc != 0 || !strings.Contains(out.String(), `"ok":true`) {
+			t.Fatalf("%v: rc=%d %q", args, rc, out.String())
+		}
+	}
+	if len(*got) != 2 || (*got)[0].Op != "help" || (*got)[1].Op != "help" {
+		t.Fatalf("the op was not sent: %+v", *got)
+	}
+	out.Reset()
+	if rc := Run([]string{"help", "agent"}, e); rc != 0 || !strings.Contains(out.String(), "agent") || strings.Contains(out.String(), `"ok"`) {
+		t.Fatalf("the usage of the command: rc=%d %q", rc, out.String())
+	}
+}
+
+func TestAgentWaitKeepsAskingAfterALostConnection(t *testing.T) {
+	old := agentReconnect
+	agentReconnect = 10 * time.Second
+	defer func() { agentReconnect = old }()
+	_, _, _, dir := agentEnv(t, "")
+	go func() { // the window is away for a moment (it saves and opens the vault again), then it answers
+		time.Sleep(1500 * time.Millisecond)
+		_, stop := fakeWindow(t, dir, agentapi.StateApplied)
+		time.Sleep(10 * time.Second)
+		stop()
+	}()
+	r := agentWait(dir, "abc", "tok", "t", 8*time.Second)
+	if r.State != agentapi.StateApplied {
+		t.Fatalf("the real outcome is expected after the reconnect: %+v", r)
+	}
+}
+
+func TestAgentWaitReportsALockedWindowAsExpiredNotDenied(t *testing.T) {
+	old := agentReconnect
+	agentReconnect = 800 * time.Millisecond
+	defer func() { agentReconnect = old }()
+	_, _, _, dir := agentEnv(t, "")
+	r := agentWait(dir, "abc", "tok", "t", 10*time.Second)
+	if r.State != agentapi.StateExpired || r.Code != "locked" || r.State == agentapi.StateDenied {
+		t.Fatalf("%+v", r)
 	}
 }
 

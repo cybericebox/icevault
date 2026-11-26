@@ -218,6 +218,12 @@ func TestRevealNeedsConfirmAndCopyNeverReturnsValue(t *testing.T) {
 	}
 }
 
+func TestClipboardIsClearedAfterThirtySeconds(t *testing.T) {
+	if ClipboardClear != 30*time.Second {
+		t.Fatalf("the clipboard is cleared after %v, want 30s", ClipboardClear)
+	}
+}
+
 func TestClipboardClearsOnlyOurValue(t *testing.T) {
 	h := newHarness(t)
 	h.unlock(t)

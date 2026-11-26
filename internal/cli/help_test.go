@@ -63,6 +63,9 @@ func TestEverySubcommandHasUsageAndNeverUnlocksOnHelpOrAnUnknownFlag(t *testing.
 			t.Fatalf("%s has no spec", cmd)
 		}
 		for _, help := range []string{"--help", "-h", "help"} {
+			if cmd == "agent" && help == "help" {
+				continue // the op "help" of the agent API (TestAgentHelpIsTheOpOfTheWindow); the usage is "icevault help agent"
+			}
 			e, m, asked, out, errb := helpEnv(t)
 			if rc := Run([]string{cmd, help}, e); rc != 0 {
 				t.Errorf("%s %s: rc=%d, want 0 (%s)", cmd, help, rc, errb)
