@@ -160,6 +160,7 @@ cmd "session" help=#"Unlock once, run a command with the files of an environment
       complete type="dir"
     }
   }
+  flag "--read-only" help=#"a session of its own that is never written back (for commands that only look)"# global=#true
   cmd "run" help=#"run a command inside a session"# {
     arg "[-- command]..." help=#"the command and its arguments, after --"# {
       complete type="path"

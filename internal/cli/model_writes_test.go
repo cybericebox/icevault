@@ -33,6 +33,7 @@ func TestSessionRunAndRecoverChangeTheModel(t *testing.T) {
 	}
 	dir := sessionDir(h.env0(), base, "prod", "")
 	_ = os.WriteFile(filepath.Join(dir, "keys", "gcp", "from-a-killed-run"), []byte("kept"), 0o600)
+	killOwner(t, dir)
 	if rc := h.run("recover", "--env", "prod", "--base", base); rc != 0 {
 		t.Fatalf("recover: %s %s", h.out.String(), h.errb.String())
 	}

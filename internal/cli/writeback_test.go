@@ -73,6 +73,7 @@ func TestRecoverWritesALeftOverSessionIntoTheVault(t *testing.T) {
 	dir := sessionDir(h.env0(), base, "prod", "")
 	_ = os.MkdirAll(filepath.Join(dir, "keys", "gcp"), 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "keys", "gcp", "from-a-killed-run"), []byte("kept"), 0o600)
+	killOwner(t, dir)
 	// the run was killed: no close. A new open is refused, recover writes the files and removes the directory
 	if rc := h.run("recover", "--env", "prod", "--base", filepath.Join(h.dir, "nowhere")); rc != 1 || !strings.Contains(h.errb.String(), "no left-over session directory") {
 		t.Fatal(h.errb.String())
