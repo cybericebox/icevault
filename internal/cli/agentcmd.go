@@ -31,6 +31,9 @@ const (
 // Exit codes of "agent": 0 done (or allowed), 1 refused or no window, 2 wrong command line, 3 the person denied, the request expired or failed, or the wait ran out.
 const exitAgentNotDone = 3
 
+// agentReconnect is how long a waiting client keeps asking after it lost the window before it reports that the window is locked or closed.
+var agentReconnect = 30 * time.Second
+
 func cmdAgent(args []string, e *Env) error {
 	var noWait bool
 	var wait int
@@ -100,12 +103,22 @@ func cmdAgent(args []string, e *Env) error {
 func agentWait(dir, id, token, as string, limit time.Duration) agentapi.Response {
 	end := time.Now().Add(limit)
 	resp := agentapi.Response{OK: true, State: agentapi.StatePending, ID: id}
+	var lost time.Time // since when the window does not answer (it saves and reopens the vault when it applies a batch, or it was locked)
 	for time.Now().Before(end) {
 		time.Sleep(agentPoll)
 		r, err := agentapi.Call(dir, agentapi.Request{Op: "batch-status", Args: map[string]any{"id": id, "token": token}, Client: as}, agentCall)
-		if err != nil { // the window was locked or closed meanwhile: nothing can be allowed any more
-			return agentapi.Response{OK: true, State: agentapi.StateDenied, ID: id, Code: "no_window"}
+		if err != nil || (!r.OK && r.Code == "locked") {
+			// The connection was lost: ask again, the window keeps the outcome of a finished batch. Only a window that stays away for the whole grace time is
+			// taken as locked or closed, and then the batch is gone (expired), not denied: the person did not say no.
+			if lost.IsZero() {
+				lost = time.Now()
+			}
+			if time.Since(lost) > agentReconnect {
+				return agentapi.Response{OK: true, State: agentapi.StateExpired, ID: id, Code: "locked"}
+			}
+			continue
 		}
+		lost = time.Time{}
 		if !r.OK || r.State != agentapi.StatePending {
 			return r
 		}

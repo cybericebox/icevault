@@ -99,7 +99,11 @@ type agentResult struct {
 	Result string `json:"result"`
 }
 
+// agentDoneKeep is how long the outcome of a finished batch stays readable by batch-status (it also survives a lock and an unlock of the window).
+const agentDoneKeep = 30 * time.Minute
+
 type agentDone struct {
+	at          time.Time
 	state, code string
 	token       string
 	title       string
@@ -246,7 +250,7 @@ func (h *agentHub) stop() {
 	conns := h.conns
 	h.conns = nil
 	pend, drafts := h.pend, h.drafts
-	h.pend, h.drafts, h.ord, h.done, h.dord = map[string]*agentBatch{}, map[string]*agentBatch{}, nil, map[string]agentDone{}, nil
+	h.pend, h.drafts, h.ord = map[string]*agentBatch{}, map[string]*agentBatch{}, nil // the outcomes of finished batches stay: a client may ask after the window is open again
 	h.mu.Unlock()
 	h.a.ops.Lock() // what runs on a copy of a batch ends first
 	defer h.a.ops.Unlock()
@@ -258,11 +262,13 @@ func (h *agentHub) stop() {
 		_ = os.Remove(agentapi.SocketPath(h.dir))
 		h.a.say("the agent API is off")
 	}
-	for _, b := range drafts {
+	for id, b := range drafts {
 		b.drop()
+		h.finish(id, b.title, b.token, agentapi.StateExpired, "locked", nil)
 	}
-	for _, b := range pend {
+	for id, b := range pend {
 		b.drop()
+		h.finish(id, b.title, b.token, agentapi.StateExpired, "locked", nil)
 		h.log("batch", b.title, b.who, "dropped: locked")
 	}
 	if len(pend) > 0 {

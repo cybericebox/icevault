@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cybericebox/icevault/internal/agentapi"
 )
@@ -166,6 +167,34 @@ func TestAgentHelpIsTheOpOfTheWindow(t *testing.T) {
 	out.Reset()
 	if rc := Run([]string{"help", "agent"}, e); rc != 0 || !strings.Contains(out.String(), "agent") || strings.Contains(out.String(), `"ok"`) {
 		t.Fatalf("the usage of the command: rc=%d %q", rc, out.String())
+	}
+}
+
+func TestAgentWaitKeepsAskingAfterALostConnection(t *testing.T) {
+	old := agentReconnect
+	agentReconnect = 10 * time.Second
+	defer func() { agentReconnect = old }()
+	_, _, _, dir := agentEnv(t, "")
+	go func() { // the window is away for a moment (it saves and opens the vault again), then it answers
+		time.Sleep(1500 * time.Millisecond)
+		_, stop := fakeWindow(t, dir, agentapi.StateApplied)
+		time.Sleep(10 * time.Second)
+		stop()
+	}()
+	r := agentWait(dir, "abc", "tok", "t", 8*time.Second)
+	if r.State != agentapi.StateApplied {
+		t.Fatalf("the real outcome is expected after the reconnect: %+v", r)
+	}
+}
+
+func TestAgentWaitReportsALockedWindowAsExpiredNotDenied(t *testing.T) {
+	old := agentReconnect
+	agentReconnect = 800 * time.Millisecond
+	defer func() { agentReconnect = old }()
+	_, _, _, dir := agentEnv(t, "")
+	r := agentWait(dir, "abc", "tok", "t", 10*time.Second)
+	if r.State != agentapi.StateExpired || r.Code != "locked" || r.State == agentapi.StateDenied {
+		t.Fatalf("%+v", r)
 	}
 }
 

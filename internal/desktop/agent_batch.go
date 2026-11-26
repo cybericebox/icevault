@@ -157,7 +157,7 @@ func (h *agentHub) takePending(id string) *agentBatch {
 
 func (h *agentHub) finish(id, title, token, state, code string, results []agentResult) {
 	h.mu.Lock()
-	h.done[id] = agentDone{state: state, code: code, token: token, title: title, results: results}
+	h.done[id] = agentDone{at: time.Now(), state: state, code: code, token: token, title: title, results: results}
 	h.dord = append(h.dord, id)
 	if len(h.dord) > 100 {
 		delete(h.done, h.dord[0])
@@ -415,7 +415,7 @@ func (h *agentHub) batchStatus(id, token string) agentapi.Response {
 	if b := h.pend[id]; b != nil && sameToken(b.token, token) {
 		return agentapi.Response{OK: true, State: agentapi.StatePending, ID: id, Data: map[string]any{keyTitle: b.title, "items": len(b.items)}}
 	}
-	if d, found := h.done[id]; found && sameToken(d.token, token) {
+	if d, found := h.done[id]; found && sameToken(d.token, token) && time.Since(d.at) < agentDoneKeep {
 		return agentapi.Response{OK: true, State: d.state, ID: id, Code: d.code, Data: map[string]any{keyTitle: d.title, "results": d.results}}
 	}
 	return agentRefused("not_found", nil)

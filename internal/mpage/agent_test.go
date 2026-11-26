@@ -830,6 +830,9 @@ func TestAgentLockDropsBatchesAndConnections(t *testing.T) {
 		t.Fatal("an open connection survived the lock")
 	}
 	r.unlock()
+	if st := r.status(id); !st.OK || st.State != agentapi.StateExpired || st.Code != "locked" {
+		t.Fatalf("the client must learn that the lock dropped the batch (expired, locked): %+v", st)
+	}
 	if d := r.app.AgentDecide(id, true); d.Status == 200 {
 		t.Fatal("a batch survived the lock")
 	}
