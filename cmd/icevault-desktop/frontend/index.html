@@ -3049,7 +3049,8 @@ function mConnections(main) {
   if (!list.length) { main.append(mempty(t("m.empty.connections"))); return; }
   list.forEach((c) => {
     const b = [];
-    if (editing() && !c.unknown_kind) { b.push(btn(t("m.conn.add_field"), "plus", () => mfieldDialog(c, null), "ghost"), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)), ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
+    if (editing() && !c.unknown_kind) b.push(btn(t("m.conn.add_field"), "plus", () => mfieldDialog(c, null), "ghost"), ibtn("edit", t("m.conn.rename", { name: c.name }), () => mconnDialog(c)));
+    if (editing()) { b.push(ibtn("archive", t("m.conn.delete", { name: c.name }), () => mdelete(t("m.conn.delete_title", { name: c.name }), c.users.length ? t("m.conn.delete_used", { list: c.users.map(muserText).join(", ") }) : t("m.conn.delete_note"), "m-connection", { action: "delete", uuid: c.uuid }), "danger")); }
     const sec = mblock(main, c.name, "plug", b);
     const meta = el("div", "mmeta"); meta.append(el("span", "tag", c.unknown_kind ? c.kind : ckTitle(c.kind))); if (c.unknown_kind) meta.append(el("span", "dim", t("m.conn.unknown_kind")));
     const us = el("span", "dim", c.users.length ? t("m.conn.used_by", { list: c.users.map(muserText).join(", ") }) : t("m.conn.unused")); meta.append(us); sec.append(meta);

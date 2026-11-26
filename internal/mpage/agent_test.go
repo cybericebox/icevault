@@ -693,6 +693,52 @@ func TestAgentCopyAndMoveStayInsideTheVault(t *testing.T) {
 	r.noSecrets()
 }
 
+func TestAgentCopyAndMoveCarryTheExpiryDate(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.mutate(func(m *vmodel.Vault) { m.Connection("GCP").Field("credentials").Expires = "2099-02-03" })
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "COPIED_SPOT", "visibility": "secret"}},
+		step{"var-create", map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT", "visibility": "secret"}})
+	r.okAll(step{"copy-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "COPIED_SPOT"}}})
+	r.okAll(step{"move-value", map[string]any{"from": map[string]any{"connection": "GCP", "field": "credentials"}, "to": map[string]any{"scope": "env/prod/general", "key": "MOVED_SPOT"}}})
+	m := r.onDisk()
+	if f := m.Connection("GCP").Field("credentials"); f.Value != "" || f.Expires != "" {
+		t.Fatalf("a move empties the source with its date: %q %q", f.Value, f.Expires)
+	}
+	for _, k := range []string{"COPIED_SPOT", "MOVED_SPOT"} {
+		found := false
+		for _, v := range m.Env("prod").General {
+			if v.Key == k {
+				found = true
+				if v.Expires != "2099-02-03" {
+					t.Fatalf("%s: the date did not travel: %q", k, v.Expires)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s not found", k)
+		}
+	}
+}
+
+func TestAgentConnectionOfAnUndeclaredKindCanBeReadFromAndDeleted(t *testing.T) {
+	r := newRig(t, 0)
+	r.unlock()
+	r.mutate(func(m *vmodel.Vault) {
+		m.Connections = append(m.Connections, &vmodel.Connection{Name: "Old relay", Kind: "retired-kind",
+			Fields: []*vmodel.Field{{Name: "token", Value: "old-token-value", Secret: true, Expires: "2099-05-06"}}})
+	})
+	r.okAll(step{"var-create", map[string]any{"scope": "env/prod/general", "key": "RELAY_SPOT", "visibility": "secret"}})
+	r.okAll(step{"move-value", map[string]any{"from": map[string]any{"connection": "Old relay", "field": "token"}, "to": map[string]any{"scope": "env/prod/general", "key": "RELAY_SPOT"}}})
+	if r.reveal("env/prod/general", "RELAY_SPOT") != "old-token-value" || r.reveal("conn/"+r.connUUID("Old relay"), "token") != "" {
+		t.Fatal("the value was not moved out of the undeclared kind")
+	}
+	r.okAll(step{"connection-delete", map[string]any{"connection": "Old relay"}})
+	if r.onDisk().Connection("Old relay") != nil {
+		t.Fatal("the connection was not deleted")
+	}
+}
+
 func TestAgentRejectLeavesTheVaultAsItIs(t *testing.T) {
 	r := newRig(t, 0)
 	r.unlock()

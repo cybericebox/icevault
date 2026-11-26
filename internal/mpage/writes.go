@@ -341,9 +341,7 @@ func (c *Core) writeConnection(a map[string]any) error {
 		if x == nil {
 			return refuse("not_found", nil)
 		}
-		if _, known := c.kinds().Kind(x.Kind); !known {
-			return refuse("unknown_kind", map[string]any{jKind: x.Kind})
-		}
+		// a connection of a kind the description does not declare can still be deleted (and only that)
 		if us := c.usersOf(x); len(us) > 0 && !flag(a, "confirm") {
 			return refuse("confirm_delete_used", map[string]any{jList: userList(us), jName: x.Name})
 		}
@@ -389,7 +387,13 @@ func (c *Core) writeField(a map[string]any) error {
 	}
 	k, known := c.kinds().Kind(x.Kind)
 	if !known {
-		return refuse("unknown_kind", map[string]any{jKind: x.Kind}) // read only: this vault was opened without the description that declares the kind
+		// read only: this vault was opened without the description that declares the kind. The one change allowed is to empty a value
+		// (with its date) of a field that exists: the end of a move out of it.
+		if f := x.Field(name); f != nil && !flag(a, actDelete) && !flag(a, "secret") && has(a, "value") && str(a, "value") == "" {
+			f.Value = ""
+			return setExpires(a, &f.Expires)
+		}
+		return refuse("unknown_kind", map[string]any{jKind: x.Kind})
 	}
 	if flag(a, actDelete) {
 		var keep []*vmodel.Field
