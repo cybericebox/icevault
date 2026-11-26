@@ -71,8 +71,6 @@ icevault env adopt-connections --env E [--dry-run]
                                        move values an environment holds as its own into the connection the description now gives them (names only are printed)
 icevault import --env E [--dry-run]    read the plaintext tree of an environment into the vault
 icevault export --env E --to DIR       write the settings files of an environment
-icevault export-app --env E --app A    write the env file of an app into <dir>/.env (the app's dir: of the description,
-                                       relative to the checkout; ../<name> without one; --to DIR names another)
 icevault status --env E                what is set, what is missing, what is still on disk
 icevault view --env E                  the variables of an environment (names only, never a value)
 icevault expiring [--days N]           the values that have expired or expire within N days (default 14): names and dates only
@@ -80,10 +78,28 @@ icevault session run --env E -- CMD    run CMD with a private tree of the enviro
 icevault purge-plaintext --env E       remove the plaintext files the vault holds
 icevault copies | copy --to DIR        copies of the vault on other volumes
 icevault ui                            the window (macOS)
+icevault agent OP [JSON]               ask the unlocked window to read the vault or to apply a batch of changes (see "The agent API"; JSON answer, never a secret value)
 icevault help [COMMAND]                every command and flag
 ```
 
 Environment variables: `ICEVAULT_ROOT` (the checkout; otherwise the nearest folder above the working directory with `icevault-project.yaml`), `ICEVAULT_PROJECT` (another description file), `ICEVAULT_VAULT` (the vault file; `--vault PATH` wins), `ICEVAULT_KEYFILE`, `ICEVAULT_NO_VAULT=1`, `ICEVAULT_NO_TOUCHID=1`.
+
+## The agent API
+
+While the window is **unlocked** it serves a local unix socket (`agent.sock` in the application folder of the user's configuration directory: mode 0600, in a folder of mode 0700 owned by the user; any other mode switches the API off). Locked or closed means no socket and no access; a connection of another user is not answered. `icevault agent OP [JSON]` is the client: it asks no password, unlocks nothing and prints one JSON line (exit 0 done, 1 refused or no window, 2 usage, 3 not applied or timed out). `icevault agent help` lists the operations.
+
+- **Reads** answer at once: `help`, `structure` (environments, sites, products, variables, connections with their fields, shared values, other secrets, files and who uses what: names, states (`filled`), expiry dates and the values of plain places; a secret or sealed value is never in any answer) and `batch-status`.
+- **Changes are default-deny batches.** No write op is run when it is sent. `batch-begin {"title":T}` answers an id and a random token (the key to that batch: it is shown nowhere else and never logged; every later call about the batch needs it, a connection of another user is not answered at all); every write op (`var-create`, `var-rename`, `var-delete`, `var-meta`, `set-value`, `copy-value`, `move-value`, `connection-*`, `field-*`, `site-*`, `product-*`, `env-*`, `other-*`) takes `"batch":ID` and `"token":TOKEN` and is checked at once, on a copy of the vault where the items before it are done, and recorded (`batch_required` without a batch). `batch-submit {"id":ID,"token":TOKEN}` sends the batch to the window, which shows it in one dialog: the title, who sent it, every item by names and scopes (never a value), what it changes (old to new), and a short reason for every item that needs a close look (a secret value, a delete, a relink, a copy of an environment with secrets, a name the project binds, ...). **Apply batch** runs the items again, in order, on a fresh copy of the vault (every target is found again and every rule is checked again; an item the rules see differently than when it was shown fails) and only when every item passed makes the copy the content of the vault, in one save. Everything Apply uses is in the dialog: every argument of every item (plain values cleaned and cut with a "…", a reference as written, a secret value only as "a secret value"), who added the items, and a mark on names that start alike or have non-Latin letters. The password change and the reload of the vault wait for Apply, and a copy made before a change of the file or the password is never saved over it. **Reject** (the default focus), the first failing item, the expiry and the lock leave the vault as it is. What is deleted goes to the vault's recycle bin.
+- **Rules that stay:** the writes need the window in edit mode (also at Apply); visibility only goes up (a secret is never made plain, a sealed one never lowered); a secret is never copied into a plain place; a plain variable never takes the name of a secret one; a value is never an argument of the command: put `"value_file": "/path"` or `"value_stdin": true` in the JSON.
+- **Limits:** at most 50 items in a batch, 4 open batches, one submitted batch waiting at a time, a new submit at most every 10 seconds, a batch is dropped after 10 minutes.
+- **Journal:** the batch and every item (time, operation, names, who asked, result; never a value) are shown in the window (the robot button) and kept in `agent-journal.log` next to the socket. The window shows the program that really connected, read from the socket.
+
+```
+ID=$(icevault agent batch-begin '{"title":"mail relay"}' | jq -r .data.id)
+icevault agent connection-create '{"batch":"'$ID'","name":"Mail relay","kind":"s3"}'
+echo -n 'new value' | icevault agent set-value '{"batch":"'$ID'","connection":"Mail relay","field":"password","value_stdin":true}'
+icevault agent batch-submit '{"id":"'$ID'"}'   # waits for Apply or Reject in the window
+```
 
 ## The master password
 
@@ -111,7 +127,7 @@ A vault normally belongs to a project (the folder with `icevault-project.yaml`: 
 
 - `icevault init-vault --no-project --vault PATH` makes such a vault anywhere (`--vault PATH` or `ICEVAULT_VAULT` names the file).
 - In the window, **New vault** offers **Without a project** beside the project folder; a vault that lies in no project (the lock screen asks for a checkout folder) can be opened with **Open without a project**.
-- A command that needs environments (`status`, `view`, `import`, `export`, `export-app`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
+- A command that needs environments (`status`, `view`, `import`, `export`, `env`, `session`, ...) says "this vault has no project" and does nothing. Add a project later and the vault works with it as before.
 
 ## Development
 

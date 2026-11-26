@@ -79,7 +79,7 @@ func CompatWith(m *Vault, d *project.Description, o CompatOptions) *CompatSnapsh
 	out := &CompatSnapshot{Snap: model.NewSnapshot(), Skipped: map[string]string{}, Targets: map[string]*Target{}}
 	for _, e := range m.Envs {
 		if len(e.Sites) > 1 {
-			out.Skipped[e.Name] = fmt.Sprintf("'%s' has %d sites: the files of the project are written for one site; export it per run with --batches", e.Name, len(e.Sites))
+			out.Skipped[e.Name] = fmt.Sprintf("'%s' has %d sites: the files of the project are written for one site", e.Name, len(e.Sites))
 			continue
 		}
 		out.Snap.Put(compatEnv(e, d, o, out.Targets))

@@ -6,8 +6,11 @@
 package mpage
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -950,4 +953,211 @@ func (c *Core) resolvedText(pl vmodel.Place, key, value, vis string) (string, er
 		return "", refuse("ref_varies", nil)
 	}
 	return pv.Text, nil
+}
+
+// DefaultVisibility is the visibility a new variable of that name gets.
+func (c *Core) DefaultVisibility(key string) string { return c.defaultVis(key) }
+
+// EnvHoldsSecrets says whether the environment holds a filled variable that is not plain (in any group, also the groups of site kinds no site shows) or
+// any kept file.
+func (c *Core) EnvHoldsSecrets(env string) bool {
+	e := c.m.Env(env)
+	if e == nil {
+		return false
+	}
+	held := func(vs []*vmodel.Var) bool {
+		for _, v := range vs {
+			if v.Value != "" && v.Vis != vmodel.VisPlain {
+				return true
+			}
+		}
+		return false
+	}
+	if held(e.General) || len(e.Files) > 0 {
+		return true
+	}
+	for _, s := range e.Sites {
+		if held(s.Vars) || len(s.Files) > 0 {
+			return true
+		}
+	}
+	for _, p := range e.Products {
+		if held(p.Vars) {
+			return true
+		}
+		for _, vs := range p.Sub {
+			if held(vs) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// uses are all the uses of a connection the project description has: of a product, of the vault, of a site kind (its connection and its state).
+func (c *Core) uses() []project.ConnectionUse {
+	if c.d == nil {
+		return nil
+	}
+	var uses []project.ConnectionUse
+	for _, p := range c.d.Products {
+		uses = append(uses, p.Connections...)
+	}
+	uses = append(uses, c.d.VaultConnections...)
+	for _, sk := range c.d.SiteKinds {
+		if sk.Connection != nil {
+			uses = append(uses, *sk.Connection)
+		}
+		if sk.State != nil {
+			uses = append(uses, *sk.State)
+		}
+	}
+	return uses
+}
+
+// BoundConnectionName says whether the project description gives that name to a use of a connection (its name, its serve-as, the title of its kind or the
+// id of its kind).
+func (c *Core) BoundConnectionName(name string) bool {
+	if name == "" {
+		return false
+	}
+	same := strings.EqualFold
+	for _, u := range c.uses() {
+		if same(u.Name, name) || same(u.ServeAs, name) || same(u.Kind, name) {
+			return true
+		}
+		if u.Name == "" {
+			if k, known := c.kinds().Kind(u.Kind); known && same(k.Title, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ConnectionKindNeeded says whether a use of the project description needs a connection of that kind.
+func (c *Core) ConnectionKindNeeded(kind string) bool {
+	for _, u := range c.uses() {
+		if u.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// ConnectionKindServed says whether a program asks for a connection of that kind by a serve-as name.
+func (c *Core) ConnectionKindServed(kind string) bool {
+	for _, u := range c.uses() {
+		if u.Kind == kind && u.ServeAs != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// VarExists says whether a variable of the key is in exactly that scope (also in the group of a site kind that no site shows).
+func (c *Core) VarExists(scope, key string) bool {
+	l, err := c.scope(scope)
+	if err != nil {
+		return false
+	}
+	for _, v := range l.get() {
+		if v.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// KeyPlaces lists every place a variable of that key lives.
+func (c *Core) KeyPlaces(key string) []desktop.KeyPlace {
+	var out []desktop.KeyPlace
+	add := func(scope string, vs []*vmodel.Var, imported bool) {
+		for _, v := range vs {
+			if v.Key == key {
+				out = append(out, desktop.KeyPlace{Scope: scope, Secret: v.Vis != vmodel.VisPlain, Filled: v.Value != "", Imported: imported})
+			}
+		}
+	}
+	add("shared", c.m.Shared, false)
+	for _, e := range c.m.Envs {
+		base := "env/" + e.Name
+		add(base+"/general", e.General, false)
+		add(base+"/general", e.Imports, true)
+		for _, s := range e.Sites {
+			add(base+"/site/"+s.Name, s.Vars, false)
+		}
+		for _, p := range e.Products {
+			add(base+"/product/"+p.Name, p.Vars, false)
+			for kind, vs := range p.Sub {
+				add(base+"/product/"+p.Name+"/"+kind, vs, false)
+			}
+		}
+	}
+	return out
+}
+
+// scratchCore is a Core on a copy of the vault (see BatchScratch).
+type scratchCore struct {
+	*Core
+	id vault.Identity // the vault this is a copy of, when the copy was made
+}
+
+// Lock does nothing: the copy is removed by its release function.
+func (scratchCore) Lock() {}
+
+// BatchScratch copies the vault file to a private temporary folder, opens the copy with the key of the open vault and returns a Core on it.
+func (c *Core) BatchScratch() (desktop.Core, func(), error) {
+	data, err := os.ReadFile(c.v.Path())
+	if err != nil {
+		return nil, nil, err
+	}
+	dir, err := os.MkdirTemp("", "icevault-batch-")
+	if err != nil {
+		return nil, nil, err
+	}
+	release := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, "v.kdbx")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		release()
+		return nil, nil, err
+	}
+	k := c.v.Key()
+	sv, err := vault.Reopen(path, k)
+	k.Wipe()
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	sc, err := New(sv, c.d)
+	if err != nil {
+		sv.Close()
+		release()
+		return nil, nil, err
+	}
+	sc.Now = c.Now
+	return scratchCore{Core: sc, id: c.v.Identity()}, func() { sv.Close(); release() }, nil
+}
+
+// BatchAdopt makes the content of the copy the content of the vault and reads the model again.
+func (c *Core) BatchAdopt(scratch desktop.Core) error {
+	s, isScratch := scratch.(scratchCore)
+	if !isScratch {
+		return errors.New("not a copy made by BatchScratch")
+	}
+	if c.v.Identity() != s.id { // the file was replaced or the password changed since the copy was made: the copy must not undo that
+		return refuse("changed", nil)
+	}
+	if err := c.v.AdoptContent(s.v); err != nil {
+		return err
+	}
+	m, err := vmodel.Load(c.v)
+	if err != nil {
+		if c.m != nil {
+			c.m.ReadOnly = true // the model in memory is the old one: nothing may be written from it over what was saved
+		}
+		return desktop.ErrBatchSaved
+	}
+	c.m = m
+	return nil
 }

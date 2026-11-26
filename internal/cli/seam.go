@@ -320,11 +320,11 @@ func guardDirRE(k *project.KeptFile) *regexp.Regexp {
 	return re
 }
 
-// cmdGuard: sealed --private DIR [--what TEXT] | <guard word> --dir DIR | env-of-private DIR | token-file PATH | plaintext --private DIR [--env E].
+// cmdGuard: sealed --private DIR [--what TEXT] | <guard word> --dir DIR | token-file PATH | plaintext --private DIR [--env E].
 // Exit 0: allowed (or the answer is on stdout as JSON); exit 1: refused, one line on stderr.
 func cmdGuard(args []string, e *Env) error {
 	if len(args) == 0 {
-		return &parseErr{msg: "guard needs sealed, a guard word of the project description, env-of-private, token-file or plaintext"}
+		return &parseErr{msg: "guard needs sealed, a guard word of the project description, token-file or plaintext"}
 	}
 	sub, rest := args[0], args[1:]
 	var private, dir, what, env string
@@ -350,18 +350,6 @@ func cmdGuard(args []string, e *Env) error {
 			return refusal(v, en, state, private, what)
 		}
 		return nil
-	case "env-of-private":
-		if len(pos) != 1 {
-			return &parseErr{msg: "guard env-of-private needs DIR"}
-		}
-		root, en, ok, err := envOfPrivate(e, pos[0])
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return printJSON(e.Out, map[string]any{"match": false})
-		}
-		return printJSON(e.Out, map[string]any{"match": true, "root": root, "env": en})
 	case "token-file":
 		if len(pos) != 1 {
 			return &parseErr{msg: "guard token-file needs PATH"}
@@ -684,13 +672,13 @@ func closeSession(e *Env, o *opened, s *session) error {
 	return os.RemoveAll(s.Path)
 }
 
-// cmdSession: open --env E [--site S] | close --env E [--site S] | run --env E [--site S] -- COMMAND ARGS...
+// cmdSession: run --env E [--site S] -- COMMAND ARGS...
 func cmdSession(args []string, e *Env) error {
 	if len(args) == 0 {
-		return &parseErr{msg: "session needs open, close or run"}
+		return &parseErr{msg: "session needs run"}
 	}
 	sub, rest := args[0], args[1:]
-	if sub != "open" && sub != actClose && sub != "run" {
+	if sub != "run" {
 		return &parseErr{msg: "session: unknown " + sub}
 	}
 	var child []string
@@ -722,26 +710,12 @@ func cmdSession(args []string, e *Env) error {
 	if !render.Holds(o.snap, ec.name) {
 		return fail("the vault holds nothing for '%s'", ec.name)
 	}
-	if sub != actClose {
-		warnExpiredVault(e, o.v, ec.name)
-	}
+	warnExpiredVault(e, o.v, ec.name)
 	s0, err := render.PickSite(o.snap, ec.name, site)
 	if err != nil {
 		return fail("%v", err)
 	}
 	switch sub {
-	case "open":
-		s, err := openSession(e, o, ec.name, s0, base)
-		if err != nil {
-			return err
-		}
-		return printJSON(e.Out, s)
-	case "close":
-		s := &session{Env: ec.name, Site: s0, Path: sessionDir(e, base, ec.name, s0), base: base}
-		if err := ownSessionDir(s.Path); err != nil {
-			return err
-		}
-		return closeSession(e, o, s)
 	case "run":
 		if len(child) == 0 {
 			return &parseErr{msg: "session run needs -- COMMAND"}

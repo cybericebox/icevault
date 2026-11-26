@@ -4,6 +4,10 @@ IceVault {{VERSION}}
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
+- **Agent API.** While the window is unlocked it serves a local socket (mode 0600, in the user's own configuration folder, mode 0700; gone when the window locks or closes; another user's connection is not answered) that `icevault agent OP [JSON]` talks to. Programs of the user can read the structure of the vault (names, states, plain values, never a secret value). They change it only through **batches**: `batch-begin`, write ops that take `"batch":ID` (each checked at once on a copy of the vault), `batch-submit`. The window shows the whole batch in one dialog (every item by names, what it changes, and why it needs a close look); **Apply batch** runs the items again on a fresh copy and saves the vault in one write only if every item passed, **Reject** (the default) and any failure leave it as it is. Writes need edit mode; visibility only goes up; a secret is never copied into a plain place; a value comes from a file or the standard input of the client, never an argument, and is never echoed or logged.
+- A **Journal** panel in the window (the robot button) lists every API action (the batch and each item: time, operation, names, who asked, result; no values); the same lines are kept in `agent-journal.log` in the configuration folder.
+- **Removed** (they had no user left): the subcommands `export-app`, `export --batches` (with its `--product` and `--all`), `guard env-of-private`, `session open` and `session close`. `session run` and `recover` stay and work as before. The window no longer carries the leftovers of the gone `migrate` command (its plan panel, banner and texts); the messages that sent the reader to `icevault migrate` now point to `icevault project check`.
+
 ## What is here
 
 - `IceVault-{{VERSION}}-macos.dmg`: **the recommended way on macOS**. Open it and drag IceVault to Applications. One application for Apple silicon and Intel (the settings window, with the `icevault` command inside it).

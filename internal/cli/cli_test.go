@@ -53,6 +53,9 @@ func (h *harness) run(args ...string) int {
 			asks = asks[1:]
 			return []byte(p), nil
 		}}
+	if len(args) >= 2 && args[0] == "session" && (args[1] == "open" || args[1] == "close") {
+		return runTestSession(args[1], args[2:], e)
+	}
 	return Run(args, e)
 }
 

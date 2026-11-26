@@ -32,6 +32,25 @@ cmd "ui" help=#"Open the settings window (IceVault.app)"# {
   }
   flag "--demo" help=#"a throwaway in-memory vault (password demo)"#
 }
+cmd "agent" help=#"Ask the unlocked window to read the vault or to apply a batch of changes (JSON, never a secret value)"# {
+  flag "--no-wait" help=#"answer pending at once, do not wait for the person"#
+  flag "--timeout <seconds>" help=#"how long to wait for the person (default 600)"# {
+    arg "<seconds>" {
+      complete type="none"
+    }
+  }
+  flag "--as <name>" help=#"the name shown in the dialog"# {
+    arg "<name>" {
+      complete type="none"
+    }
+  }
+  arg "<op>" help=#"the operation (agent help lists them)"# {
+    complete type="none"
+  }
+  arg "[json]" help=#"its arguments as a JSON object, or - to read them from the standard input"# {
+    complete type="none"
+  }
+}
 cmd "where" help=#"Where the vault is (JSON); --remember saves the checkout"# {
   flag "--remember" help=#"save the project checkout for the window opened from Finder"#
 }
@@ -96,11 +115,6 @@ cmd "guard" help=#"The checks the scripts ask before they make secrets"# subcomm
       complete type="path"
     }
   }
-  cmd "env-of-private" help=#"the environment of a plaintext tree (JSON)"# {
-    arg "[path]" help=#"the path"# {
-      complete type="dir"
-    }
-  }
   cmd "token-file" help=#"is the token file safe to hand over"# {
     arg "[path]" help=#"the path"# {
       complete type="path"
@@ -146,8 +160,6 @@ cmd "session" help=#"Unlock once, run a command with the files of an environment
       complete type="dir"
     }
   }
-  cmd "open" help=#"make the session directory (prints JSON)"#
-  cmd "close" help=#"write a session directory back and remove it"#
   cmd "run" help=#"run a command inside a session"# {
     arg "[-- command]..." help=#"the command and its arguments, after --"# {
       complete type="path"
@@ -220,37 +232,6 @@ cmd "export" help=#"Write an environment as PLAINTEXT files"# {
       complete type="none"
     }
   }
-  flag "--product <product>" help=#"one product of the environment (with --batches)"# {
-    arg "<product>" {
-      complete type="none"
-    }
-  }
-  flag "--all" help=#"every site and product of the environment (with --batches)"#
-  flag "--batches" help=#"write the batches of the vault model, not the project's files"#
-}
-cmd "export-app" help=#"Write the env file of one app"# {
-  flag "--env <env>" help=#"the environment"# {
-    arg "<env>" {
-      complete run=#"icevault project envs 2>/dev/null"#
-    }
-  }
-  flag "--site <site>" help=#"the site of the environment"# {
-    arg "<site>" {
-      complete type="none"
-    }
-  }
-  flag "--app <app>" help=#"the app"# {
-    arg "<app>" {
-      complete type="none"
-    }
-  }
-  flag "--to <dir>" help=#"the app's directory"# {
-    arg "<dir>" {
-      complete type="dir"
-    }
-  }
-  flag "--force" help=#"replace an existing file"#
-  flag "--dry-run" help=#"print the variable names, write nothing"#
 }
 cmd "status" help=#"What the vault holds for an environment"# {
   flag "--env <env>" help=#"the environment"# {

@@ -74,6 +74,12 @@ type Options struct {
 	// Maker and PickSave make "New vault" possible (newvault.go): both are needed, and the list of Vaults; nil: the page offers no new vault.
 	Maker    VaultMaker
 	PickSave SavePicker
+	// AgentDir is the folder of the agent socket and journal (agentapi.Dir); "" switches the agent API off. The socket exists only while the vault is unlocked.
+	AgentDir string
+	// AgentTTL is how long a request waits for the person's answer (0: AgentTTLDefault).
+	AgentTTL time.Duration
+	// AgentGap is the least time between two new requests that wait for the person, from one client (0: AgentGapDefault, below 0: no limit).
+	AgentGap time.Duration
 }
 
 // CLIInstaller is internal/cliinstall as the window needs it.
@@ -108,6 +114,8 @@ type App struct {
 	kit         *recoveryKit // the password of the vault just made, until its recovery kit is saved or dropped
 	changeWrong int          // wrong current passwords in a row in the change-password dialog (changepw.go)
 	changing    sync.Mutex   // one password change at a time
+	agent       *agentHub    // the agent API (agent.go); nil when it is off
+	ops         sync.Mutex   // one operation on the core at a time: the window's own and the agents'
 
 	unlocking  sync.Mutex // one unlock at a time
 	confirming sync.Mutex // never two Touch ID dialogs at once
@@ -149,6 +157,9 @@ func New(o Options) *App {
 		}
 	}
 	a := &App{o: o, mode: "view", active: o.Clock(), unlockState: "idle", cur: Target{Unlocker: o.Unlocker, Binding: o.Binding, Confirm: o.Confirm}}
+	if o.AgentDir != "" {
+		a.agent = newAgentHub(a, o.AgentDir, o.AgentTTL, o.AgentGap)
+	}
 	if o.Vaults != nil && o.Vault != "" {
 		a.selectVault(o.Vault)
 	}
@@ -278,7 +289,16 @@ func (a *App) syncDisk(full, wait bool) (bool, error) {
 	} else if !a.syncing.TryLock() {
 		return false, nil
 	}
+	if !wait { // the background check: not while an operation holds the core (a batch is being applied, a password is being changed)
+		if !a.ops.TryLock() {
+			a.syncing.Unlock()
+			return false, nil
+		}
+	}
 	changed, err := s.Sync(full)
+	if !wait {
+		a.ops.Unlock()
+	}
 	a.syncing.Unlock()
 	if err != nil || !changed {
 		return false, err
@@ -299,7 +319,9 @@ func (a *App) Refresh() Response {
 	if _, e := a.store(); e != nil {
 		return answer(e)
 	}
+	a.ops.Lock()
 	changed, err := a.syncDisk(true, true)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}
@@ -309,6 +331,7 @@ func (a *App) Refresh() Response {
 }
 
 func (a *App) quit() {
+	a.agentStop()
 	if a.o.Quit != nil {
 		a.o.Quit()
 	}
@@ -341,9 +364,12 @@ func (a *App) lock() {
 	c := a.core
 	a.core, a.mode = nil, "view"
 	a.mu.Unlock()
+	a.agentStop()
 	a.clearClipboardIfOurs()
 	if c != nil {
+		a.ops.Lock() // an operation of the window or of an agent in the middle of the core ends first
 		c.Lock()
+		a.ops.Unlock()
 		a.say("locked")
 		if a.o.Notify != nil {
 			a.o.Notify(EventVaultLocked, map[string]any{})
@@ -376,7 +402,7 @@ func (a *App) status() map[string]any {
 		left = 0
 	}
 	return map[string]any{"locked": a.core == nil, "mode": a.mode, keyTouchID: a.cur.Confirm != nil, "binding": a.cur.Binding, "unlock_state": a.unlockState,
-		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword()}
+		"focus": focus, "keyfile": a.cur.Unlocker != nil && a.cur.Unlocker.HasKeyFile(), "touch_left": left, "vaults": a.o.Vaults != nil, "vault": a.vault, "can_change_password": a.canChangePassword(), "agent": a.agent != nil}
 }
 
 // Status is the lock state and the mode.
@@ -387,7 +413,11 @@ func (a *App) Ping(active bool) Response {
 	a.touch(active)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return ok(map[string]any{"ok": true, "locked": a.core == nil, "mode": a.mode, "rev": a.rev})
+	agent := 0
+	if a.agent != nil {
+		agent = a.agent.pendingCount()
+	}
+	return ok(map[string]any{"ok": true, "locked": a.core == nil, "mode": a.mode, "rev": a.rev, "agent": agent})
 }
 
 // ---- unlock: the only place a password is read
@@ -405,6 +435,7 @@ func (a *App) attach(c Core) map[string]any {
 	a.active = a.o.Clock()
 	a.mu.Unlock()
 	a.say("unlocked")
+	a.agentStart()
 	a.opened()
 	return out
 }
@@ -566,11 +597,13 @@ func (a *App) Read(op string, args map[string]any) Response {
 		args = map[string]any{}
 	}
 	switch op {
-	case "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value", "migrate-plan":
+	case "nav", "item", "compare", "references", "pull-candidates", "shared", "visibility", "preview-value":
 	default:
 		return fail(404, "not_found")
 	}
+	a.ops.Lock()
 	data, err := c.Read(op, args)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}
@@ -597,7 +630,9 @@ func str(args map[string]any, k string) string {
 }
 
 func (a *App) reveal(c Core, args map[string]any) (string, *Response) {
+	a.ops.Lock()
 	value, err := c.Reveal(str(args, "section"), str(args, "name"), str(args, "group"), str(args, "key"))
+	a.ops.Unlock()
 	if err != nil {
 		r := answer(err)
 		return "", &r
@@ -666,8 +701,10 @@ func (a *App) Write(op string, args map[string]any) Response {
 		}
 	}
 	// what another writer saved since the last check is read first, so this write lands on it instead of failing with "changed on disk"
+	a.ops.Lock()
 	_, _ = a.syncDisk(false, true)
 	data, err := c.Write(op, args)
+	a.ops.Unlock()
 	if err != nil {
 		return answer(err)
 	}
@@ -699,7 +736,7 @@ var writeOps = func() map[string]bool {
 		"create-group", "rename-group", "generate", "generate-seal", "scope", "make-global", "move-entry", "create-site", "add-site", "pull-globals",
 		"apply-shared", "group-sites", "item-sites", "site-type", "duplicates", "duplicates-apply", "create-entry", "retire-entry", "restore-entry",
 		"retire-group", "create-missing", "retire-item", "retire-file", "create-file", "replace-file", "managed",
-		"m-var", "m-import", "m-connection", "m-field", "m-site", "m-product", "m-env", "m-env-fill", "m-env-adopt", "m-other", "migrate-apply"} {
+		"m-var", "m-import", "m-connection", "m-field", "m-site", "m-product", "m-env", "m-env-fill", "m-env-adopt", "m-other"} {
 		m[op] = true
 	}
 	return m

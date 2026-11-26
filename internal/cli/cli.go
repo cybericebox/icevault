@@ -100,7 +100,7 @@ type Env struct {
 	// Exec runs age and age-plugin-se for Touch ID. TouchID is true when the platform has it and the password is read from a real terminal.
 	Exec    Runner
 	TouchID bool
-	// Model is the WIRING POINT for the commands that need the settings model (import, export, export-app, status, visibility, recover,
+	// Model is the WIRING POINT for the commands that need the settings model (import, export, status, visibility, recover,
 	// purge-plaintext, import-hcp, view --env). The model package implements it.
 	Model Model
 	// Root is the project checkout (ICEVAULT_ROOT, the folder above the working directory with a project description, or the saved one); ""
@@ -146,7 +146,6 @@ const (
 	cmdStatus     = "status"
 	cmdView       = "view"
 	cmdExport     = "export"
-	cmdExportApp  = "export-app"
 	cmdVisibility = "visibility"
 	cmdPurge      = "purge-plaintext"
 	cmdRecover    = "recover"
@@ -154,7 +153,7 @@ const (
 	actClose      = "close" // session close, and the close message of external serve
 )
 
-var modelCommands = map[string]bool{cmdImport: true, cmdExport: true, cmdExportApp: true, cmdStatus: true, cmdVisibility: true, cmdPurge: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true, cmdExpiring: true}
+var modelCommands = map[string]bool{cmdImport: true, cmdExport: true, cmdStatus: true, cmdVisibility: true, cmdPurge: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true, cmdExpiring: true}
 
 // Run runs one command line (without the program name) and returns the exit code.
 func Run(args []string, e *Env) int {
@@ -263,6 +262,8 @@ func runCommand(cmd string, rest []string, e *Env) int {
 		err = cmdKeyfile(rest, e)
 	case "ui":
 		err = cmdUI(rest, e)
+	case "agent":
+		err = cmdAgent(rest, e)
 	default:
 		fmt.Fprintf(e.Err, "icevault: unknown command %q\n", cmd)
 		usage(e.Err)

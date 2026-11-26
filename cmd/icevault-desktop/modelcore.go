@@ -136,6 +136,73 @@ func (m *modelCore) Read(op string, args map[string]any) (any, error) {
 	return m.mp.Read(op, args)
 }
 
+// DefaultVisibility and EnvHoldsSecrets are the optional parts of desktop.Core the agent API uses (desktop.VisDefaulter, desktop.SecretCounter).
+func (m *modelCore) DefaultVisibility(key string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return "secret"
+	}
+	return m.mp.DefaultVisibility(key)
+}
+
+func (m *modelCore) EnvHoldsSecrets(env string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.EnvHoldsSecrets(env)
+}
+
+func (m *modelCore) BoundConnectionName(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.BoundConnectionName(name)
+}
+
+func (m *modelCore) ConnectionKindNeeded(kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.ConnectionKindNeeded(kind)
+}
+
+func (m *modelCore) ConnectionKindServed(kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.ConnectionKindServed(kind)
+}
+
+func (m *modelCore) VarExists(scope, key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.v == nil || m.mp.VarExists(scope, key)
+}
+
+func (m *modelCore) KeyPlaces(key string) []desktop.KeyPlace {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return nil
+	}
+	return m.mp.KeyPlaces(key)
+}
+
+func (m *modelCore) BatchScratch() (desktop.Core, func(), error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return nil, nil, errLocked
+	}
+	return m.mp.BatchScratch()
+}
+
+func (m *modelCore) BatchAdopt(scratch desktop.Core) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.v == nil {
+		return errLocked
+	}
+	return m.mp.BatchAdopt(scratch)
+}
+
 func (m *modelCore) Write(op string, args map[string]any) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

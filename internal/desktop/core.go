@@ -79,3 +79,54 @@ type Clipboard interface {
 	Set(text string) error
 	Get() (string, error)
 }
+
+// VisDefaulter is a Core that knows the visibility a new variable of that name gets (the project description, else the name rule): a variable that is
+// secret by that rule is never made plain through the agent API.
+type VisDefaulter interface {
+	DefaultVisibility(key string) string
+}
+
+// SecretCounter is a Core that can say whether an environment holds a filled secret or a file anywhere, also in the groups of a site kind that no site
+// shows (the answer of "nav" has only the group of the kind in use).
+type SecretCounter interface {
+	EnvHoldsSecrets(env string) bool
+}
+
+// ConnNameBinder is a Core that knows which connection names the project description binds to a use (the name it gives a connection it makes, the name a
+// program asks for): a connection made or renamed to such a name is linked by the commands that fill an environment, so it changes where they link.
+type ConnNameBinder interface {
+	BoundConnectionName(name string) bool
+	// ConnectionKindNeeded says whether a use of the project description needs a connection of that kind (the commands that fill an environment link the only one of a kind).
+	ConnectionKindNeeded(kind string) bool
+	// ConnectionKindServed says whether a program asks for a connection of that kind by a serve-as name (icevault external serve).
+	ConnectionKindServed(kind string) bool
+}
+
+// KeyPlace is where a variable of some key lives: its scope (as the scopes of "m-var"), whether it is secret, whether it holds a value, and whether it is
+// an import of a shared one into the General of an environment.
+type KeyPlace struct {
+	Scope    string
+	Secret   bool
+	Filled   bool
+	Imported bool
+}
+
+// VarProbe is a Core that answers from its model, not from the answer of "nav", which does not show the group of a site kind that no site uses.
+type VarProbe interface {
+	// VarExists says whether a variable of the key is in exactly that scope.
+	VarExists(scope, key string) bool
+	// KeyPlaces lists every place a variable of that key lives, in every scope and every group.
+	KeyPlaces(key string) []KeyPlace
+}
+
+// ErrBatchSaved is what BatchAdopt answers when the batch was saved but the vault could not be read again: it is on disk, and the window must reload.
+var ErrBatchSaved = errors.New("the batch was saved, the vault could not be read again")
+
+// BatchRunner is a Core that can work on a copy of the vault: the agent API validates a batch of changes on the copy and, when every item passes, makes the
+// copy the content of the vault in one save (all or nothing).
+type BatchRunner interface {
+	// BatchScratch makes a copy of the vault in a temporary folder and a Core on it; release removes it.
+	BatchScratch() (scratch Core, release func(), err error)
+	// BatchAdopt makes the content of the scratch Core the content of the vault, in one save.
+	BatchAdopt(scratch Core) error
+}

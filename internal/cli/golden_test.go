@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cybericebox/icevault/internal/vmodel"
 	"github.com/cybericebox/icevault/pkg/vault"
@@ -18,16 +17,6 @@ import (
 // again (only when the behaviour is meant to change).
 
 var update = flag.Bool("update", false, "write the golden files of testdata/golden")
-
-type fakeGit struct{ ignored bool }
-
-func (fakeGit) Has(string) bool { return true }
-func (f fakeGit) Run(name string, args []string, _ []byte, _ time.Duration) ([]byte, int, error) {
-	if name == "git" && f.ignored {
-		return nil, 0, nil
-	}
-	return nil, 1, nil
-}
 
 func goldenHarness(t *testing.T) *harness {
 	t.Helper()
@@ -162,42 +151,6 @@ func TestGoldenExport(t *testing.T) {
 	}
 	if rc := h.run("export", "--env", "Bad_Name", "--to", filepath.Join(h.dir, "o3")); rc != 1 || !strings.Contains(h.errb.String(), "is not an environment name") {
 		t.Fatalf("%s", h.errb.String())
-	}
-}
-
-func TestGoldenExportApp(t *testing.T) {
-	h := goldenHarness(t)
-	for _, app := range []string{"web-client", "worker-cli"} {
-		dir := filepath.Join(h.root, map[string]string{"web-client": "clients/web", "worker-cli": "clients/worker"}[app])
-		h.exec = fakeGit{ignored: false}
-		if rc := h.run("export-app", "--env", "prod", "--app", app); rc != 1 || !strings.Contains(h.errb.String(), "is not git-ignored") {
-			t.Fatalf("%s: rc=%d %s", app, rc, h.errb.String())
-		}
-		h.exec = fakeGit{ignored: true}
-		if rc := h.run("export-app", "--env", "prod", "--app", app, "--dry-run"); rc != 0 || !strings.Contains(h.out.String(), "dry run: nothing written") {
-			t.Fatalf("%s: %s", app, h.errb.String())
-		}
-		if _, err := os.Stat(filepath.Join(dir, ".env")); err == nil {
-			t.Fatal("dry run wrote")
-		}
-		if rc := h.run("export-app", "--env", "prod", "--app", app); rc != 0 {
-			t.Fatalf("%s: rc=%d %s", app, rc, h.errb.String())
-		}
-		got, _ := os.ReadFile(filepath.Join(dir, ".env"))
-		golden(t, "app-"+app+".env", string(got))
-		golden(t, "app-"+app+".report", h.paths(h.out.String()))
-		if st, _ := os.Stat(filepath.Join(dir, ".env")); st.Mode().Perm() != 0o600 {
-			t.Errorf("mode %v", st.Mode())
-		}
-		if rc := h.run("export-app", "--env", "prod", "--app", app); rc != 1 || !strings.Contains(h.errb.String(), "exists: --force replaces it") {
-			t.Fatalf("%s", h.errb.String())
-		}
-		if rc := h.run("export-app", "--env", "prod", "--app", app, "--force"); rc != 0 {
-			t.Fatalf("force: %s", h.errb.String())
-		}
-	}
-	if rc := h.run("export-app", "--env", "prod", "--app", "nope"); rc != 2 {
-		t.Fatalf("unknown app rc=%d", rc)
 	}
 }
 

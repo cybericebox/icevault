@@ -3,10 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 
-	"github.com/cybericebox/icevault/internal/project"
 	"github.com/cybericebox/icevault/internal/vmodel"
 	"github.com/cybericebox/icevault/pkg/vault"
 )
@@ -25,49 +23,22 @@ func itemLine(it vmodel.ExpiryItem) string {
 
 // warnExpired tells on stderr which values an export or a session of the environment uses that have expired. It never stops the run and never
 // prints a value.
-func warnExpired(e *Env, m *vmodel.Vault, env string, app *appUse) {
+func warnExpired(e *Env, m *vmodel.Vault, env string) {
 	x := m.Env(env)
 	if x == nil {
 		return
 	}
 	for _, it := range m.ExpiringIn(x, e.Now(), 0) {
-		if it.State == "expired" && app.uses(m, it) {
+		if it.State == "expired" {
 			fmt.Fprintf(e.Err, "icevault: WARNING: %s: %s has expired (%s)\n", it.Place, it.Name, it.Date)
 		}
 	}
 }
 
-// appUse narrows the warning of export-app to the values the app takes: the vault keys of its report, and the connection fields they stand for.
-type appUse struct {
-	keys []string
-	d    *project.Description
-}
-
-// uses reports whether the app takes the value (nil: a whole-environment run, which takes everything).
-func (a *appUse) uses(m *vmodel.Vault, it vmodel.ExpiryItem) bool {
-	if a == nil {
-		return true
-	}
-	if it.Place.Scope != "connection" {
-		return slices.Contains(a.keys, it.Name)
-	}
-	c := m.Connection(it.Place.Name)
-	if c == nil || a.d == nil {
-		return false
-	}
-	found := false
-	a.d.Walk(func(h project.Home) {
-		if h.Conn != nil && h.Conn.Kind == c.Kind && h.Var.Field == it.Name && slices.Contains(a.keys, h.Var.Name) {
-			found = true
-		}
-	})
-	return found
-}
-
 // warnExpiredVault is warnExpired for a vault that is not loaded as a model yet.
 func warnExpiredVault(e *Env, v *vault.Vault, env string) {
 	if m, err := vmodel.Load(v); err == nil {
-		warnExpired(e, m, env, nil)
+		warnExpired(e, m, env)
 	}
 }
 

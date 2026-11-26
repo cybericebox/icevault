@@ -38,6 +38,17 @@ func helpEnv(t *testing.T) (*Env, *countingModel, *int, *bytes.Buffer, *bytes.Bu
 	return e, m, asked, &out, &errb
 }
 
+// the removed subcommands are unknown now
+func TestRemovedSubcommandsAreGone(t *testing.T) {
+	var out, errb bytes.Buffer
+	e := &Env{Getenv: func(string) string { return "" }, Out: &out, Err: &errb}
+	for _, args := range [][]string{{"export-app", "--env", "prod"}, {"session", "open", "--env", "prod"}, {"session", "close", "--env", "prod"}, {"guard", "env-of-private", "/x"}, {"export", "--env", "prod", "--batches", "--all", "--to", "/x"}} {
+		if rc := Run(args, e); rc == 0 {
+			t.Errorf("%v: still works", args)
+		}
+	}
+}
+
 func TestEverySubcommandHasUsageAndNeverUnlocksOnHelpOrAnUnknownFlag(t *testing.T) {
 	if len(commandNames) != len(specs) {
 		t.Fatalf("commandNames has %d entries, specs %d", len(commandNames), len(specs))

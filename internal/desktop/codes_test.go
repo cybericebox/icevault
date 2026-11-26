@@ -42,9 +42,6 @@ func sourceCodes(t *testing.T) map[string]string {
 			if err != nil || d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 				return err
 			}
-			if filepath.ToSlash(p) == "../../internal/migrate/migrate.go" {
-				return nil // the codes of the report lines are words of mig.why.* (internal/migrate/codes_test.go), not refusals
-			}
 			b, rerr := os.ReadFile(p)
 			if rerr != nil {
 				return rerr
@@ -255,6 +252,10 @@ func TestNoBoundMethodReturnsAnErrorText(t *testing.T) {
 		t.Errorf("CLIStatus: %+v", r)
 	}
 	covered["CLIStatus"] = true
+	assertCoded(t, "AgentPending locked", l.AgentPending())
+	assertCoded(t, "AgentJournal locked", l.AgentJournal())
+	assertCoded(t, "AgentDecide locked", l.AgentDecide("x", true))
+	covered["AgentPending"], covered["AgentJournal"], covered["AgentDecide"] = true, true, true
 	assertCoded(t, "Unlock bad method", l.Unlock("nope", ""))
 	assertCoded(t, "Unlock no unlocker", l.Unlock("touch", ""))
 	// the choice of the vault: every step fails with each error

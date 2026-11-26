@@ -88,7 +88,9 @@ func (a *App) ChangePassword(current, pw, confirm string, touchID, refresh bool)
 		return fail(409, "change_running")
 	}
 	defer a.changing.Unlock()
+	a.ops.Lock() // not while a batch of an agent is being applied: it must never undo the change
 	out, err := pc.ChangePassword(cur, pwb, refresh)
+	a.ops.Unlock()
 	if err != nil {
 		if errors.Is(err, ErrWrongPassword) {
 			return a.wrongCurrent()
