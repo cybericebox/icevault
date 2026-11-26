@@ -150,6 +150,25 @@ func TestAgentCommandNoWaitAndRefusals(t *testing.T) {
 	}
 }
 
+func TestAgentHelpIsTheOpOfTheWindow(t *testing.T) {
+	e, out, _, dir := agentEnv(t, "")
+	got, stop := fakeWindow(t, dir, agentapi.StateAllowed)
+	defer stop()
+	for _, args := range [][]string{{"agent", "help"}, {"agent", "help", "{}"}} {
+		out.Reset()
+		if rc := Run(args, e); rc != 0 || !strings.Contains(out.String(), `"ok":true`) {
+			t.Fatalf("%v: rc=%d %q", args, rc, out.String())
+		}
+	}
+	if len(*got) != 2 || (*got)[0].Op != "help" || (*got)[1].Op != "help" {
+		t.Fatalf("the op was not sent: %+v", *got)
+	}
+	out.Reset()
+	if rc := Run([]string{"help", "agent"}, e); rc != 0 || !strings.Contains(out.String(), "agent") || strings.Contains(out.String(), `"ok"`) {
+		t.Fatalf("the usage of the command: rc=%d %q", rc, out.String())
+	}
+}
+
 func TestAgentCommandRefusesAnOpenFolder(t *testing.T) {
 	e, out, errb, dir := agentEnv(t, "")
 	_, stop := fakeWindow(t, dir, agentapi.StateAllowed)
