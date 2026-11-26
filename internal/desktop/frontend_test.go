@@ -347,6 +347,36 @@ func TestKeyTextAsTypedAndListInsideDialog(t *testing.T) {
 	}
 }
 
+// The expiry fields have their own date picker (not the system's input type=date): Monday first, presets from today, keyboard, names from the language.
+func TestExpiryFieldsUseTheOwnDatePicker(t *testing.T) {
+	src, err := fs.ReadFile(frontend(t), "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+	for _, want := range []string{"function datePicker(", "function dpPlusYear(", "Math.min(from.d, dpDays(y, from.m))", "dpPlusDays(today, n)", "(new Date(cur.y, cur.m, 1).getDay() + 6) % 7", "Intl.DateTimeFormat(lang",
+		"ArrowLeft: -1", "PageUp", "e.key === \"Escape\"", "dp.today", "dp.clear", "dp.p1y", "openList = { list: pop, trig }"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the page lacks %s", want)
+		}
+	}
+	if strings.Contains(s, `inp.type = f.type || "text"`) {
+		t.Error("a date field must not use the system date input")
+	}
+	raw, _ := fs.ReadFile(frontend(t), "messages.json")
+	var tables map[string]map[string]string
+	if err := json.Unmarshal(raw, &tables); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []string{"en", "uk", "ru"} {
+		for _, k := range []string{"dp.label", "dp.open", "dp.today", "dp.clear", "dp.p30", "dp.p60", "dp.p90", "dp.p1y", "dp.prev_month", "dp.next_month", "dp.pick_month", "dp.pick_year", "m.exp.format", "m.exp.bad"} {
+			if strings.TrimSpace(tables[lang][k]) == "" {
+				t.Errorf("no %s in %s", k, lang)
+			}
+		}
+	}
+}
+
 // The tables of the model page show what a value with references resolves to, with its source under it; the eye asks for the resolved text, and
 // a broken reference shows the state, never a value.
 func TestModelTablesShowResolvedValues(t *testing.T) {

@@ -328,6 +328,17 @@ table.rows th.h.d, table.rows th.h.a { text-align:right; }
 .listbox .opt::before { content:""; flex:none; box-sizing:border-box; width:16px; height:16px; margin-top:2px; color:var(--ib-action); }
 .listbox .opt[aria-selected="true"]::before { border:4px solid transparent; border-radius:50%; background:currentColor; background-clip:padding-box; }
 .listbox .opt.active { background:var(--ib-soft); }
+.dpop { position:fixed; z-index:95; box-sizing:border-box; width:288px; padding:10px; background:var(--ib-raised); border:1px solid var(--ib-line); border-radius:var(--ib-r-lg); box-shadow:var(--ib-shadow-overlay); color:var(--ib-ink); font:400 13px/1.4 var(--ib-font); }
+.dp-head { display:flex; align-items:center; gap:4px; margin-bottom:6px; }
+.dp-title { flex:1; height:32px; border:0; border-radius:var(--ib-r-sm); background:transparent; color:var(--ib-ink); font:600 14px/1 var(--ib-font); text-align:center; text-transform:capitalize; cursor:pointer; } .dp-title:hover { background:var(--ib-hover); } .dp-title.static { display:inline-flex; align-items:center; justify-content:center; cursor:default; } .dp-title.static:hover { background:transparent; }
+.dp-nav { display:inline-flex; align-items:center; justify-content:center; flex:none; width:32px; height:32px; padding:0; border:0; border-radius:var(--ib-r-sm); background:transparent; color:var(--ib-dim); cursor:pointer; } .dp-nav:hover { background:var(--ib-hover); color:var(--ib-ink); } .dp-nav .i { width:16px; height:16px; } .dp-nav.flip .i { transform:scaleX(-1); }
+.dp-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; } .dp-grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; }
+.dp-wd { padding:4px 0; text-align:center; color:var(--ib-dim); font-size:12px; text-transform:lowercase; } .dp-gap { height:32px; }
+.dp-day, .dp-cell { height:32px; border:1px solid transparent; border-radius:var(--ib-r-sm); background:transparent; color:var(--ib-ink); font:400 13px/1 var(--ib-font); text-transform:capitalize; cursor:pointer; } .dp-day:hover, .dp-cell:hover { background:var(--ib-hover); }
+.dp-day.today { border-color:var(--ib-control); } .dp-day.on, .dp-cell.on { background:var(--ib-action); border-color:var(--ib-action); color:var(--ib-on-action); }
+.dp-day:focus-visible, .dp-cell:focus-visible, .dp-title:focus-visible, .dp-nav:focus-visible { outline:2px solid var(--ib-action); outline-offset:1px; }
+.dp-pre { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-top:8px; } .dp-pre .dp-chip { padding:0 4px; white-space:nowrap; } .dp-foot { display:flex; gap:4px; margin-top:4px; } .dp-foot { justify-content:space-between; margin-top:4px; } .dp-chip { height:28px; padding:0 8px; font-size:12px; border-color:var(--ib-line); } .dp-foot .dp-chip { border-color:transparent; }
+
 /* layers */
 .bgl.second { z-index:40; }
 .dlgbox { width:100%; max-width:480px; }
@@ -551,6 +562,7 @@ input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; accent-co
 <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></symbol>
 <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
 <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
 <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
 <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -798,6 +810,92 @@ let openList = null;
 function closeList(refocus) { if (!openList) return; const o = openList; openList = null; o.list.remove(); o.trig.setAttribute("aria-expanded", "false"); o.trig.removeAttribute("aria-activedescendant"); if (refocus) o.trig.focus(); }
 document.addEventListener("pointerdown", (e) => { if (openList && !openList.list.contains(e.target) && !openList.trig.contains(e.target)) closeList(false); }, true);
 addEventListener("resize", () => closeList(false));
+
+// ---- the date picker of the expiry fields (instead of the system's own popup): month and day names from the language of the window, Monday first
+const dpPad = (n) => String(n).padStart(2, "0");
+const dpIso = (y, m, d) => String(y).padStart(4, "0") + "-" + dpPad(m + 1) + "-" + dpPad(d);                  // m is 0-11
+const dpDays = (y, m) => { const x = new Date(2000, 0, 1); x.setFullYear(y, m + 1, 0); return x.getDate(); };
+function dpDate(y, m, d) { const x = new Date(2000, 0, 1); x.setFullYear(y, m, d); return { y: x.getFullYear(), m: x.getMonth(), d: x.getDate() }; }   // the day is normalised: day 32 is the next month
+function dpParse(s) { const p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || "")); if (!p) return null; const x = dpDate(+p[1], +p[2] - 1, +p[3]); return x.y === +p[1] && x.m === +p[2] - 1 && x.d === +p[3] ? x : null; }
+// presets from a day: n days later, or the same day next year (29 February becomes 28 February)
+const dpPlusDays = (from, n) => dpDate(from.y, from.m, from.d + n);
+function dpPlusYear(from) { const y = from.y + 1; return { y, m: from.m, d: Math.min(from.d, dpDays(y, from.m)) }; }
+const dpToday = () => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth(), d: n.getDate() }; };
+function dpMonthName(m) { const x = new Date(2000, 0, 1); x.setFullYear(2000, m, 1); try { return new Intl.DateTimeFormat(lang, { month: "long" }).format(x); } catch (e) { return String(m + 1); } }
+function dpWeekday(i) { const x = new Date(2000, 0, 3 + i); try { return new Intl.DateTimeFormat(lang, { weekday: "short" }).format(x); } catch (e) { return String(i + 1); } }   // 3 January 2000 was a Monday
+function datePicker(inp, anchor, trig, onPick) {
+  closeList(false);
+  const pop = el("div", "dpop"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", t("dp.label"));
+  const today = dpToday(); const sel = dpParse(inp.value);
+  let cur = sel || today, mode = "days", yfrom = 0;                                   // cur: the day under the cursor
+  const same = (a, b) => a && b && a.y === b.y && a.m === b.m && a.d === b.d;
+  const pick = (x) => { inp.value = x ? dpIso(x.y, x.m, x.d) : ""; inp.dispatchEvent(new Event("input", { bubbles: true })); closeList(true); };
+  const nav = (name, label, fn, flip) => { const b = el("button", "dp-nav"); b.type = "button"; b.append(icon(name)); if (flip) b.classList.add("flip"); b.setAttribute("aria-label", label); b.addEventListener("click", fn); return b; };
+  let focusSel = ".dp-day[tabindex='0']";
+  function draw() {
+    pop.textContent = "";
+    const head = el("div", "dp-head");
+    if (mode === "days") {
+      const title = el("button", "dp-title", dpMonthName(cur.m) + " " + cur.y); title.type = "button"; title.setAttribute("aria-label", t("dp.pick_month")); title.addEventListener("click", () => { mode = "months"; focusSel = ".dp-cell[tabindex='0']"; draw(); });
+      head.append(nav("right", t("dp.prev_month"), () => { cur = dpDate(cur.y, cur.m - 1, Math.min(cur.d, dpDays(cur.y, cur.m - 1 < 0 ? 11 : cur.m - 1))); draw(); }, true), title, nav("right", t("dp.next_month"), () => { cur = dpDate(cur.y, cur.m + 1, Math.min(cur.d, dpDays(cur.m + 1 > 11 ? cur.y + 1 : cur.y, (cur.m + 1) % 12))); draw(); }));
+    } else if (mode === "months") {
+      const title = el("button", "dp-title", String(cur.y)); title.type = "button"; title.setAttribute("aria-label", t("dp.pick_year")); title.addEventListener("click", () => { mode = "years"; yfrom = cur.y - (cur.y % 12); focusSel = ".dp-cell[tabindex='0']"; draw(); });
+      head.append(nav("right", t("dp.prev_year"), () => { cur = { y: cur.y - 1, m: cur.m, d: Math.min(cur.d, dpDays(cur.y - 1, cur.m)) }; draw(); }, true), title, nav("right", t("dp.next_year"), () => { cur = { y: cur.y + 1, m: cur.m, d: Math.min(cur.d, dpDays(cur.y + 1, cur.m)) }; draw(); }));
+    } else {
+      const title = el("span", "dp-title static", yfrom + " – " + (yfrom + 11));
+      head.append(nav("right", t("dp.prev_years"), () => { yfrom -= 12; draw(); }, true), title, nav("right", t("dp.next_years"), () => { yfrom += 12; draw(); }));
+    }
+    pop.append(head);
+    if (mode === "days") {
+      const grid = el("div", "dp-grid");
+      for (let i = 0; i < 7; i++) grid.append(el("span", "dp-wd", dpWeekday(i)));
+      const lead = (new Date(cur.y, cur.m, 1).getDay() + 6) % 7;                       // Monday first
+      for (let i = 0; i < lead; i++) grid.append(el("span", "dp-gap"));
+      for (let d = 1; d <= dpDays(cur.y, cur.m); d++) {
+        const x = { y: cur.y, m: cur.m, d }; const b = el("button", "dp-day" + (same(x, today) ? " today" : "") + (same(x, sel) ? " on" : ""), String(d)); b.type = "button"; b.tabIndex = d === cur.d ? 0 : -1;
+        b.setAttribute("aria-label", d + " " + dpMonthName(cur.m) + " " + cur.y); if (same(x, sel)) b.setAttribute("aria-pressed", "true");
+        b.addEventListener("click", () => pick(x)); grid.append(b);
+      }
+      pop.append(grid);
+    } else {
+      const grid = el("div", "dp-grid3");
+      for (let i = 0; i < 12; i++) {
+        const v = mode === "months" ? i : yfrom + i; const on = mode === "months" ? v === cur.m : v === cur.y;
+        const b = el("button", "dp-cell" + (on ? " on" : ""), mode === "months" ? dpMonthName(v) : String(v)); b.type = "button"; b.tabIndex = i === (mode === "months" ? cur.m : (cur.y >= yfrom && cur.y < yfrom + 12 ? cur.y - yfrom : 0)) ? 0 : -1;
+        b.addEventListener("click", () => { if (mode === "months") cur = { y: cur.y, m: v, d: Math.min(cur.d, dpDays(cur.y, v)) }; else cur = { y: v, m: cur.m, d: Math.min(cur.d, dpDays(v, cur.m)) }; mode = mode === "months" ? "days" : "months"; focusSel = mode === "days" ? ".dp-day[tabindex='0']" : ".dp-cell[tabindex='0']"; draw(); });
+        grid.append(b);
+      }
+      pop.append(grid);
+    }
+    const pre = el("div", "dp-pre");
+    [[30, "dp.p30"], [60, "dp.p60"], [90, "dp.p90"]].forEach(([n, key]) => { const b = btn(t(key), "", () => pick(dpPlusDays(today, n)), "ghost dp-chip"); pre.append(b); });
+    pre.append(btn(t("dp.p1y"), "", () => pick(dpPlusYear(today)), "ghost dp-chip"));
+    const foot = el("div", "dp-foot");
+    foot.append(btn(t("dp.today"), "", () => pick(today), "ghost dp-chip"), btn(t("dp.clear"), "", () => pick(null), "ghost dp-chip"));
+    pop.append(pre, foot);
+    const f = pop.querySelector(focusSel); if (f && pop.isConnected) f.focus();
+  }
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); closeList(true); return; }
+    if (mode === "days" && e.target.classList && e.target.classList.contains("dp-day")) {
+      const mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+      if (mv !== undefined) { e.preventDefault(); cur = dpDate(cur.y, cur.m, cur.d + mv); focusSel = ".dp-day[tabindex='0']"; draw(); return; }
+      if (e.key === "PageUp" || e.key === "PageDown") { e.preventDefault(); const k = (e.key === "PageUp" ? -1 : 1) * (e.shiftKey ? 12 : 1); const ty = cur.y + Math.floor((cur.m + k) / 12), tm = ((cur.m + k) % 12 + 12) % 12; cur = { y: ty, m: tm, d: Math.min(cur.d, dpDays(ty, tm)) }; draw(); return; }
+      if (e.key === "Home" || e.key === "End") { e.preventDefault(); const wd = (new Date(cur.y, cur.m, cur.d).getDay() + 6) % 7; cur = dpDate(cur.y, cur.m, cur.d + (e.key === "Home" ? -wd : 6 - wd)); draw(); return; }
+      if (e.key === "Enter") { e.preventDefault(); pick(cur); return; }
+    } else if (mode !== "days" && e.target.classList && e.target.classList.contains("dp-cell")) {
+      const cells = [...pop.querySelectorAll(".dp-cell")]; const i = cells.indexOf(e.target); const mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[e.key];
+      if (mv !== undefined && i >= 0) { e.preventDefault(); const j = Math.max(0, Math.min(11, i + mv)); cells.forEach((c, k) => { c.tabIndex = k === j ? 0 : -1; }); cells[j].focus(); return; }
+    }
+    if (e.key === "Tab") { const f = [...pop.querySelectorAll("button:not([tabindex='-1'])")]; if (!f.length) return; const first = f[0], last = f[f.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
+  });
+  document.body.append(pop); openList = { list: pop, trig }; trig.setAttribute("aria-expanded", "true");
+  draw();
+  const r = anchor.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight;
+  const up = r.bottom + 4 + ph > innerHeight - 8 && r.top - ph - 4 > 8;
+  pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pw - 8)) + "px"; pop.style.top = Math.max(8, up ? r.top - ph - 4 : r.bottom + 4) + "px";
+  const f = pop.querySelector(focusSel); if (f) f.focus();
+}
 function selectBox(o) {
   let value = o.value; const wrap = el("span", "sel" + (o.compact ? " compact" : ""));
   const trig = el("button", "input sel-trig"); trig.type = "button"; trig.setAttribute("aria-haspopup", "listbox"); trig.setAttribute("aria-expanded", "false"); trig.setAttribute("aria-label", o.label);
@@ -1091,7 +1189,7 @@ function dialog(title, fields, submitText, onSubmit, note) {
       inp = chipsInput(f.value || [], false, () => { changed = true; clearErr(f.name); }, f.label, f.suggest, f.copy); box.append(inp.el); inputs[f.name] = inp; focusNode = inp.el.querySelector("input");
     } else {
       if (f.type === "textarea") { inp = el("textarea", "input"); inp.value = f.value || ""; }
-      else { inp = el("input", "input lg"); inp.type = f.type || "text"; if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
+      else { inp = el("input", "input lg"); inp.type = f.type === "date" ? "text" : (f.type || "text"); if (f.type === "date") { inp.placeholder = t("m.exp.format"); inp.maxLength = 10; inp.setAttribute("inputmode", "numeric"); } if (f.type !== "file") inp.value = f.value || ""; inp.autocomplete = "off"; inp.spellcheck = false; }
       inp.id = id; inputs[f.name] = inp; focusNode = inp;
       const area = inp.tagName === "TEXTAREA";
       inp.setAttribute("autocapitalize", "off"); inp.setAttribute("autocorrect", "off");
@@ -1119,7 +1217,10 @@ function dialog(title, fields, submitText, onSubmit, note) {
         box.append(wrap);
         if (hasRef) { const out = el("div", "refbox"); const fw = el("div", "fld"); fw.append(out); fw.hidden = true; box.append(fw); liveRefs(inp, () => f.ref.vis(inputs), out, () => ({ scope: f.ref.scope, key: f.ref.key(inputs) })); }
       } else if (f.type === "date") {   // an optional date: the clear button says "never"
-        const wrap = el("div", "valbox"); wrap.append(inp, btn(t("m.exp.never"), "", () => { inp.value = ""; changed = true; clearErr(f.name); }, "ghost")); box.append(wrap);
+        const wrap = el("div", "valbox"); const cal = ibtn("calendar", t("dp.open"), null); cal.setAttribute("aria-haspopup", "dialog"); cal.setAttribute("aria-expanded", "false");
+        cal.addEventListener("click", (e) => { e.stopPropagation(); if (openList && openList.trig === cal) closeList(false); else datePicker(inp, wrap, cal); });
+        inp.addEventListener("keydown", (e) => { if (e.key === "ArrowDown" && e.altKey) { e.preventDefault(); datePicker(inp, wrap, cal); } });
+        wrap.append(inp, cal, btn(t("m.exp.never"), "", () => { inp.value = ""; changed = true; clearErr(f.name); }, "ghost")); box.append(wrap);
       } else box.append(inp);
       inp.addEventListener("input", () => { clearErr(f.name); err.textContent = ""; if (f.check) { const m = f.check(inp.value, inputs); if (m) fieldErr(f.name, m); } if (f.recheck) f.recheck.forEach((n) => { const o = fields.find((x) => x.name === n), i = inputs[n]; if (o && o.check && i && i.value !== undefined) { clearErr(n); const m = o.check(i.value, inputs); if (m) fieldErr(n, m); } }); if (f.onInput) f.onInput(inp.value, inputs); });
       if (inp.tagName === "INPUT" && inp.type !== "file") inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ok.click(); } });
@@ -2994,7 +3095,7 @@ function mexptag(r) {
   if (r.expiry === "soon") return el("span", "tag warn", t("m.exp.soon", { date: mexpday(r.expires) }));
   return el("span", "quiet", t("m.exp.until", { date: mexpday(r.expires, true) }));
 }
-function mexpfield(r) { return { name: "expires", label: t("m.exp.label"), type: "date", value: (r && r.expires) || "", help: r && r.expires_flag ? t("m.exp.help_flag") : t("m.exp.help") }; }
+function mexpfield(r) { return { name: "expires", label: t("m.exp.label"), type: "date", value: (r && r.expires) || "", check: (v) => (v.trim() && !dpParse(v.trim()) ? t("m.exp.bad") : ""), help: r && r.expires_flag ? t("m.exp.help_flag") : t("m.exp.help") }; }
 const mexpwhere = (it) => t("m.exp.where." + it.scope, { env: it.env, name: it.place });
 function mExpiring(main) {
   mhead(main, "alert", t("m.exp.title"), t("m.exp.note"));
