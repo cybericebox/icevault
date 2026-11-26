@@ -598,7 +598,7 @@ func detailsOf(args map[string]any, hideValue bool) []agentDetail {
 	var out []agentDetail
 	var walk func(prefix string, m map[string]any)
 	walk = func(prefix string, m map[string]any) {
-		keys := make([]string, 0, len(m))
+		var keys []string
 		for k := range m {
 			keys = append(keys, k)
 		}
@@ -653,8 +653,8 @@ func prefixClashes(items []*agentItem) []bool {
 			}
 		}
 	}
-	out := make([]bool, len(items))
-	list := make([]string, 0, len(names))
+	out := make([]bool, len(items)) // at most agentMaxItems
+	var list []string
 	for n := range names {
 		list = append(list, n)
 	}

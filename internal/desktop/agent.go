@@ -383,7 +383,7 @@ func (a *App) AgentJournal() Response {
 	out := map[string]any{"available": a.agent != nil, "active": false, "entries": []AgentEntry{}, "pending": 0}
 	if h := a.agent; h != nil {
 		h.mu.Lock()
-		list := make([]AgentEntry, 0, len(h.ring))
+		var list []AgentEntry
 		for i := len(h.ring) - 1; i >= 0; i-- {
 			list = append(list, h.ring[i])
 		}

@@ -260,7 +260,7 @@ func copyIf(w, a map[string]any, keys ...string) {
 func withAction(w map[string]any, action string) map[string]any { w[keyAction] = action; return w }
 
 func copyMap(w map[string]any) map[string]any {
-	c := make(map[string]any, len(w)+1)
+	c := map[string]any{} // no size taken from what an agent sent
 	for k, v := range w {
 		c[k] = v
 	}

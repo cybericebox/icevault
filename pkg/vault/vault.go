@@ -25,6 +25,8 @@ type Vault struct {
 	diskSum [32]byte // hash of the file as read: Save refuses when the file is not that any more
 	hasDisk bool
 	format  Format
+	nonce   [16]byte    // random at every open: tells one open of the vault from another
+	credGen uint64      // counts the changes of the credentials (SetPassword)
 	stamp   os.FileInfo // the file as last seen (Open, Save, Changed): a cheap first test of whether another writer replaced it
 }
 
@@ -74,7 +76,7 @@ func Create(path string, c Credentials, o CreateOptions) (*Vault, error) {
 	root.Name = "Passwords" // as KeePassXC names the root group; the database name is o.Name
 	root.IconID = 49
 	db.Content.Root.Groups = []gokeepasslib.Group{root}
-	v := &Vault{path: path, db: db, creds: Credentials{}, format: Format{Major: 4, Minor: 1, KDF: "argon2d"}}
+	v := &Vault{path: path, db: db, creds: Credentials{}, format: Format{Major: 4, Minor: 1, KDF: "argon2d"}, nonce: newNonce()}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func openWith(path string, cred *gokeepasslib.DBCredentials) (*Vault, error) {
 		wipeCreds(cred)
 		return nil, err
 	}
-	return &Vault{path: path, db: db, diskSum: sha256.Sum256(data), hasDisk: true, format: f, stamp: stamp}, nil
+	return &Vault{path: path, db: db, diskSum: sha256.Sum256(data), hasDisk: true, format: f, stamp: stamp, nonce: newNonce()}, nil
 }
 
 // sameFile says whether two looks at the file show the same file: the same inode (a save renames a new file into place), size and modification time.
@@ -240,8 +242,10 @@ func (v *Vault) SetPassword(pw []byte) (prevLeft string, err error) {
 		next.Passphrase = passwordKey(pw)
 	}
 	v.db.Credentials = next
+	v.credGen++
 	if err := v.Save(); err != nil {
 		v.db.Credentials = old
+		v.credGen--
 		wipeCreds(next)
 		return "", err
 	}
@@ -267,12 +271,14 @@ func (v *Vault) Path() string { return v.path }
 // Format tells the KDBX version and the key derivation function of the file as it was read (or made).
 func (v *Vault) Format() Format { return v.format }
 
-// Identity says which file a Vault stands for and which credentials open it: the path, the hash of the file as last read or written, and a hash of the
-// credentials. A copy made now can be told from a vault that was replaced or whose password changed since.
+// Identity says which open of which file a Vault is, and in which state of its credentials: the path, the hash of the file as last read or written, a random
+// number of this open, and how many times the credentials were changed. Nothing of the credentials themselves goes into it. A copy made now can be told from
+// a vault that was replaced, opened again or whose password changed since.
 type Identity struct {
 	Path    string
 	DiskSum [32]byte
-	Creds   [32]byte
+	Nonce   [16]byte
+	CredGen uint64
 }
 
 // Identity answers the Identity of the open vault (the zero value for a closed one).
@@ -280,19 +286,7 @@ func (v *Vault) Identity() Identity {
 	if v.db == nil {
 		return Identity{}
 	}
-	h := sha256.New()
-	c := v.db.Credentials
-	if c != nil {
-		h.Write(c.Passphrase)
-		h.Write([]byte{0})
-		h.Write(c.Key)
-		h.Write([]byte{0})
-		h.Write(c.Windows)
-	}
-	var id Identity
-	id.Path, id.DiskSum = v.path, v.diskSum
-	copy(id.Creds[:], h.Sum(nil))
-	return id
+	return Identity{Path: v.path, DiskSum: v.diskSum, Nonce: v.nonce, CredGen: v.credGen}
 }
 
 // AdoptContent makes the content of o (a copy of this vault, opened with the same key and changed) the content of v and saves it in one write; the file
@@ -319,6 +313,11 @@ func (v *Vault) Close() {
 	}
 	wipeCreds(v.db.Credentials)
 	v.db = nil
+}
+
+func newNonce() (n [16]byte) {
+	copy(n[:], randBytes(len(n)))
+	return n
 }
 
 func randBytes(n int) []byte {
