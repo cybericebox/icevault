@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -485,6 +486,7 @@ type session struct {
 	Manifest map[string]string `json:"manifest"`
 	ExtraEnv map[string]string `json:"vars"`
 	base     string
+	readOnly bool // a read-only session: its own directory, never written back
 }
 
 func (s *session) siteArg() string {
@@ -556,16 +558,52 @@ func openSession(e *Env, o *opened, env, site, base string) (*session, error) {
 		return nil, err
 	}
 	s.Real = ec.private
-	if _, err := os.Lstat(s.Path); err == nil {
-		return nil, fail("%s is left over from a run that was killed: `icevault recover --env %s%s` writes its files into the vault and removes it "+
-			"(or delete the directory if you know it holds nothing new)", s.Path, env, s.siteArg())
-	}
-	if err := os.Mkdir(s.Path, 0o700); err != nil {
+	if err := os.Mkdir(s.Path, 0o700); err != nil { // atomic: of two runs only one makes the directory
+		if errors.Is(err, fs.ErrExist) {
+			return nil, s.existsError()
+		}
 		return nil, err
 	}
 	_ = os.Chmod(s.Path, 0o700)
+	if err := writeOwner(s.Path); err != nil {
+		_ = os.RemoveAll(s.Path)
+		return nil, err
+	}
+	return s.fill(e, o)
+}
+
+// openReadOnlySession renders the files of an environment into a directory of its own (unique name, mode 0700), so it never meets a running session or
+// another read-only one. It is never written back.
+func openReadOnlySession(e *Env, o *opened, env, site, base string) (*session, error) {
+	s := &session{Env: env, Site: site, Manifest: map[string]string{}, ExtraEnv: map[string]string{}, base: base, readOnly: true}
+	ec, err := envContext(e, env)
+	if err != nil {
+		return nil, err
+	}
+	s.Real = ec.private
+	prefix := "icevault"
+	if d, err := e.description(); err == nil {
+		prefix = d.SessionPrefix()
+	}
+	name := fmt.Sprintf("%s-ro-%d-%s-", prefix, os.Getuid(), env)
+	if site != "" {
+		name += site + "-"
+	}
+	dir, err := os.MkdirTemp(baseOrTemp(base), name)
+	if err != nil {
+		return nil, err
+	}
+	s.Path = dir
+	_ = os.Chmod(s.Path, 0o700)
+	return s.fill(e, o)
+}
+
+// fill renders the session's files into its directory and prepares the variables. On a failure it removes everything it made.
+func (s *session) fill(e *Env, o *opened) (*session, error) {
+	env, site, base := s.Env, s.Site, s.base
 	fail1 := func(err error) (*session, error) {
 		_ = os.RemoveAll(s.Path)
+		removeOwner(s.Path)
 		s.dropTF()
 		return nil, err
 	}
@@ -634,6 +672,9 @@ func openSession(e *Env, o *opened, env, site, base string) (*session, error) {
 	}
 	sv := o.plat.D.SessionVars()
 	s.ExtraEnv = map[string]string{sv.Marker: "1", sv.Environment: env, sv.Tree: s.Path, sv.SettingsFile: settingsFile}
+	if s.readOnly {
+		s.ExtraEnv[sv.ReadOnly] = "1"
+	}
 	if site != "" {
 		s.ExtraEnv[sv.Site] = site
 	}
@@ -654,8 +695,12 @@ func (s *session) dropTF() {
 // closeSession ends a session: drop the token file, write what the run made back into the vault, remove the tree. On a failed write-back
 // the tree is kept: it may hold the only copy of what the run made.
 func closeSession(e *Env, o *opened, s *session) error {
+	if s.readOnly {
+		return closeReadOnly(e, s)
+	}
 	s.dropTF()
-	cleanStaleTF(e, s.base) // the open of another process left its token directory: only real directories of this user are removed
+	defer removeOwner(s.Path) // the run is over: the kept tree of a failed write-back is a leftover for recover
+	cleanStaleTF(e, s.base)   // the open of another process left its token directory: only real directories of this user are removed
 	unknown, err := syncBack(e, o, s)
 	if err != nil {
 		fmt.Fprintf(e.Err, "icevault: the run's files could NOT be written to the vault (%v); they are kept in %s; `icevault recover --env %s%s` repeats the write\n", err, s.Path, s.Env, s.siteArg())
@@ -668,6 +713,43 @@ func closeSession(e *Env, o *opened, s *session) error {
 			shown, more = shown[:8], " ..."
 		}
 		fmt.Fprintf(e.Out, "vault: %d file(s) made in the session are not kept (no rule of the project description keeps them): %s%s\n", len(unknown), strings.Join(shown, ", "), more)
+	}
+	return os.RemoveAll(s.Path)
+}
+
+// closeReadOnly ends a read-only session: what the command changed in the tree is dropped with it (said once, as a count), the tree is removed.
+func closeReadOnly(e *Env, s *session) error {
+	s.dropTF()
+	cleanStaleTF(e, s.base)
+	changed := 0
+	seen := map[string]bool{}
+	_ = filepath.WalkDir(s.Path, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == s.Path || !d.Type().IsRegular() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(s.Path, p)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		seen[rel] = true
+		if data, rerr := os.ReadFile(p); rerr != nil {
+			changed++
+		} else {
+			if sum, ok := s.Manifest[rel]; !ok || sum != sha256Hex(data) {
+				changed++
+			}
+			wipe(data)
+		}
+		return nil
+	})
+	for rel := range s.Manifest {
+		if !seen[rel] {
+			changed++
+		}
+	}
+	if changed > 0 {
+		fmt.Fprintf(e.Out, "vault: read-only session: %d file(s) changed in the session are not kept (a read-only session writes nothing back)\n", changed)
 	}
 	return os.RemoveAll(s.Path)
 }
@@ -689,8 +771,10 @@ func cmdSession(args []string, e *Env) error {
 		}
 	}
 	var base string
+	var readOnly bool
 	env, site, err := envFlags("session "+sub, rest, e, func(fs *flag.FlagSet) {
 		fs.StringVar(&base, "base", "", "the folder of the session directory (default: the temp directory)")
+		fs.BoolVar(&readOnly, "read-only", false, "a session of its own that is never written back (for commands that only look)")
 	})
 	if err != nil {
 		return err
@@ -720,7 +804,11 @@ func cmdSession(args []string, e *Env) error {
 		if len(child) == 0 {
 			return &parseErr{msg: "session run needs -- COMMAND"}
 		}
-		s, err := openSession(e, o, ec.name, s0, base)
+		open := openSession
+		if readOnly {
+			open = openReadOnlySession
+		}
+		s, err := open(e, o, ec.name, s0, base)
 		if err != nil {
 			return err
 		}

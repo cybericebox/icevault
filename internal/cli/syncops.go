@@ -202,6 +202,9 @@ func runRecover(e *Env, args []string, out io.Writer, o *opened) (int, error) {
 	if _, err := os.Lstat(path); err != nil {
 		return 1, fail("no left-over session directory at %s", path)
 	}
+	if info, st := readOwner(path); st == ownerLive {
+		return 1, fail("a run of '%s' is in progress (PID %d): recover would pull the files from under it; wait for the run to end", ec.name, info.PID)
+	}
 	if err := ownSessionDir(path); err != nil {
 		return 1, err
 	}
@@ -217,6 +220,7 @@ func runRecover(e *Env, args []string, out io.Writer, o *opened) (int, error) {
 	}
 	fmt.Fprintf(out, "recovered into the vault: %d new, %d changed; %d unchanged. Removing %s\n", rep.Added, rep.Changed, rep.Unchanged, path)
 	_ = os.RemoveAll(path)
+	removeOwner(path)
 	afterChange(o.path, before, out)
 	return 0, nil
 }

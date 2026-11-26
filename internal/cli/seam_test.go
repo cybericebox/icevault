@@ -331,6 +331,7 @@ func TestSessionOpenCloseAndRun(t *testing.T) {
 		t.Fatal("token file content")
 	}
 	// a second open is refused: a left-over is never reused
+	killOwner(t, s.Path)
 	if rc := h.run("session", "open", "--env", "prod", "--base", base); rc != 1 || !strings.Contains(h.errb.String(), "is left over from a run that was killed") {
 		t.Fatalf("%s", h.errb.String())
 	}

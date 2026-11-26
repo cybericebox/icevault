@@ -234,6 +234,7 @@ type SessionVariables struct {
 	Tree         string `yaml:"tree,omitempty"`          // the session's tree of the project's files (ICEVAULT_TREE)
 	SettingsFile string `yaml:"settings-file,omitempty"` // the JSON of the settings of the environments (ICEVAULT_SETTINGS_FILE)
 	TokenFile    string `yaml:"token-file,omitempty"`    // the Terraform credentials file of the state connection (ICEVAULT_TF_TOKEN_FILE)
+	ReadOnly     string `yaml:"read-only,omitempty"`     // "1" in a read-only session (ICEVAULT_READ_ONLY)
 }
 
 // WithDefaults fills the names left empty.
@@ -249,11 +250,12 @@ func (s SessionVariables) WithDefaults() SessionVariables {
 	def(&s.Tree, "ICEVAULT_TREE")
 	def(&s.SettingsFile, "ICEVAULT_SETTINGS_FILE")
 	def(&s.TokenFile, "ICEVAULT_TF_TOKEN_FILE")
+	def(&s.ReadOnly, "ICEVAULT_READ_ONLY")
 	return s
 }
 
 func (s SessionVariables) list() []string {
-	return []string{s.Marker, s.Environment, s.Site, s.Tree, s.SettingsFile, s.TokenFile}
+	return []string{s.Marker, s.Environment, s.Site, s.Tree, s.SettingsFile, s.TokenFile, s.ReadOnly}
 }
 
 // App is an app whose local development settings file export-app writes.
