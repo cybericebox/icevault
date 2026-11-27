@@ -1,11 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.9.4
+## Changes since v0.9.5
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
-
-- The Touch ID notification says what is unlocked, not the raw command line: the command, the environment and whether the run writes back (paths and the program a session runs are left out). A calling program can add one short line of its own (ICEVAULT_PURPOSE), shown above it.
-- After "Restart and update" the new copy now opens reliably: it waits a moment after the old one has ended and opens a new instance.
 
 ## What is here
 
