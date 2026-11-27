@@ -28,6 +28,8 @@ type harness struct {
 	// asked counts the password prompts: a refusal that needs no vault must leave it at 0
 	asked int
 	rand  io.Reader // the source of generated passphrases (nil: crypto/rand)
+	// notified are the command lines shown to the owner before a touch
+	notified []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -44,6 +46,7 @@ func (h *harness) run(args ...string) int {
 	h.errb.Reset()
 	asks := append([]string(nil), h.pw...)
 	e := &Env{Getenv: func(k string) string { return h.env[k] }, Out: &h.out, Err: &h.errb, Now: time.Now, Exec: h.exec, TouchID: h.tid, Root: h.root, Rand: h.rand,
+		Notify: func(s string) { h.notified = append(h.notified, s) },
 		Ask: func(string) ([]byte, error) {
 			h.asked++
 			if len(asks) == 0 {

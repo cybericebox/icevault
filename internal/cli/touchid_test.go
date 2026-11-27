@@ -116,6 +116,30 @@ func TestTouchIDEnableUnlockDisable(t *testing.T) {
 	}
 }
 
+// A program (no terminal) runs the command: Touch ID is the only way in, the owner is shown the command line, and without a touch the run stops
+// without asking for the password.
+func TestTouchIDWithoutTerminalShowsTheCommand(t *testing.T) {
+	h, f := tidHarness(t)
+	pw := h.pw[0]
+	if rc := h.run("touchid", "enable"); rc != 0 {
+		t.Fatal(h.errb.String())
+	}
+	f.decrypt, h.pw, h.notified, h.asked = []byte(pw), nil, nil, 0
+	if rc := h.run("view", "--item", "a/b"); rc != 0 || h.asked != 0 {
+		t.Fatalf("rc=%d asked=%d %s", rc, h.asked, h.errb.String())
+	}
+	if len(h.notified) != 1 || h.notified[0] != "icevault view --item a/b" {
+		t.Fatalf("shown: %q", h.notified)
+	}
+	f.code = 1
+	if rc := h.run("view", "--item", "a/b"); rc != 1 || !strings.Contains(h.errb.String(), NeedsOwner) {
+		t.Fatalf("no touch: rc=%d %s", rc, h.errb.String())
+	}
+	if long := commandLine([]string{strings.Repeat("x", 500)}); len([]rune(long)) != 200 {
+		t.Fatalf("the shown line is %d long", len([]rune(long)))
+	}
+}
+
 func TestTouchIDMissingToolsAndPlatform(t *testing.T) {
 	h, f := tidHarness(t)
 	f.missing["age-plugin-se"] = true
