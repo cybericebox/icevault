@@ -1,11 +1,8 @@
 IceVault {{VERSION}}
 
-## Changes since v0.9.3
+## Changes since v0.9.4
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
-
-- Read-only sessions in any number, beside a session that writes: a run no longer removes the folder of the Terraform credentials of another run that is still going. That folder now has an owner file like the session directory; only the folders of runs that are gone are cleaned up.
-- Touch ID without a terminal: a command started by another program unlocks the vault with a touch, never with the password. The command line is shown in a notification first, so you know which run you allow.
 
 ## What is here
 
