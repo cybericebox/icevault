@@ -128,15 +128,29 @@ func TestTouchIDWithoutTerminalShowsTheCommand(t *testing.T) {
 	if rc := h.run("view", "--item", "a/b"); rc != 0 || h.asked != 0 {
 		t.Fatalf("rc=%d asked=%d %s", rc, h.asked, h.errb.String())
 	}
-	if len(h.notified) != 1 || h.notified[0] != "icevault view --item a/b" {
+	if len(h.notified) != 1 || h.notified[0] != "view" {
 		t.Fatalf("shown: %q", h.notified)
 	}
 	f.code = 1
 	if rc := h.run("view", "--item", "a/b"); rc != 1 || !strings.Contains(h.errb.String(), NeedsOwner) {
 		t.Fatalf("no touch: rc=%d %s", rc, h.errb.String())
 	}
-	if long := commandLine([]string{strings.Repeat("x", 500)}); len([]rune(long)) != 200 {
-		t.Fatalf("the shown line is %d long", len([]rune(long)))
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"session", "run", "--env", "staging", "--", "/usr/bin/python3", "/tmp/x/cibenv.py", "deploy"}, "session run · staging · writes back"},
+		{[]string{"session", "run", "--read-only", "--env=prod", "--site", "gcp", "--", "sh"}, "session run · prod (gcp) · read only"},
+		{[]string{"settings", "--all", "--out", "/var/folders/x/out.json"}, "settings · all environments"},
+	} {
+		if got := runSummary(c.args); got != c.want {
+			t.Fatalf("%v: %q, want %q", c.args, got, c.want)
+		}
+	}
+	env := map[string]string{purposeVar: "deploy staging\n" + strings.Repeat("x", 200)}
+	if got := runPurpose([]string{"settings", "--all"}, func(k string) string { return env[k] }); !strings.HasPrefix(got, "deploy staging x") ||
+		!strings.HasSuffix(got, "\nsettings · all environments") || len([]rune(strings.Split(got, "\n")[0])) != 80 {
+		t.Fatalf("purpose: %q", got)
 	}
 }
 

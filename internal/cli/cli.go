@@ -101,8 +101,8 @@ type Env struct {
 	// ID is the only way in: the password is never asked there, so the owner's touch is what lets the run unlock the vault.
 	Exec    Runner
 	TouchID bool
-	// Purpose is the command line being run (no secret ever goes into an argument); Notify shows it to the owner when Touch ID is asked without a
-	// terminal, so the touch is given for a run the owner can name (nil: nothing is shown, tests).
+	// Purpose is what the run unlocks for (runPurpose: the caller's words over the command, environment and mode); Notify shows it to the owner when
+	// Touch ID is asked without a terminal, so the touch is given for a run the owner can name (nil: nothing is shown, tests).
 	Purpose string
 	Notify  func(text string)
 	// Model is the WIRING POINT for the commands that need the settings model (import, export, status, visibility, recover,
@@ -179,7 +179,7 @@ func Run(args []string, e *Env) int {
 		}
 		return 0
 	}
-	e.Purpose = commandLine(args)
+	e.Purpose = runPurpose(args, e.Getenv)
 	cmd, rest := args[0], args[1:]
 	// --vault PATH is accepted by every subcommand: the vault file; it wins over ICEVAULT_VAULT, which wins over the default
 	if rest, vf, ok := takeFlag(rest, "vault"); ok {
