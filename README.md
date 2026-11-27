@@ -69,6 +69,8 @@ icevault env create --env E --site KIND --products a,b[=PLACE] | --from-checkout
 icevault env fill-missing --env E      add the empty entries an environment lacks (nothing that exists changes)
 icevault env adopt-connections --env E [--dry-run]
                                        move values an environment holds as its own into the connection the description now gives them (names only are printed)
+icevault set --env E [--scope S] [--dry-run] KEY=VALUE ...
+                                       set plain values of the vault from the command line (secrets, system values and references are refused; all or nothing)
 icevault import --env E [--dry-run]    read the plaintext tree of an environment into the vault
 icevault export --env E --to DIR       write the settings files of an environment
 icevault status --env E                what is set, what is missing, what is still on disk

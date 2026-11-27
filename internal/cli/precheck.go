@@ -82,6 +82,8 @@ func (defaultModel) Check(e *Env, cmd string, args []string) (int, bool, error) 
 		return checkImport(e, v)
 	case cmdEnv:
 		return checkEnv(e, args)
+	case cmdSet:
+		return checkSet(e, args)
 	case cmdImportHCP:
 		path, token, err := hcpCredentials(e)
 		herr := hcpError(path, token, err)
