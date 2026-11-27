@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
@@ -190,6 +192,9 @@ func (e *Env) touchIDEnabled(vaultFile string) bool {
 func (e *Env) touchIDPassword(vaultFile string) []byte {
 	key, blob := e.touchIDFiles(vaultFile)
 	fmt.Fprintln(e.Err, "Touch ID: touch the sensor to unlock the vault (Ctrl+C to type the password instead)")
+	if e.Notify != nil {
+		e.Notify(e.Purpose)
+	}
 	out, code, err := e.Exec.Run("age", []string{"--decrypt", "-i", key, blob}, nil, touchIDTimeout)
 	if errors.Is(err, errTimeout) {
 		fmt.Fprintln(e.Err, "Touch ID: no touch in time; type the password")
@@ -200,6 +205,27 @@ func (e *Env) touchIDPassword(vaultFile string) []byte {
 		return nil
 	}
 	return out
+}
+
+// commandLine is the command as the owner is shown it before a touch: the program name and the arguments, cut to a length a notification shows.
+func commandLine(args []string) string {
+	s := "icevault " + strings.Join(args, " ")
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:199]) + "…"
+	}
+	return s
+}
+
+// notifyOwner shows the command in a notification when Touch ID is asked without a terminal (a program started the command, so the owner is not
+// looking at its output). At a terminal the line on stderr says it. The text goes to osascript as an argument of its run handler, never as script text.
+func notifyOwner(text string) {
+	if term.IsTerminal(int(os.Stdin.Fd())) || !isFile("/usr/bin/osascript") {
+		return
+	}
+	script := []string{"-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"IceVault: touch to allow\"", "-e", "end run", text}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "/usr/bin/osascript", script...).Run() // #nosec G204 -- fixed program and script; the text is an argument
 }
 
 func (e *Env) touchIDEnable(vaultFile string) error {

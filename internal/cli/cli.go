@@ -97,9 +97,14 @@ type Env struct {
 	// Ask returns what the person types without echo; it returns an error with NeedsOwner when there is no terminal.
 	Ask func(prompt string) ([]byte, error)
 	Now func() time.Time
-	// Exec runs age and age-plugin-se for Touch ID. TouchID is true when the platform has it and the password is read from a real terminal.
+	// Exec runs age and age-plugin-se for Touch ID. TouchID is true when the platform has it. Without a terminal (a program started the command) Touch
+	// ID is the only way in: the password is never asked there, so the owner's touch is what lets the run unlock the vault.
 	Exec    Runner
 	TouchID bool
+	// Purpose is the command line being run (no secret ever goes into an argument); Notify shows it to the owner when Touch ID is asked without a
+	// terminal, so the touch is given for a run the owner can name (nil: nothing is shown, tests).
+	Purpose string
+	Notify  func(text string)
 	// Model is the WIRING POINT for the commands that need the settings model (import, export, status, visibility, recover,
 	// purge-plaintext, import-hcp, view --env). The model package implements it.
 	Model Model
@@ -117,7 +122,7 @@ type Env struct {
 
 // DefaultEnv is the real process environment.
 func DefaultEnv() *Env {
-	return &Env{Getenv: os.Getenv, Out: os.Stdout, Err: os.Stderr, Ask: askTerminal, Now: time.Now, Root: findRoot(os.Getenv), In: os.Stdin, AskConsole: askConsole, Exec: execRunner{}, TouchID: touchIDPlatform && term.IsTerminal(int(os.Stdin.Fd())),
+	return &Env{Getenv: os.Getenv, Out: os.Stdout, Err: os.Stderr, Ask: askTerminal, Now: time.Now, Root: findRoot(os.Getenv), In: os.Stdin, AskConsole: askConsole, Exec: execRunner{}, TouchID: touchIDPlatform, Notify: notifyOwner,
 		StdioIsTerminal: func() bool { return term.IsTerminal(int(os.Stdin.Fd())) || term.IsTerminal(int(os.Stdout.Fd())) }}
 }
 
@@ -174,6 +179,7 @@ func Run(args []string, e *Env) int {
 		}
 		return 0
 	}
+	e.Purpose = commandLine(args)
 	cmd, rest := args[0], args[1:]
 	// --vault PATH is accepted by every subcommand: the vault file; it wins over ICEVAULT_VAULT, which wins over the default
 	if rest, vf, ok := takeFlag(rest, "vault"); ok {
