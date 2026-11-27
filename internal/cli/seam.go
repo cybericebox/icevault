@@ -498,6 +498,9 @@ func (s *session) siteArg() string {
 
 func sha256Hex(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
+// cleanStaleTF removes the token directories of runs that are gone: a directory of this user whose owner process no longer runs (or that has no owner
+// file: one of an older version, or of a run killed before it wrote one), and an owner file whose directory is gone. The directory of a run that is
+// still going (a session for writing or any number of read-only ones) is left alone.
 func cleanStaleTF(e *Env, base string) {
 	if base == "" {
 		base = os.TempDir()
@@ -512,9 +515,26 @@ func cleanStaleTF(e *Env, base string) {
 			continue
 		}
 		p := filepath.Join(base, en.Name())
-		if st, err := os.Lstat(p); err == nil && st.IsDir() && ownedByMe(st) {
-			_ = os.RemoveAll(p)
+		st, err := os.Lstat(p)
+		if err != nil || !ownedByMe(st) {
+			continue
 		}
+		if strings.HasSuffix(en.Name(), ".owner") {
+			if st.Mode().IsRegular() {
+				if _, derr := os.Lstat(strings.TrimSuffix(p, ".owner")); errors.Is(derr, fs.ErrNotExist) {
+					_ = os.Remove(p)
+				}
+			}
+			continue
+		}
+		if !st.IsDir() {
+			continue
+		}
+		if _, state := readOwner(p); state == ownerLive {
+			continue
+		}
+		_ = os.RemoveAll(p)
+		removeOwner(p)
 	}
 }
 
@@ -628,6 +648,9 @@ func (s *session) fill(e *Env, o *opened) (*session, error) {
 		return fail1(err)
 	}
 	s.TFDir = dir
+	if err := writeOwner(dir); err != nil { // another run's clean-up leaves the directory of a live run alone
+		return fail1(err)
+	}
 	all, err := o.plat.AllSettings(o.snap)
 	if err != nil {
 		return fail1(fail("%v", err))
@@ -688,6 +711,7 @@ func (s *session) fill(e *Env, o *opened) (*session, error) {
 func (s *session) dropTF() {
 	if s.TFDir != "" {
 		_ = os.RemoveAll(s.TFDir)
+		removeOwner(s.TFDir)
 	}
 	s.TFDir, s.TFConfig = "", ""
 }

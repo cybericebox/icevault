@@ -134,3 +134,53 @@ func TestReadOnlyDirectoryIsRemovedAfterAFailure(t *testing.T) {
 		t.Fatalf("left in the base: %d entries", len(left))
 	}
 }
+
+
+// tfDirs are the token directories of the user in base.
+func tfDirs(t *testing.T, h *harness, base string) []string {
+	t.Helper()
+	ents, _ := os.ReadDir(base)
+	var out []string
+	for _, en := range ents {
+		if en.IsDir() && strings.HasPrefix(en.Name(), tfDirPrefix(h.env0())+itoa(os.Getuid())+"-") {
+			out = append(out, filepath.Join(base, en.Name()))
+		}
+	}
+	return out
+}
+
+func TestRunsKeepTheTokenDirectoryOfALiveRun(t *testing.T) {
+	h := goldenHarness(t)
+	base, _ := openHeld(t, h)
+	held := tfDirs(t, h, base)
+	if len(held) != 1 || !isFile(ownerPath(held[0])) {
+		t.Fatalf("the held session's token directory and its owner file: %v", held)
+	}
+	// a killed run's token directory, one of an older version (no owner file) and an owner file whose directory is gone
+	dead := filepath.Join(base, tfDirPrefix(h.env0())+itoa(os.Getuid())+"-dead")
+	old := filepath.Join(base, tfDirPrefix(h.env0())+itoa(os.Getuid())+"-old")
+	_ = os.Mkdir(dead, 0o700)
+	_ = os.Mkdir(old, 0o700)
+	killOwner(t, dead)
+	orphan := ownerPath(filepath.Join(base, tfDirPrefix(h.env0())+itoa(os.Getuid())+"-gone"))
+	_ = os.WriteFile(orphan, []byte("{}"), 0o600)
+	for i := 0; i < 3; i++ { // any number of read-only runs, one after another and beside the held session
+		if rc := h.run("session", "run", "--read-only", "--env", "prod", "--base", base, "--", "sh", "-c", "test -f \"$ICEVAULT_SETTINGS_FILE\""); rc != 0 {
+			t.Fatalf("read-only run %d: %s", i, h.errb.String())
+		}
+	}
+	if !isDir(held[0]) || !isFile(ownerPath(held[0])) {
+		t.Fatal("a read-only run removed the token directory of the live session")
+	}
+	if isDir(dead) || isFile(ownerPath(dead)) || isDir(old) || isFile(orphan) {
+		t.Fatal("a token directory of a run that is gone, or an orphan owner file, stays")
+	}
+	if left := tfDirs(t, h, base); len(left) != 1 {
+		t.Fatalf("token directories left: %v", left)
+	}
+	killOwner(t, held[0]) // the held run ends without its close: the next clean-up takes its directory
+	cleanStaleTF(h.env0(), base)
+	if isDir(held[0]) || isFile(ownerPath(held[0])) {
+		t.Fatal("the token directory of a run that is gone, or its owner file, stays")
+	}
+}

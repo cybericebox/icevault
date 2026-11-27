@@ -332,6 +332,7 @@ func TestSessionOpenCloseAndRun(t *testing.T) {
 	}
 	// a second open is refused: a left-over is never reused
 	killOwner(t, s.Path)
+	killOwner(t, s.TFDir) // the test close does not know the token directory: as for a killed run, the clean-up of the close takes it
 	if rc := h.run("session", "open", "--env", "prod", "--base", base); rc != 1 || !strings.Contains(h.errb.String(), "is left over from a run that was killed") {
 		t.Fatalf("%s", h.errb.String())
 	}
