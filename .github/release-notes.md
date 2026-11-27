@@ -4,6 +4,8 @@ IceVault {{VERSION}}
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
+- New command `icevault set --env E [--scope SCOPE] [--dry-run] KEY=VALUE ...`: changes plain values of the vault directly from the command line, without the window (unlock and write lock as for `session`). It sets a key that lives in one scope, creates a missing key where the project description places it, and prints `SCOPE KEY: OLD -> NEW` per key. A secret, a system-managed or generated variable, a value with a reference and a value that breaks its type are refused; all keys are checked first, so one refusal writes nothing.
+
 ## What is here
 
 - `IceVault-{{VERSION}}-macos.dmg`: **the recommended way on macOS**. Open it and drag IceVault to Applications. One application for Apple silicon and Intel (the settings window, with the `icevault` command inside it).

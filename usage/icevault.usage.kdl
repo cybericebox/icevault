@@ -86,6 +86,22 @@ cmd "env" help=#"Create an environment, or add what it lacks, from the project d
   cmd "fill-missing" help=#"add the entries an environment lacks"#
   cmd "adopt-connections" help=#"move own values into the connections the description now gives them"#
 }
+cmd "set" help=#"Set plain values of the vault directly, without the window"# {
+  flag "--env <env>" help=#"the environment"# {
+    arg "<env>" {
+      complete run=#"icevault project envs 2>/dev/null"#
+    }
+  }
+  flag "--scope <scope>" help=#"where the keys live (default: the one scope that holds the key, else where the description places it)"# {
+    arg "<scope>" {
+      complete type="none"
+    }
+  }
+  flag "--dry-run" help=#"print the lines, write nothing"#
+  arg "<KEY=VALUE>" help=#"a plain variable and its new value (KEY= clears it); one or more"# {
+    complete type="none"
+  }
+}
 cmd "trust" help=#"Trust the project description (its required-check may run)"# {
   flag "--forget" help=#"remove the record"#
 }

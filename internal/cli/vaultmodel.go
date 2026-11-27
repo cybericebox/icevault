@@ -93,6 +93,8 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 	switch cmd {
 	case cmdEnv:
 		return runEnv(e, args, out, v, plat)
+	case cmdSet:
+		return runSet(e, args, out, v, plat)
 	case cmdImport, cmdRecover, cmdImportHCP:
 		w, err := modelWriter(e, v, plat)
 		if err != nil {

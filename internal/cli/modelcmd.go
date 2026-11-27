@@ -72,7 +72,7 @@ func vaultPathOr(e *Env) string { p, _ := vaultPath(e); return p }
 // writesVault: the commands of the model that open the vault for writing (import, recover, import-hcp, visibility --apply; session in seam.go).
 func writesVault(cmd string, args []string) bool {
 	switch cmd {
-	case "import", cmdRecover, cmdImportHCP, cmdEnv:
+	case "import", cmdRecover, cmdImportHCP, cmdEnv, cmdSet:
 		return true
 	case cmdVisibility:
 		return hasFlag(args, "apply")
