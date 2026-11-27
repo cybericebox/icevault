@@ -207,13 +207,92 @@ func (e *Env) touchIDPassword(vaultFile string) []byte {
 	return out
 }
 
-// commandLine is the command as the owner is shown it before a touch: the program name and the arguments, cut to a length a notification shows.
-func commandLine(args []string) string {
-	s := "icevault " + strings.Join(args, " ")
-	if r := []rune(s); len(r) > 200 {
-		s = string(r[:199]) + "…"
+// purposeVar names what the calling program is doing, in its own words (one short line, e.g. "deploy staging"): shown above what IceVault itself
+// tells about the run. The caller's words alone are never trusted: the command, the environment and the mode always come from the arguments.
+const purposeVar = "ICEVAULT_PURPOSE"
+
+// runSummary is what a run unlocks, as the owner is shown it before a touch: the command, its environment and site, and whether it can write. No
+// path and nothing after "--" (the program a session runs).
+func runSummary(args []string) string {
+	if len(args) == 0 {
+		return "icevault"
+	}
+	words := []string{args[0]}
+	rest := args[1:]
+	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+		words = append(words, rest[0])
+		rest = rest[1:]
+	}
+	var env, site string
+	var readOnly, all bool
+	for i := 0; i < len(rest); i++ {
+		a := rest[i]
+		if a == "--" {
+			break
+		}
+		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		next := func() string {
+			if hasVal {
+				return val
+			}
+			if i+1 < len(rest) {
+				i++
+				return rest[i]
+			}
+			return ""
+		}
+		switch name {
+		case "env":
+			env = next()
+		case "site":
+			site = next()
+		case "read-only":
+			readOnly = true
+		case "all":
+			all = true
+		}
+	}
+	out := strings.Join(words, " ")
+	switch {
+	case env != "" && site != "":
+		out += " · " + env + " (" + site + ")"
+	case env != "":
+		out += " · " + env
+	case all:
+		out += " · all environments"
+	}
+	if words[0] == "session" {
+		if readOnly {
+			out += " · read only"
+		} else {
+			out += " · writes back"
+		}
+	}
+	return cutLine(out, 120)
+}
+
+// cutLine keeps one line of printable text, at most n characters.
+func cutLine(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// runPurpose is the text of the notification: the caller's words (purposeVar, cut to one short line) over IceVault's own summary.
+func runPurpose(args []string, getenv func(string) string) string {
+	sum := runSummary(args)
+	if p := cutLine(getenv(purposeVar), 80); p != "" {
+		return p + "\n" + sum
+	}
+	return sum
 }
 
 // notifyOwner shows the command in a notification when Touch ID is asked without a terminal (a program started the command, so the owner is not
@@ -222,7 +301,13 @@ func notifyOwner(text string) {
 	if term.IsTerminal(int(os.Stdin.Fd())) || !isFile("/usr/bin/osascript") {
 		return
 	}
-	script := []string{"-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"IceVault: touch to allow\"", "-e", "end run", text}
+	// the caller's words (when given) are the subtitle, IceVault's own summary the text
+	subtitle, body, two := strings.Cut(text, "\n")
+	if !two {
+		subtitle, body = "", text
+	}
+	script := []string{"-e", "on run argv", "-e", "display notification (item 2 of argv) with title \"IceVault: Touch ID to unlock\" subtitle (item 1 of argv)", "-e", "end run",
+		subtitle, body}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = exec.CommandContext(ctx, "/usr/bin/osascript", script...).Run() // #nosec G204 -- fixed program and script; the text is an argument

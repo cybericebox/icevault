@@ -84,7 +84,7 @@ icevault help [COMMAND]                every command and flag
 
 Environment variables: `ICEVAULT_ROOT` (the checkout; otherwise the nearest folder above the working directory with `icevault-project.yaml`), `ICEVAULT_PROJECT` (another description file), `ICEVAULT_VAULT` (the vault file; `--vault PATH` wins), `ICEVAULT_KEYFILE`, `ICEVAULT_NO_VAULT=1`, `ICEVAULT_NO_TOUCHID=1`.
 
-Touch ID without a terminal: when another program starts a command that unlocks the vault (a script, an assistant), the password is never asked; with Touch ID on, the command line is shown in a notification ("IceVault: touch to allow") and the touch is what lets that one run unlock the vault. No touch, no run. `ICEVAULT_NO_TOUCHID=1` switches this off with the rest of Touch ID.
+Touch ID without a terminal: when another program starts a command that unlocks the vault (a script, an assistant), the password is never asked; with Touch ID on, a notification ("IceVault: Touch ID to unlock") names the command, the environment and whether the run writes back, under one line of the caller's own words when it sets `ICEVAULT_PURPOSE` and the touch is what lets that one run unlock the vault. No touch, no run. `ICEVAULT_NO_TOUCHID=1` switches this off with the rest of Touch ID.
 
 ## The agent API
 
