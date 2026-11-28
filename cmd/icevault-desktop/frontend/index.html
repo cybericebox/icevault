@@ -1746,7 +1746,7 @@ async function agentCheck() {
   const p = r.data.list[0], q = (s) => t("agent.batch.q", { s });
   let decided = false;
   confirmBox(t("agent.batch.title", { who: p.who, title: p.title }), "", t("agent.batch.apply"), { cancelText: t("agent.batch.reject"),
-    onOk: async () => { const x = await api("/api/agent-decide", { id: p.id, allow: true }); if (x.status === 200) { decided = true; return true; } if (x.data && x.data.code === "agent_gone") decided = true; return srv(x.data); },
+    onOk: async () => { const x = await api("/api/agent-decide", { id: p.id, allow: true }); if (x.status === 200) { decided = true; await refresh(); return true; } if (x.data && x.data.code === "agent_gone") decided = true; return srv(x.data); },
     onClose: async () => { if (!decided) { decided = true; await api("/api/agent-decide", { id: p.id, allow: false }); } agentAsking = false; setTimeout(agentCheck, 200); if (agentRedraw) agentRedraw(); } });
   const box = confirmLayer.box, err = box.querySelector(".err"); box.classList.add("agent");
   // the whole batch: every change by names and scopes (never a value), what it changes, and why it needs a close look
