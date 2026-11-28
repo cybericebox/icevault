@@ -148,7 +148,7 @@ type Checkout struct {
 	Templates string `yaml:"templates,omitempty"`
 	// Environments is the folder of the committed settings: <environments>/<env>/<the general file> (no secrets).
 	Environments string `yaml:"environments"`
-	// Plaintext is the folder of the plaintext trees: <plaintext>/<env>/ is what import reads and purge-plaintext deletes.
+	// Plaintext is the folder of the plaintext trees: <plaintext>/<env>/ is the plaintext tree of an environment, which the guards look at.
 	Plaintext string `yaml:"plaintext"`
 	// Vault is the vault file when none is named.
 	Vault string `yaml:"vault"`

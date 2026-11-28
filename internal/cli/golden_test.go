@@ -24,7 +24,7 @@ func goldenHarness(t *testing.T) *harness {
 	h.initVault()
 	h.trust()
 	for _, env := range []string{"prod", "staging"} {
-		if rc := h.run("import", "--env", env); rc != 0 {
+		if rc := h.importEnv(env); rc != 0 {
 			t.Fatalf("import %s: rc=%d %s %s", env, rc, h.out.String(), h.errb.String())
 		}
 	}
@@ -154,7 +154,7 @@ func TestGoldenExport(t *testing.T) {
 	}
 }
 
-func TestStatusImportDryRunPurge(t *testing.T) {
+func TestStatusGolden(t *testing.T) {
 	h := goldenHarness(t)
 	oldHook := runHook
 	defer func() { runHook = oldHook }()
@@ -167,49 +167,12 @@ func TestStatusImportDryRunPurge(t *testing.T) {
 	if strings.Contains(out, "example-cookie-key") || strings.Contains(out, "example-blob-secret") {
 		t.Fatal("status shows a value")
 	}
-	private := filepath.Join(h.root, "plain", "prod")
-	// a dry run of import asks no password and lists the files
-	h.pw = nil
-	if rc := h.run("import", "--env", "prod", "--dry-run"); rc != 0 || !strings.Contains(h.out.String(), "  would look at services/portal.env") ||
-		!strings.Contains(h.out.String(), "would import: 10 file(s) are covered") {
-		t.Fatalf("rc=%d %s %s", rc, h.out.String(), h.errb.String())
-	}
-	h.pw = []string{pw}
-	if rc := h.run("import", "--env", "prod"); rc != 0 || !strings.Contains(h.out.String(), "imported: 0 new, 0 changed; 10 unchanged") {
-		t.Fatalf("import rc=%d %s %s", rc, h.out.String(), h.errb.String())
-	}
-	// change one file: it differs and is kept
-	if err := os.WriteFile(filepath.Join(private, "targets", "gcp.env"), []byte("GKE_POOL=other\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if rc := h.run("purge-plaintext", "--env", "prod"); rc != 0 || !strings.Contains(h.out.String(), "would delete: 9; kept: 1 (repeat with --yes)") ||
-		!strings.Contains(h.out.String(), "  kept (differs from the vault) targets/gcp.env") {
-		t.Fatalf("%s", h.out.String())
-	}
-	// --yes needs a copy on another volume; without one it is refused, with --force it needs the typed sentence
-	if rc := h.run("purge-plaintext", "--env", "prod", "--yes"); rc != 1 || !strings.Contains(h.errb.String(), "needs an up-to-date copy of the vault on ANOTHER volume") {
-		t.Fatalf("%s", h.errb.String())
-	}
-	h.pw = []string{pw, "wrong sentence"}
-	if rc := h.run("purge-plaintext", "--env", "prod", "--yes", "--force"); rc != 1 {
-		t.Fatal("deleted without the sentence")
-	}
-	h.pw = []string{pw, "delete without a copy"}
-	if rc := h.run("purge-plaintext", "--env", "prod", "--yes", "--force"); rc != 0 || !strings.Contains(h.out.String(), "deleted: 9; kept: 1") {
-		t.Fatalf("%s %s", h.out.String(), h.errb.String())
-	}
-	if _, err := os.Stat(filepath.Join(private, "services", "portal.env")); err == nil {
-		t.Fatal("not deleted")
-	}
-	if _, err := os.Stat(filepath.Join(private, "targets", "gcp.env")); err != nil {
-		t.Fatal("the differing file was deleted")
-	}
 }
 
-func TestVisibilityApply(t *testing.T) {
+func TestVisibilityListsAndChangesNothing(t *testing.T) {
 	h := goldenHarness(t)
-	// a variable the description marks secret, stored as plain (as an import before the description gave it), is moved to secret with --apply;
-	// one whose name looks secret and that is plain was made so by hand and stays
+	// a variable the description marks secret, stored as plain (as an import before the description gave it), is listed with the visibility it
+	// would get; --apply is gone: the window changes visibility
 	h.editModel(func(m *vmodel.Vault) {
 		for _, p := range m.Env("prod").Products {
 			for _, x := range p.Vars {
@@ -222,11 +185,12 @@ func TestVisibilityApply(t *testing.T) {
 	if rc := h.run("visibility", "--env", "prod"); rc != 0 || !strings.Contains(h.out.String(), "BILLING_ACCOUNT") || !strings.Contains(h.out.String(), "kept-differs") {
 		t.Fatalf("%s %s", h.out.String(), h.errb.String())
 	}
-	if rc := h.run("visibility", "--env", "prod", "--apply"); rc != 0 || !strings.Contains(h.out.String(), "changed") {
-		t.Fatalf("%s %s", h.out.String(), h.errb.String())
+	before := h.out.String()
+	if rc := h.run("visibility", "--env", "prod", "--apply"); rc != 2 {
+		t.Fatalf("--apply is not a flag any more: rc=%d", rc)
 	}
-	if rc := h.run("visibility", "--env", "prod"); rc != 0 || strings.Contains(h.out.String(), "BILLING_ACCOUNT") {
-		t.Fatalf("not applied: %s", h.out.String())
+	if rc := h.run("visibility", "--env", "prod"); rc != 0 || h.out.String() != before {
+		t.Fatalf("the listing changed: %s", h.out.String())
 	}
 }
 

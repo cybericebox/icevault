@@ -27,7 +27,7 @@ type ChangeReport struct {
 	TouchIDLeft         []string
 	// Refreshed are the standing destinations that got the new file.
 	Refreshed []string
-	// Stale are the files that still open with the OLD password: copies in the destinations and in the folders of `copy --to`, and the previous copy
+	// Stale are the files that still open with the OLD password: copies in the destinations and in the folders of `copies now`, and the previous copy
 	// a refresh keeps there. The files are the person's; they are only named.
 	Stale []string
 }
@@ -107,7 +107,7 @@ func (e *Env) printStale(rep *ChangeReport, path string, refreshed bool) {
 		fmt.Fprintf(e.Out, "  %s\n", f)
 	}
 	if !refreshed && len(readInfo(path).destinations()) > 0 {
-		fmt.Fprintln(e.Out, "the standing copies follow at the next write, or now: run `change-password --refresh-copies` next time, or `icevault copy --to DIR` for one of them")
+		fmt.Fprintln(e.Out, "the standing copies follow at the next write, or now: run `change-password --refresh-copies` next time, or `icevault copies now DIR` for one of them")
 	}
 }
 
@@ -192,7 +192,7 @@ func (e *Env) touchIDRemove(vaultFile string) (wasOn bool, left []string) {
 }
 
 // staleCopies names the files of the copies of the vault that do not hold the current vault file: in the standing destinations and in the folders
-// `copy --to` wrote to, the copy and its previous copy.
+// `copies now` wrote to, the copy and its previous copy.
 func staleCopies(path string) []string {
 	cur, err := sha256File(path)
 	if err != nil {

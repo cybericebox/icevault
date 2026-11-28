@@ -101,8 +101,8 @@ func TestEverySubcommandHasUsageAndNeverUnlocksOnHelpOrAnUnknownFlag(t *testing.
 
 func TestHelpCommandAndTheOverview(t *testing.T) {
 	e, _, asked, out, _ := helpEnv(t)
-	if rc := Run([]string{"help", "import"}, e); rc != 0 || !strings.HasPrefix(out.String(), "usage: icevault import") {
-		t.Fatalf("help import: rc=%d %q", rc, out)
+	if rc := Run([]string{"help", "copies"}, e); rc != 0 || !strings.HasPrefix(out.String(), "usage: icevault copies") {
+		t.Fatalf("help copies: rc=%d %q", rc, out)
 	}
 	e, _, _, out, _ = helpEnv(t)
 	if rc := Run([]string{"--help"}, e); rc != 0 || !strings.Contains(out.String(), "icevault COMMAND --help") {

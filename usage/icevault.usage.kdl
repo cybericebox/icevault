@@ -6,6 +6,11 @@ flag "--vault <path>" help=#"the vault file (wins over ICEVAULT_VAULT)"# global=
 }
 cmd "init-vault" help=#"Make the vault (KDBX 4, Argon2d)"# {
   flag "--generate" help=#"a random six-word passphrase, shown once and typed back"#
+  flag "--new-keyfile <path>" help=#"make a key file at this path and use it for the vault"# {
+    arg "<path>" {
+      complete type="path"
+    }
+  }
   flag "--no-project" help=#"a vault without a project (--vault PATH names the file)"#
   flag "--decryption-time <ms>" help=#"key derivation time in ms, 100 to 5000"# {
     arg "<ms>" {
@@ -16,13 +21,6 @@ cmd "init-vault" help=#"Make the vault (KDBX 4, Argon2d)"# {
 cmd "change-password" help=#"Change the master password of the vault"# {
   flag "--generate" help=#"a random six-word passphrase, shown once and typed back"#
   flag "--refresh-copies" help=#"write the new file to the standing copy destinations now"#
-}
-cmd "keyfile" help=#"Make a KeePass key file"# subcommand_required=#true {
-  cmd "new" help=#"make a key file"# {
-    arg "<path>" help=#"the new file"# {
-      complete type="path"
-    }
-  }
 }
 cmd "ui" help=#"Open the settings window (IceVault.app)"# {
   flag "--env <env>" help=#"the environment"# {
@@ -64,26 +62,13 @@ cmd "project" help=#"Check the project description; which files an environment u
   cmd "used" help=#"the files an environment reads (JSON)"#
   cmd "envs" help=#"the environments of the checkout"#
 }
-cmd "env" help=#"Create an environment, or add what it lacks, from the project description (empty entries)"# subcommand_required=#true {
+cmd "env" help=#"Move values an environment holds as its own into the connections the description gives them"# subcommand_required=#true {
   flag "--env <env>" help=#"the environment"# global=#true {
     arg "<env>" {
       complete run=#"icevault project envs 2>/dev/null"#
     }
   }
-  flag "--site <kind>" help=#"the site kind of the new environment"# global=#true {
-    arg "<kind>" {
-      complete type="none"
-    }
-  }
-  flag "--products <list>" help=#"the products: a,b or a=PLACE"# global=#true {
-    arg "<list>" {
-      complete type="none"
-    }
-  }
-  flag "--from-checkout" help=#"take the site kind and the products from the committed settings"# global=#true
   flag "--dry-run" help=#"list what would move and change nothing"# global=#true
-  cmd "create" help=#"make the environment with its site and products"#
-  cmd "fill-missing" help=#"add the entries an environment lacks"#
   cmd "adopt-connections" help=#"move own values into the connections the description now gives them"#
 }
 cmd "set" help=#"Set plain values of the vault directly, without the window"# {
@@ -196,7 +181,7 @@ cmd "touchid" help=#"Unlock with Touch ID (macOS)"# subcommand_required=#true {
   cmd "disable" help=#"remove the binding"#
   cmd "status" help=#"is it on"#
 }
-cmd "copies" help=#"Standing backup copies of the encrypted vault file"# subcommand_required=#true {
+cmd "copies" help=#"Backup copies of the encrypted vault file"# subcommand_required=#true {
   cmd "add" help=#"add a destination folder"# {
     arg "<dir>" help=#"the dir"# {
       complete type="dir"
@@ -208,10 +193,8 @@ cmd "copies" help=#"Standing backup copies of the encrypted vault file"# subcomm
     }
   }
   cmd "list" help=#"list the destinations"#
-}
-cmd "copy" help=#"One copy of the encrypted vault file now"# {
-  flag "--to <dir>" help=#"the folder that receives the copy"# {
-    arg "<dir>" {
+  cmd "now" help=#"one copy into a folder now"# {
+    arg "<dir>" help=#"the dir"# {
       complete type="dir"
     }
   }
@@ -285,39 +268,6 @@ cmd "visibility" help=#"Visibility of the variables (never values)"# {
       complete type="none"
     }
   }
-  flag "--apply" help=#"change the variables marked change"#
-}
-cmd "purge-plaintext" help=#"Delete the plaintext files once the vault is verified"# {
-  flag "--env <env>" help=#"the environment"# {
-    arg "<env>" {
-      complete run=#"icevault project envs 2>/dev/null"#
-    }
-  }
-  flag "--site <site>" help=#"the site of the environment"# {
-    arg "<site>" {
-      complete type="none"
-    }
-  }
-  flag "--yes" help=#"really delete"#
-  flag "--force" help=#"delete even without an up-to-date copy on another volume"#
-}
-cmd "import" help=#"Take the plaintext tree of an environment into the vault"# {
-  flag "--env <env>" help=#"the environment"# {
-    arg "<env>" {
-      complete run=#"icevault project envs 2>/dev/null"#
-    }
-  }
-  flag "--site <site>" help=#"the site of the environment"# {
-    arg "<site>" {
-      complete type="none"
-    }
-  }
-  flag "--file <file>" help=#"one extra file of the plaintext folder"# {
-    arg "<file>" {
-      complete type="none"
-    }
-  }
-  flag "--dry-run" help=#"print what would change, write nothing"#
 }
 cmd "recover" help=#"Write a killed session run back into the vault"# {
   flag "--env <env>" help=#"the environment"# {

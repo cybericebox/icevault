@@ -172,31 +172,6 @@ func TestImportHCPAndImportFile(t *testing.T) {
 	if tok := mustSessionToken(t, h); tok != "hcp-secret-throwaway" {
 		t.Fatalf("token %q", tok)
 	}
-	// import --file
-	priv := filepath.Join(h.root, "plain")
-	_ = os.MkdirAll(priv, 0o700)
-	_ = os.WriteFile(filepath.Join(priv, "dump.sql"), []byte("select 1;"), 0o600)
-	if rc := h.run("import", "--env", "prod", "--file", "dump.sql"); rc != 0 || !strings.Contains(h.out.String(), "imported: 1 new, 0 changed") {
-		t.Fatalf("%s %s", h.out.String(), h.errb.String())
-	}
-	if rc := h.run("import", "--env", "prod", "--file", "dump.sql"); rc != 0 || !strings.Contains(h.out.String(), "imported: 0 new, 0 changed; 1 unchanged") {
-		t.Fatal(h.out.String())
-	}
-	if rc := h.run("import", "--env", "prod", "--file", "/etc/hosts"); rc != 1 || !strings.Contains(h.errb.String(), "is not under") {
-		t.Fatal(h.errb.String())
-	}
-	h.env["ICEVAULT_VAULT"] = h.vaultOfCheckout()
-	_ = os.MkdirAll(filepath.Dir(h.vaultOfCheckout()), 0o700)
-	_ = os.WriteFile(filepath.Join(filepath.Dir(h.vaultOfCheckout()), "x"), []byte("x"), 0o600)
-	if rc := h.run("import", "--env", "prod", "--file", "vault/x"); rc != 1 || !strings.Contains(h.errb.String(), "the vault does not go into itself") {
-		t.Fatal(h.errb.String())
-	}
-	if rc := h.run("import", "--env", "prod", "--into", "environments/x"); rc != 2 {
-		t.Fatal("--into is not a flag any more")
-	}
-	if rc := h.run("import", "--env", "nothing-here"); rc != 1 || !strings.Contains(h.errb.String(), "is not an environment here") {
-		t.Fatal(h.errb.String())
-	}
 }
 
 func mustSessionToken(t *testing.T, h *harness) string {
@@ -229,11 +204,11 @@ func mustSessionToken(t *testing.T, h *harness) string {
 func TestGoldenImport(t *testing.T) {
 	h := newHarness(t)
 	h.initVault()
-	if rc := h.run("import", "--env", "prod"); rc != 0 {
+	if rc := h.importEnv("prod"); rc != 0 {
 		t.Fatalf("rc=%d %s", rc, h.errb.String())
 	}
 	golden(t, "import-report.txt", h.out.String())
-	if rc := h.run("import", "--env", "prod"); rc != 0 || !strings.Contains(h.out.String(), "imported: 0 new, 0 changed; 10 unchanged") {
+	if rc := h.importEnv("prod"); rc != 0 || !strings.Contains(h.out.String(), "imported: 0 new, 0 changed; 10 unchanged") {
 		t.Fatalf("%s", h.out.String())
 	}
 	in := readInfo(h.env["ICEVAULT_VAULT"])

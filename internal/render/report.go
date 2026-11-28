@@ -15,57 +15,6 @@ func ljust(s string, n int) string {
 	return s
 }
 
-// AuditVisibility is `icevault visibility`: the lines of the table (key,
-// current, proposed, verdict; never a value) for every owner variable the rule
-// would treat differently; with apply it moves the "change" ones (never unseals,
-// never touches a choice of the owner) through w. Returns the lines and how many
-// were changed.
-func (p *Project) AuditVisibility(w model.Writer, snap *model.Snapshot, env string, apply bool) ([]string, int, error) {
-	rows, err := p.VisibilityRows(snap, env)
-	if err != nil {
-		return nil, 0, err
-	}
-	if len(rows) == 0 {
-		return []string{"every owner variable already has the visibility the rule gives it"}, 0, nil
-	}
-	width := 0
-	for _, r := range rows {
-		if n := len([]rune(r.Item + "/" + r.Group + "/" + r.Key)); n > width {
-			width = n
-		}
-	}
-	lines := []string{ljust("variable", width) + "  current  proposed  verdict"}
-	done, todo := 0, 0
-	for _, r := range rows {
-		shown := r.Verdict
-		if r.Verdict == "change" {
-			todo++
-			if apply {
-				e := r.Entry
-				if err := func() error {
-					nts, err := model.EntryNotesSet(model.ManagedOwner, r.Proposed, e.Labels, e.Description, "", e.ManagedSet)
-					if err != nil {
-						return err
-					}
-					return w.SetNotes(e.Path, nts)
-				}(); err != nil {
-					return lines, done, err
-				}
-				e.Vis, e.VisBy = r.Proposed, ""
-				shown = "changed"
-				done++
-			}
-		}
-		lines = append(lines, ljust(r.Item+"/"+r.Group+"/"+r.Key, width)+"  "+ljust(r.Current, 7)+"  "+ljust(r.Proposed, 8)+"  "+shown)
-	}
-	if apply {
-		lines = append(lines, fmt.Sprintf("%d changed, %d left as they are", done, len(rows)-done))
-	} else {
-		lines = append(lines, fmt.Sprintf("%d can be changed with --apply; %d stay as they are (chosen by the owner, sealed, or changed by hand)", todo, len(rows)-todo))
-	}
-	return lines, done, nil
-}
-
 // ViewText is `icevault view`: a table of names only, never a value (file,
 // variable, source, managed-by, set or empty, last change), then what is
 // missing with its hint. item non-nil: the table of one item.

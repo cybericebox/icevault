@@ -2,80 +2,9 @@ package render
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
-
-	"github.com/cybericebox/icevault/internal/model"
 )
-
-func auditSnap(t *testing.T) *model.Snapshot {
-	o := "managed-by=owner\nvisibility="
-	return snapOf(t,
-		row{"environments/staging/web", "WIDGET_SITE_KEY", "v", o + "secret"},          // the old import default, now plain
-		row{"environments/staging/web", "FOO_NOTE", "v", o + "secret"},                 // unknown key: old default secret, now plain
-		row{"environments/staging/web", "BASE_HOST", "v", o + "plain"},                 // already right
-		row{"environments/staging/web", "MY_TOKEN", "v", o + "plain"},                  // plain by hand: left
-		row{"environments/staging/web", "OWNER_NOTE", "v", o + "secret\nvis-by=owner"}, // chosen in the screen: left
-		row{"environments/staging/web", "SEALED_NOTE", "v", o + "sealed"},              // never unsealed
-		row{"environments/staging/web", "SYSTEM_NOTE", "v", "managed-by=system\nvisibility=sealed"})
-}
-
-type setNotes struct{ calls [][2]string }
-
-func (s *setNotes) Mkdir(string) error                { return nil }
-func (s *setNotes) Add(string, string, *string) error { return nil }
-func (s *setNotes) SetPassword(string, string) error  { return nil }
-func (s *setNotes) SetNotes(e, n string) error {
-	s.calls = append(s.calls, [2]string{e, n})
-	return nil
-}
-func (s *setNotes) Remove(string) error               { return nil }
-func (s *setNotes) Move(string, string) error         { return nil }
-func (s *setNotes) SetTitle(string, string) error     { return nil }
-func (s *setNotes) Attach(string, []byte, bool) error { return nil }
-
-func TestVisibilityAuditListsNamesAndChangesNothingWithoutApply(t *testing.T) {
-	snap, w := auditSnap(t), &setNotes{}
-	lines, n, err := proj().AuditVisibility(w, snap, "staging", false)
-	eq(t, []any{err, n, len(w.calls)}, []any{error(nil), 0, 0}, "nothing written")
-	text := strings.Join(lines, "\n")
-	if strings.Contains(text, "v\n") && strings.Contains(text, "S3CRET") {
-		t.Error("a value is printed")
-	}
-	rows, _ := proj().VisibilityRows(snap, "staging")
-	by := map[string]string{}
-	for _, r := range rows {
-		by[r.Key] = r.Verdict
-	}
-	eq(t, by, map[string]string{"WIDGET_SITE_KEY": "change", "FOO_NOTE": "change", "MY_TOKEN": "kept-differs", "OWNER_NOTE": "kept-owner", "SEALED_NOTE": "kept-sealed"}, "verdicts")
-	contains2(t, text, "2 can be changed")
-	contains2(t, lines[0], "variable")
-}
-
-func TestVisibilityApplyChangesOnlyWhatTheOwnerNeverChoseAndNeverUnseals(t *testing.T) {
-	snap, w := auditSnap(t), &setNotes{}
-	_, n, err := proj().AuditVisibility(w, snap, "staging", true)
-	eq(t, []any{err, n}, []any{error(nil), 2}, "changed")
-	var keys []string
-	for _, c := range w.calls {
-		keys = append(keys, c[0][strings.LastIndex(c[0], "/")+1:])
-		if !strings.Contains(c[1], "visibility=plain") || strings.Contains(c[1], "vis-by") {
-			t.Errorf("notes: %q", c[1])
-		}
-	}
-	sort.Strings(keys)
-	eq(t, keys, []string{"FOO_NOTE", "WIDGET_SITE_KEY"}, "changed keys")
-	lines, n2, _ := proj().AuditVisibility(w, snap, "staging", true)
-	eq(t, []any{len(w.calls), n2}, []any{2, 0}, "a second run has nothing left to change")
-	contains2(t, strings.Join(lines, "\n"), "0 changed, 3 left as they are")
-	if _, _, err := proj().AuditVisibility(w, snap, "nowhere", false); err == nil {
-		t.Error("an unknown environment is an error")
-	}
-	clean := snapOf(t, row{"environments/staging/web", "BASE_HOST", "v", own})
-	l, _, _ := proj().AuditVisibility(w, clean, "staging", false)
-	eq(t, l, []string{"every owner variable already has the visibility the rule gives it"}, "nothing to do")
-}
 
 func TestViewTextListsNamesOnlyAndWhatIsMissingWithItsHint(t *testing.T) {
 	notes := "managed-by=owner\nvisibility=plain\nlabels=file:apps/web.env\nNEEDED FOR: off-site backups. Get it: the storage provider, API tokens."

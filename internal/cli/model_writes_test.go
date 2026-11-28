@@ -54,7 +54,7 @@ func TestImportOfAChangedTree(t *testing.T) {
 	if err := os.WriteFile(pf, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if rc := h.run("import", "--env", "prod"); rc != 0 {
+	if rc := h.importEnv("prod"); rc != 0 {
 		t.Fatalf("%s %s", h.out.String(), h.errb.String())
 	}
 	if !strings.Contains(h.out.String(), "1 owner entry(ies) differ from the file and were left as they are") || !strings.Contains(h.out.String(), "services/engine.env/ENGINE_THREADS") {

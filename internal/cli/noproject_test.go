@@ -69,8 +69,8 @@ func TestCommandsThatNeedEnvironmentsSayTheVaultHasNoProject(t *testing.T) {
 	if rc := h.run("init-vault", "--no-project", "--decryption-time", "100"); rc != 0 {
 		t.Fatalf("rc=%d %s", rc, h.errb.String())
 	}
-	for _, args := range [][]string{{"status", "--env", "prod"}, {"view", "--env", "prod"}, {"import", "--env", "prod"}, {"export", "--env", "prod", "--to", filepath.Join(h.dir, "o")},
-		{"env", "create", "--env", "qa", "--site", "compose", "--products", "portal"}} {
+	for _, args := range [][]string{{"status", "--env", "prod"}, {"view", "--env", "prod"}, {"export", "--env", "prod", "--to", filepath.Join(h.dir, "o")},
+		{"env", "adopt-connections", "--env", "qa"}} {
 		h.asked = 0
 		rc := h.run(args...)
 		if rc != 1 || !strings.Contains(h.errb.String(), "this vault has no project") || h.asked != 0 {

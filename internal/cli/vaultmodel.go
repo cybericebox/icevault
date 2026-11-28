@@ -13,9 +13,8 @@ import (
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
-// The commands on a vault of the vault model (internal/vmodel). The read commands (export, view, status, purge-plaintext,
-// settings) read the projection of the model (vmodel.CompatWith), which lays the project's files out; the commands that write (import,
-// recover, import-hcp, visibility --apply, the session, external serve) write through bridge.Writer, which puts each write into the model and
+// The commands on a vault of the vault model (internal/vmodel). The read commands (export, view, status,
+// settings) read the projection of the model (vmodel.CompatWith), which lays the project's files out; the commands that write (recover, import-hcp, the session, external serve) write through bridge.Writer, which puts each write into the model and
 // saves it with vmodel.Sync.
 
 // descriptionOf is the project description of this process.
@@ -87,7 +86,7 @@ func (mv *modelView) skipped(env string) error {
 
 // runOnModel runs a command of the settings model on a vault of the vault model.
 func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer, plat *render.Project) (int, error) {
-	if f := vmodel.FormatOf(v); f != vmodel.Format && writesVault(cmd, args) {
+	if f := vmodel.FormatOf(v); f != vmodel.Format && writesVault(cmd) {
 		return 1, fail("%v", vmodel.ErrNewerFormat)
 	}
 	switch cmd {
@@ -95,7 +94,7 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		return runEnv(e, args, out, v, plat)
 	case cmdSet:
 		return runSet(e, args, out, v, plat)
-	case cmdImport, cmdRecover, cmdImportHCP:
+	case cmdRecover, cmdImportHCP:
 		w, err := modelWriter(e, v, plat)
 		if err != nil {
 			return 1, err
@@ -106,20 +105,10 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		}
 		op := &opened{path: vaultPathOr(e), v: v, k: w, snap: snap, plat: plat}
 		switch cmd {
-		case cmdImport:
-			return runImportReal(e, args, out, op)
 		case cmdRecover:
 			return runRecover(e, args, out, op)
 		}
 		return runImportHCP(e, args, out, op)
-	}
-	if cmd == cmdVisibility && hasFlag(args, "apply") {
-		w, err := modelWriter(e, v, plat)
-		if err != nil {
-			return 1, err
-		}
-		snap, _ := w.Snapshot()
-		return 0, runVisibility(e, args, out, plat, snap, w)
 	}
 	if cmd == cmdExpiring {
 		return 0, runExpiring(e, args, out, v)
@@ -156,9 +145,7 @@ func runOnModel(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer
 		}
 		return 0, nil
 	case cmdVisibility:
-		return 0, runVisibility(e, args, out, plat, snap, nil)
-	case cmdPurge:
-		return 0, runPurge(e, args, out, plat, snap)
+		return 0, runVisibility(e, args, out, plat, snap)
 	}
 	return notPortedCmd(e, cmd, "the vault model")
 }

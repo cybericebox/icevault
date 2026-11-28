@@ -18,17 +18,8 @@ import (
 	"github.com/cybericebox/icevault/internal/vmodel"
 )
 
-// The commands that write a plaintext tree into the vault: import, recover, import-hcp, and the write-back of a session. They run SyncTree and
+// The commands that write a plaintext tree into the vault: recover, import-hcp, and the write-back of a session. They run SyncTree and
 // ImportTree (internal/render/sync.go) on the writer of the vault model (bridge.Writer).
-
-func hasFlag(args []string, name string) bool {
-	for _, a := range args {
-		if a == "--"+name || a == "-"+name || strings.HasPrefix(a, "--"+name+"=") {
-			return true
-		}
-	}
-	return false
-}
 
 // recordEnv notes in the info file that the vault holds env (what it held when read plus what the tree added).
 func recordEnv(vaultFile string, plat *render.Project, snap *model.Snapshot, env string, treeRels []string) {
@@ -80,104 +71,6 @@ func afterChange(vaultFile, before string, out io.Writer) {
 	if now, err := sha256File(vaultFile); err == nil && now != before {
 		makeCopies(vaultFile, out)
 	}
-}
-
-// runImportReal is `import` (not a dry run) on an unlocked vault.
-func runImportReal(e *Env, args []string, out io.Writer, o *opened) (int, error) {
-	var file string
-	env, site, err := envFlags("import", args, e, func(fs *flag.FlagSet) {
-		fs.Bool("dry-run", false, "")
-		fs.StringVar(&file, "file", "", "one extra file of the plaintext folder")
-	})
-	if err != nil {
-		return 2, err
-	}
-	before, _ := sha256File(o.path)
-	if file != "" {
-		return importFile(e, out, o, file)
-	}
-	ec, err := envContext(e, env)
-	if err != nil {
-		return 1, err
-	}
-	if site != "" && !model.NameRE.MatchString(site) {
-		return 1, fail("'%s' is not a site name (lower case letters, digits, - and _)", site)
-	}
-	if !isDir(ec.private) {
-		return 1, fail("%s holds no secret files to import", ec.private)
-	}
-	opt := render.Options{Env: ec.name, Tree: render.FSSource{FS: os.DirFS(ec.private)}, Site: site}
-	if extra := confExtra(e, ec.name); extra != nil {
-		conf := o.plat.Conf()
-		data, err := os.ReadFile(extra[conf])
-		if err != nil {
-			return 1, fail("%s cannot be read", extra[conf])
-		}
-		opt.Extra = map[string][]byte{conf: data}
-	}
-	_, lines, err := o.plat.ImportTree(o.k, o.snap, opt, ec.private)
-	if cerr := o.k.Commit(); cerr != nil && err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return 1, fail("%v", err)
-	}
-	recordEnv(o.path, o.plat, o.snap, ec.name, privateRels(ec.private))
-	for _, ln := range lines {
-		fmt.Fprintln(out, ln)
-	}
-	afterChange(o.path, before, out)
-	return 0, nil
-}
-
-// resolveImportFile checks the file of `import --file` without the vault: under the plaintext folder of the checkout, not the vault itself, a
-// regular file. It returns the path, the path relative to that folder and the file info.
-func resolveImportFile(e *Env, file string) (string, string, os.FileInfo, error) {
-	d, err := e.description()
-	if err != nil {
-		return "", "", nil, err
-	}
-	priv := plaintextRoot(d)
-	p := file
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(priv, file)
-	}
-	p = filepath.Clean(p)
-	rel, err := filepath.Rel(priv, p)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", "", nil, fail("%s is not under %s", file, priv)
-	}
-	rel = filepath.ToSlash(rel)
-	if vp, verr := vaultPath(e); verr == nil && (filepath.Clean(vp) == p || isUnder(p, filepath.Dir(vp))) {
-		return "", "", nil, fail("the vault does not go into itself")
-	}
-	st, err := os.Stat(p)
-	if err != nil || !st.Mode().IsRegular() {
-		return "", "", nil, fail("%s does not exist", p)
-	}
-	return p, rel, st, nil
-}
-
-func importFile(e *Env, out io.Writer, o *opened, file string) (int, error) {
-	p, rel, st, err := resolveImportFile(e, file)
-	if err != nil {
-		return 1, err
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return 1, err
-	}
-	lines, _, err := render.ImportExtra(o.k, o.snap, rel, data, int(st.Mode().Perm()), false, nil)
-	if cerr := o.k.Commit(); cerr != nil && err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return 1, fail("%v", err)
-	}
-	for _, ln := range lines {
-		fmt.Fprintln(out, ln)
-	}
-	return 0, nil
 }
 
 // runRecover writes the files of a left-over session directory into the vault and removes it.
