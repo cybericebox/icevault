@@ -98,6 +98,11 @@ cmd "set" help=#"Set plain values of the vault directly, without the window"# {
     }
   }
   flag "--dry-run" help=#"print the lines, write nothing"#
+  flag "--base <dir>" help=#"the folder of the session directories a running session would be in"# {
+    arg "<dir>" {
+      complete type="dir"
+    }
+  }
   arg "<KEY=VALUE>" help=#"a plain variable and its new value (KEY= clears it); one or more"# {
     complete type="none"
   }

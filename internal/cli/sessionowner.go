@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -113,6 +114,35 @@ func liveOwnerError(env, site string, info ownerInfo) error {
 	}
 	return fail("a run of '%s' is in progress (PID %d, since %s): wait for it to end, or use a read-only session for commands that only look: "+
 		"icevault session run --read-only --env %s -- COMMAND", env, info.PID, since, pair)
+}
+
+// liveWriteSession reports a run of env that holds a session for writing (any site) in base and still runs. Such a run writes its directory back
+// into the vault when it ends, and that write-back fails when the vault changed under it, so a direct change of the vault waits for it. Read-only
+// sessions (their own -ro- directories) never write back and do not count.
+func liveWriteSession(e *Env, base, env string) (ownerInfo, bool) {
+	base = baseOrTemp(base)
+	name := filepath.Base(sessionDir(e, base, env, ""))
+	ents, err := os.ReadDir(base)
+	if err != nil {
+		return ownerInfo{}, false
+	}
+	for _, en := range ents {
+		n := en.Name()
+		if !en.IsDir() || (n != name && !strings.HasPrefix(n, name+"-")) {
+			continue
+		}
+		p := filepath.Join(base, n)
+		if st, err := os.Lstat(p); err != nil || !ownedByMe(st) {
+			continue
+		}
+		if _, err := os.Lstat(ownerPath(p)); err != nil {
+			continue // no owner file: a leftover of an old version or of a killed run, nothing runs
+		}
+		if info, st := readOwner(p); st == ownerLive {
+			return info, true
+		}
+	}
+	return ownerInfo{}, false
 }
 
 // openError is why a session directory that already exists cannot be opened.
