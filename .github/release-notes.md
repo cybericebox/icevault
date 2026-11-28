@@ -5,6 +5,7 @@ IceVault {{VERSION}}
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
 - `icevault set` waits for a running session of the environment: while a run holds a session that is written back into the vault, `set` writes nothing and exits 1 (a change under it made the write-back fail). `--base DIR` names the folder of the session directories, as `session run --base`.
+- Window: after an agent batch is applied the navigation and the page are redrawn at once (the new values showed only after a manual refresh). The environment header, the click-to-copy of values (a secret is copied without being shown, the clipboard is cleared after 30 seconds) and the own date picker of the expiry field (Monday first, month and day names in the window language, presets +30/+60/+90 days and +1 year, clear button) are checked in the browser harness.
 
 ## What is here
 
