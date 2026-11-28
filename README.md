@@ -56,7 +56,8 @@ Or download a release: `IceVault-vX.Y.Z-macos.dmg` (the window with the command 
 ## Commands
 
 ```
-icevault init-vault [--generate]        a new vault at the path the description names; --generate makes a six-word passphrase
+icevault init-vault [--generate] [--new-keyfile PATH]
+                                       a new vault at the path the description names; --generate makes a six-word passphrase, --new-keyfile makes a key file and uses it
 icevault change-password [--generate] [--refresh-copies]
                                        change the master password of the vault (same policy as init-vault)
 icevault init-vault --no-project --vault PATH
@@ -64,21 +65,16 @@ icevault init-vault --no-project --vault PATH
 icevault project check                 validate the project description
 icevault project used --env E          which files an environment reads (JSON)
 icevault trust [--forget]              trust the description and its required-check script
-icevault env create --env E --site KIND --products a,b[=PLACE] | --from-checkout
-                                       a new environment: its site, its products and every variable it needs, as empty entries
-icevault env fill-missing --env E      add the empty entries an environment lacks (nothing that exists changes)
 icevault env adopt-connections --env E [--dry-run]
                                        move values an environment holds as its own into the connection the description now gives them (names only are printed)
 icevault set --env E [--scope S] [--dry-run] KEY=VALUE ...
                                        set plain values of the vault from the command line (secrets, system values and references are refused; all or nothing)
-icevault import --env E [--dry-run]    read the plaintext tree of an environment into the vault
 icevault export --env E --to DIR       write the settings files of an environment
 icevault status --env E                what is set, what is missing, what is still on disk
 icevault view --env E                  the variables of an environment (names only, never a value)
 icevault expiring [--days N]           the values that have expired or expire within N days (default 14): names and dates only
 icevault session run --env E -- CMD    run CMD with a private tree of the environment
-icevault purge-plaintext --env E       remove the plaintext files the vault holds
-icevault copies | copy --to DIR        copies of the vault on other volumes
+icevault copies add|remove|list|now   backup copies of the vault on other volumes (now DIR: one copy into DIR at once)
 icevault ui                            the window (macOS)
 icevault agent OP [JSON]               ask the unlocked window to read the vault or to apply a batch of changes (see "The agent API"; JSON answer, never a secret value)
 icevault help [COMMAND]                every command and flag
@@ -119,7 +115,7 @@ In the window, **New vault** (on the lock screen, beside Open vault) asks for th
 
 - the Touch ID binding holds the old password and is removed; `touchid enable` stores the new one (the window offers it in the same dialog);
 - the info file records `password_changed` (a date, never a secret);
-- copies made before (`copies add` destinations, `copy --to` outputs) still open with the **old** password: they are listed and never deleted, and `--refresh-copies` (a check box in the window) writes the new file to the standing destinations now. A refresh keeps the copy it replaces as `.prev`, which also still opens with the old password and is listed;
+- copies made before (`copies add` destinations, `copies now` outputs) still open with the **old** password: they are listed and never deleted, and `--refresh-copies` (a check box in the window) writes the new file to the standing destinations now. A refresh keeps the copy it replaces as `.prev`, which also still opens with the old password and is listed;
 - the vault's own previous copy (`<vault>.prev`) opens with the old password too and is removed; if it cannot be removed, it is listed with the copies;
 - **after `--refresh-copies`, `<destination>/<file>.prev` stays**: the refresh keeps the copy it replaces under that name, and it opens with the **old** password. It is listed in the output. Delete it yourself when the old password must stop working everywhere (`rm <destination>/<file>.prev`); nothing deletes a file in a destination for you;
 - a Touch ID binding that cannot be removed is reported with its file names (it holds the old password): delete the files or run `icevault touchid disable`;

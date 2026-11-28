@@ -18,7 +18,7 @@ func (h *harness) trust() {
 func TestRequiredCheckNeedsTrust(t *testing.T) {
 	h := newHarness(t)
 	h.initVault()
-	if rc := h.run("import", "--env", "prod"); rc != 0 {
+	if rc := h.importEnv("prod"); rc != 0 {
 		t.Fatalf("import: %s", h.errb.String())
 	}
 	ran := false

@@ -12,7 +12,7 @@ import (
 	"github.com/cybericebox/icevault/pkg/vault"
 )
 
-// Writer lets the commands of the layout before the vault model (import, recover, import-hcp, visibility --apply, the session's write-back,
+// Writer lets the commands of the layout before the vault model (recover, import-hcp, the session's write-back,
 // external serve) work on a migrated vault unchanged: they read the projection of the model (Snapshot) and write through the model.Writer they
 // always used; Writer turns each write into a change of the model, and Commit writes the model into the vault through its one write path
 // (vmodel.Sync) and saves. A path the projection made (an entry of it) is the thing it stands for; a path the old code builds for something new

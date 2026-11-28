@@ -103,8 +103,8 @@ func TestInitVaultAcceptsAStrongPassword(t *testing.T) {
 func TestInitVaultKeyFileOnlyStaysAllowed(t *testing.T) {
 	h := newHarness(t)
 	kf := h.dir + "/k.keyx"
-	if rc := h.run("keyfile", "new", kf); rc != 0 {
-		t.Fatalf("keyfile rc=%d %s", rc, h.errb.String())
+	if err := vault.NewKeyFile(kf); err != nil {
+		t.Fatal(err)
 	}
 	h.env["ICEVAULT_KEYFILE"] = kf
 	h.pw = []string{"", ""}

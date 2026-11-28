@@ -26,9 +26,7 @@ var envNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,19}$`)
 // defaultModel is the runner every Env gets when none was set.
 type defaultModel struct{}
 
-func (defaultModel) NeedsUnlock(cmd string, args []string) bool {
-	return cmd != cmdImport || !hasFlag(args, "dry-run")
-}
+func (defaultModel) NeedsUnlock(cmd string, args []string) bool { return true }
 
 type envCtx struct{ name, private string }
 
@@ -49,9 +47,6 @@ func envContext(e *Env, name string) (envCtx, error) {
 func isDir(p string) bool { st, err := os.Stat(p); return err == nil && st.IsDir() }
 
 func (defaultModel) Run(e *Env, cmd string, args []string, v *vault.Vault, out io.Writer) (int, error) {
-	if cmd == "import" && hasFlag(args, "dry-run") {
-		return runImport(e, args, out)
-	}
 	plat, err := loadProject(e)
 	if err != nil {
 		return 1, err
@@ -64,18 +59,16 @@ func (defaultModel) Run(e *Env, cmd string, args []string, v *vault.Vault, out i
 
 // errOldLayout refuses a vault that is not in the vault model (the layout of IceVault before 0.3).
 func errOldLayout(v *vault.Vault) error {
-	return fail("%s holds no vault model: a vault of the layout before it (IceVault 0.2) is moved with IceVault 0.4 first (icevault migrate --apply, or the offer of its window); a new vault is made with icevault init-vault", v.Path())
+	return fail("%s holds no vault model: a vault of the layout before it (IceVault 0.2) is not read by this version: move the file away and make a new vault with icevault init-vault", v.Path())
 }
 
 func vaultPathOr(e *Env) string { p, _ := vaultPath(e); return p }
 
-// writesVault: the commands of the model that open the vault for writing (import, recover, import-hcp, visibility --apply; session in seam.go).
-func writesVault(cmd string, args []string) bool {
+// writesVault: the commands of the model that open the vault for writing (recover, import-hcp, env adopt-connections, set; session in seam.go).
+func writesVault(cmd string) bool {
 	switch cmd {
-	case "import", cmdRecover, cmdImportHCP, cmdEnv, cmdSet:
+	case cmdRecover, cmdImportHCP, cmdEnv, cmdSet:
 		return true
-	case cmdVisibility:
-		return hasFlag(args, "apply")
 	}
 	return false
 }
@@ -258,15 +251,6 @@ func confExtra(e *Env, env string) map[string]string {
 	return nil
 }
 
-func extraRels(m map[string]string) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func runStatus(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot) error {
 	env, site, err := envFlags("status", args, e, nil)
 	if err != nil {
@@ -319,7 +303,7 @@ func runStatus(e *Env, args []string, out io.Writer, plat *render.Project, snap 
 	}
 	covered, _, _ := plat.TreeFiles(privateRels(ec.private), nil)
 	if len(covered) > 0 {
-		fmt.Fprintf(out, "plaintext copies still on disk in %s: %d file(s): the vault is used and these are ignored; `purge-plaintext --env %s` removes the ones the vault holds\n", ec.private, len(covered), ec.name)
+		fmt.Fprintf(out, "plaintext copies still on disk in %s: %d file(s): the vault is used and these are ignored; delete them by hand once the vault is verified and copied\n", ec.private, len(covered))
 	} else {
 		fmt.Fprintf(out, "no plaintext secret files in %s\n", ec.private)
 	}
@@ -357,7 +341,7 @@ func printCopies(vaultFile string, out io.Writer) {
 	sort.Strings(current)
 	switch {
 	case len(copies) == 0:
-		fmt.Fprintln(out, "vault copies: none recorded: `icevault copies add DIR` (standing one-way copies) or `copy --to DIR` (once); keep at least two, in other places")
+		fmt.Fprintln(out, "vault copies: none recorded: `icevault copies add DIR` (standing one-way copies) or `copies now DIR` (once); keep at least two, in other places")
 	case len(current) > 0:
 		tail := ""
 		if len(current) < 2 {
@@ -378,15 +362,12 @@ func printCopies(vaultFile string, out io.Writer) {
 		if last["to"] == nil {
 			to = "?"
 		}
-		fmt.Fprintf(out, "vault changed since the last copy (%s to %s): `icevault copy --to <dir>`\n", at, to)
+		fmt.Fprintf(out, "vault changed since the last copy (%s to %s): `icevault copies now <dir>`\n", at, to)
 	}
 }
 
-func runVisibility(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot, st vaultStore) error {
-	var apply bool
-	env, _, err := envFlags("visibility", args, e, func(fs *flag.FlagSet) {
-		fs.BoolVar(&apply, "apply", false, "change the variables marked change")
-	})
+func runVisibility(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot) error {
+	env, _, err := envFlags("visibility", args, e, nil)
 	if err != nil {
 		return err
 	}
@@ -407,200 +388,8 @@ func runVisibility(e *Env, args []string, out io.Writer, plat *render.Project, s
 		width = max(width, len(r.Item+"/"+r.Group+"/"+r.Key))
 	}
 	fmt.Fprintf(out, "%-*s  current  proposed  verdict\n", width, "variable")
-	done, todo := 0, 0
 	for _, r := range rows {
-		shown := r.Verdict
-		if r.Verdict == "change" {
-			todo++
-			if apply {
-				notes, err := model.EntryNotesSet(model.ManagedOwner, r.Proposed, r.Entry.Labels, r.Entry.Description, "", r.Entry.ManagedSet)
-				if err == nil {
-					err = st.SetNotes(r.Entry.Path, notes)
-				}
-				if err != nil {
-					return fail("%v", err)
-				}
-				r.Entry.Vis, r.Entry.VisBy = r.Proposed, ""
-				shown, done = "changed", done+1
-			}
-		}
-		fmt.Fprintf(out, "%-*s  %-7s  %-8s  %s\n", width, r.Item+"/"+r.Group+"/"+r.Key, r.Current, r.Proposed, shown)
-	}
-	if apply {
-		fmt.Fprintf(out, "%d changed, %d left as they are\n", done, len(rows)-done)
-		return st.Commit()
-	}
-	fmt.Fprintf(out, "%d can be changed with --apply; %d stay as they are (chosen by the owner, sealed, or changed by hand)\n", todo, len(rows)-todo)
-	return nil
-}
-
-func runImport(e *Env, args []string, out io.Writer) (int, error) {
-	var dry bool
-	var file string
-	env, _, err := envFlags("import", args, e, func(fs *flag.FlagSet) {
-		fs.BoolVar(&dry, "dry-run", false, "print what would change, write nothing")
-		fs.StringVar(&file, "file", "", "one extra file of the plaintext folder")
-	})
-	if err != nil {
-		return 2, err
-	}
-	if file != "" {
-		rel := filepath.ToSlash(file)
-		fmt.Fprintf(out, "  would look at %s\n", rel)
-		return 0, nil
-	}
-	ec, err := envContext(e, env)
-	if err != nil {
-		return 1, err
-	}
-	plat, err := loadProject(e)
-	if err != nil {
-		return 1, err
-	}
-	extra := confExtra(e, ec.name)
-	covered, skipped, unknown := plat.TreeFiles(privateRels(ec.private), extraRels(extra))
-	var rels []string
-	for r := range covered {
-		rels = append(rels, r)
-	}
-	sort.Strings(rels)
-	for _, r := range rels {
-		fmt.Fprintf(out, "  would look at %s\n", r)
-	}
-	fmt.Fprintf(out, "would import: %d file(s) are covered, %d left out on purpose, %d not covered; which differ from the vault is known only after unlocking (status)\n", len(rels), len(skipped), len(unknown))
-	return 0, nil
-}
-
-func runPurge(e *Env, args []string, out io.Writer, plat *render.Project, snap *model.Snapshot) error {
-	var yes, force bool
-	env, site, err := envFlags("purge-plaintext", args, e, func(fs *flag.FlagSet) {
-		fs.BoolVar(&yes, "yes", false, "really delete")
-		fs.BoolVar(&force, "force", false, "delete even without an up-to-date copy of the vault on another volume")
-	})
-	if err != nil {
-		return err
-	}
-	ec, err := envContext(e, env)
-	if err != nil {
-		return err
-	}
-	s, err := render.PickSite(snap, ec.name, site)
-	if err != nil {
-		return fail("%v", err)
-	}
-	if yes {
-		path, err := vaultPath(e)
-		if err != nil {
-			return err
-		}
-		if err := requireCopy(path, force, e); err != nil {
-			return err
-		}
-	}
-	view, err := plat.View(snap, ec.name, s)
-	if err != nil {
-		return fail("%v", err)
-	}
-	extra := confExtra(e, ec.name)
-	covered, _, _ := plat.TreeFiles(privateRels(ec.private), extraRels(extra))
-	var rels []string
-	for r := range covered {
-		rels = append(rels, r)
-	}
-	sort.Strings(rels)
-	var same, differ, absent []string
-	paths := map[string]string{}
-	for _, rel := range rels {
-		p := extra[rel]
-		if p == "" {
-			p = filepath.Join(ec.private, filepath.FromSlash(rel))
-		}
-		paths[rel] = p
-		if covered[rel].Kind == "env" {
-			ef := view.Env[rel]
-			if ef == nil {
-				absent = append(absent, rel)
-				continue
-			}
-			text, err := os.ReadFile(p)
-			if err != nil {
-				return fail("%s cannot be read", p)
-			}
-			_, vars := render.ParseEnv(string(text))
-			equal := len(vars) == ef.Variables.Len()
-			for _, v := range vars {
-				got, ok := ef.Variables.Get(v.Name)
-				equal = equal && ok && got == render.StoredValue(v.Value, plat.VarManagedIn(rel, v.Name))
-			}
-			if equal {
-				same = append(same, rel)
-			} else {
-				differ = append(differ, rel)
-			}
-			continue
-		}
-		fe := view.Files[rel]
-		if fe == nil {
-			absent = append(absent, rel)
-			continue
-		}
-		if sum, _ := sha256File(p); sum == fe.Sha {
-			same = append(same, rel)
-		} else {
-			differ = append(differ, rel)
-		}
-	}
-	verb, past := "would delete", "would delete"
-	if yes {
-		verb, past = "delete", "deleted"
-	}
-	for _, r := range same {
-		fmt.Fprintf(out, "  %-13s %s\n", verb, r)
-	}
-	for _, r := range differ {
-		fmt.Fprintf(out, "  kept (differs from the vault) %s\n", r)
-	}
-	for _, r := range absent {
-		fmt.Fprintf(out, "  kept (not in the vault)       %s\n", r)
-	}
-	if yes {
-		for _, r := range same {
-			_ = os.Remove(paths[r])
-		}
-	}
-	tail := ""
-	if !yes && len(same) > 0 {
-		tail = " (repeat with --yes)"
-	}
-	fmt.Fprintf(out, "%s: %d; kept: %d%s\n", past, len(same), len(differ)+len(absent), tail)
-	return nil
-}
-
-const noCopyReason = "purge-plaintext needs an up-to-date copy of the vault on ANOTHER volume (another disk, a USB stick, a synced folder on another disk): `icevault copies add DIR`, then run it again (`copies list` shows what is where; --force overrides with a typed confirmation)"
-
-// copyElsewhere says whether a destination on another volume holds a copy that equals the vault now (the info file and the files decide, no password).
-func copyElsewhere(vaultFile string) bool {
-	for _, r := range copiesStatus(vaultFile) {
-		if r.reachable && r.otherVolume && r.same {
-			return true
-		}
-	}
-	return false
-}
-
-// requireCopy: purge-plaintext may only delete the plaintext when the vault exists elsewhere: a destination on ANOTHER volume holds a copy that equals
-// the vault now. --force with a typed confirmation overrides.
-func requireCopy(vaultFile string, force bool, e *Env) error {
-	if copyElsewhere(vaultFile) {
-		return nil
-	}
-	why := noCopyReason
-	if !force {
-		return errors.New(why)
-	}
-	typed, err := e.Ask("Type 'delete without a copy' to delete the plaintext although no up-to-date copy of the vault is elsewhere: ")
-	if err != nil || strings.TrimSpace(string(typed)) != "delete without a copy" {
-		return errors.New(why)
+		fmt.Fprintf(out, "%-*s  %-7s  %-8s  %s\n", width, r.Item+"/"+r.Group+"/"+r.Key, r.Current, r.Proposed, r.Verdict)
 	}
 	return nil
 }

@@ -41,5 +41,5 @@ vault: environment prod: 7 settings file(s) with 34 variable(s), 3 other file(s)
       GCP_ZONE                             environment            owner
       EXPORT_BUCKET                        environment            system
 required values: all set
-plaintext copies still on disk in <tmp>/project/plain/prod: 9 file(s): the vault is used and these are ignored; `purge-plaintext --env prod` removes the ones the vault holds
-vault copies: none recorded: `icevault copies add DIR` (standing one-way copies) or `copy --to DIR` (once); keep at least two, in other places
+plaintext copies still on disk in <tmp>/project/plain/prod: 9 file(s): the vault is used and these are ignored; delete them by hand once the vault is verified and copied
+vault copies: none recorded: `icevault copies add DIR` (standing one-way copies) or `copies now DIR` (once); keep at least two, in other places

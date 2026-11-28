@@ -19,11 +19,10 @@ func TestEnvAdoptConnections(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.initVault()
-	if rc := h.run("env", "create", "--env", "qa", "--site", "compose", "--products", "portal"); rc != 0 {
-		t.Fatalf("rc=%d %s", rc, h.errb.String())
-	}
 	h.editModel(func(m *vmodel.Vault) {
-		p := m.Env("qa").Product("portal")
+		site := &vmodel.Site{Name: "main", Kind: "compose"}
+		p := &vmodel.Product{Name: "portal", Enabled: true, Site: site, Sub: map[string][]*vmodel.Var{}}
+		m.Envs = append(m.Envs, &vmodel.Environment{Name: "qa", Layouts: map[string][]byte{}, Sites: []*vmodel.Site{site}, Products: []*vmodel.Product{p}})
 		p.Vars = append(p.Vars, &vmodel.Var{Key: "ANALYTICS_ID", Value: "site-secret-77", Vis: vmodel.VisPlain}, &vmodel.Var{Key: "BILLING_ACCOUNT", Value: "bill-secret-88", Vis: vmodel.VisSecret})
 	})
 	if rc := h.run("env", "adopt-connections", "--env", "qa", "--dry-run"); rc != 0 {
@@ -67,7 +66,7 @@ func TestEnvAdoptConnections(t *testing.T) {
 	if rc := h.run("env", "adopt-connections", "--env", "qa", "--site", "compose"); rc != 2 {
 		t.Fatalf("a flag that is not for adopt-connections: rc=%d", rc)
 	}
-	if rc := h.run("env", "fill-missing", "--env", "qa", "--dry-run"); rc != 2 {
-		t.Fatalf("--dry-run is for adopt-connections: rc=%d", rc)
+	if rc := h.run("env", "fill-missing", "--env", "qa"); rc != 2 {
+		t.Fatalf("fill-missing is gone: rc=%d", rc)
 	}
 }

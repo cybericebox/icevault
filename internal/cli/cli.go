@@ -105,8 +105,8 @@ type Env struct {
 	// Touch ID is asked without a terminal, so the touch is given for a run the owner can name (nil: nothing is shown, tests).
 	Purpose string
 	Notify  func(text string)
-	// Model is the WIRING POINT for the commands that need the settings model (import, export, status, visibility, recover,
-	// purge-plaintext, import-hcp, view --env). The model package implements it.
+	// Model is the WIRING POINT for the commands that need the settings model (export, status, visibility, recover,
+	// import-hcp, view --env). The model package implements it.
 	Model Model
 	// Root is the project checkout (ICEVAULT_ROOT, the folder above the working directory with a project description, or the saved one); ""
 	// when it cannot be found.
@@ -147,18 +147,16 @@ type Model interface {
 // modelCommands need the settings model; the rest of the commands are generic.
 // The names of the commands that several files spell.
 const (
-	cmdImport     = "import"
 	cmdStatus     = "status"
 	cmdView       = "view"
 	cmdExport     = "export"
 	cmdVisibility = "visibility"
-	cmdPurge      = "purge-plaintext"
 	cmdRecover    = "recover"
 	cmdImportHCP  = "import-hcp"
 	actClose      = "close" // session close, and the close message of external serve
 )
 
-var modelCommands = map[string]bool{cmdImport: true, cmdExport: true, cmdStatus: true, cmdVisibility: true, cmdPurge: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true, cmdExpiring: true, cmdSet: true}
+var modelCommands = map[string]bool{cmdExport: true, cmdStatus: true, cmdVisibility: true, cmdRecover: true, cmdImportHCP: true, cmdView: true, cmdEnv: true, cmdExpiring: true, cmdSet: true}
 
 // Run runs one command line (without the program name) and returns the exit code.
 func Run(args []string, e *Env) int {
@@ -248,8 +246,6 @@ func runCommand(cmd string, rest []string, e *Env) int {
 		err = cmdTouchID(rest, e)
 	case "copies":
 		err = cmdCopies(rest, e)
-	case "copy":
-		err = cmdCopy(rest, e)
 	case "external":
 		err = cmdExternal(rest, e)
 	case "where":
@@ -264,8 +260,6 @@ func runCommand(cmd string, rest []string, e *Env) int {
 		err = cmdSettings(rest, e)
 	case "session":
 		err = cmdSession(rest, e)
-	case "keyfile":
-		err = cmdKeyfile(rest, e)
 	case "ui":
 		err = cmdUI(rest, e)
 	case "agent":
@@ -378,7 +372,9 @@ func unlock(path string, e *Env) (*vault.Vault, error) {
 func cmdInit(args []string, e *Env) error {
 	var ms int
 	var generate, noProject bool
+	var newKeyFile string
 	if _, err := parse("init-vault", args, e, 0, func(fs *flag.FlagSet) {
+		fs.StringVar(&newKeyFile, "new-keyfile", "", "make a KeePass key file at this path (never overwritten) and use it for the vault")
 		fs.BoolVar(&noProject, "no-project", false, "a vault without a project: it has no environments; the path is --vault PATH")
 		fs.IntVar(&ms, "decryption-time", 0, "key derivation time in ms, 100 to 5000")
 		fs.BoolVar(&generate, "generate", false, "make a random passphrase of six words, show it once and ask for it again")
@@ -396,10 +392,21 @@ func cmdInit(args []string, e *Env) error {
 		return fail("%s already exists: not overwritten", path)
 	}
 	kf := e.Getenv("ICEVAULT_KEYFILE")
+	if newKeyFile != "" && kf != "" {
+		return fail("--new-keyfile makes the key file of this vault: unset ICEVAULT_KEYFILE")
+	}
+	if newKeyFile != "" {
+		if _, err := os.Lstat(newKeyFile); err == nil {
+			return fail("%s already exists: not overwritten", newKeyFile)
+		}
+	}
 	if kf != "" {
 		if _, err := os.Stat(kf); err != nil {
-			return fail("the key file %s does not exist (`keyfile new PATH` makes one)", kf)
+			return fail("the key file %s does not exist (init-vault --new-keyfile PATH makes one)", kf)
 		}
+	}
+	if newKeyFile != "" {
+		kf = newKeyFile // made below, once the password is accepted
 	}
 	var pw []byte
 	if generate {
@@ -415,20 +422,30 @@ func cmdInit(args []string, e *Env) error {
 	if d, derr := e.description(); derr == nil && !noProject {
 		name = d.Name
 	}
+	if newKeyFile != "" {
+		if err := vault.NewKeyFile(newKeyFile); err != nil {
+			return fail("the key file was not made: %v", err)
+		}
+	}
 	if err := e.NewVault(path, pw, kf, name, time.Duration(ms)*time.Millisecond, noProject); err != nil {
+		if newKeyFile != "" {
+			_ = os.Remove(newKeyFile)
+		}
 		return err
+	}
+	if newKeyFile != "" {
+		fmt.Fprintf(e.Out, "made the key file %s (KeePass XML v2, mode 0600). Keep a copy away from the vault; without it the vault cannot be opened. Use it with ICEVAULT_KEYFILE=%s\n", newKeyFile, newKeyFile)
 	}
 	if noProject {
 		fmt.Fprintf(e.Out, "made the vault %s (mode 0600), with no project: it has no environments, only shared secrets, connections and other secrets, which the window (icevault ui) opens and edits.\n"+
 			"  Write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault.\n"+
-			"  icevault copy --to <dir>  makes copies on other volumes.\n", path)
+			"  icevault copies now <dir>  makes a copy on another volume.\n", path)
 		return nil
 	}
 	fmt.Fprintf(e.Out, "made the vault %s (mode 0600). Next:\n"+
 		"  1. write the master password on paper and keep it where the vault file is NOT; a lost password loses everything in the vault\n"+
-		"  2. icevault import --env <env>      (an existing plaintext tree of the environment into the vault; asks the password once)\n"+
-		"  3. icevault status --env <env>, then purge-plaintext once the vault is verified\n"+
-		"  4. icevault copy --to <dir>         to at least two other places (another disk, a synced folder)\n", path)
+		"  2. icevault ui                       fill in the environments in the window\n"+
+		"  3. icevault copies add <dir>         to at least two other places (another disk, a synced folder)\n", path)
 	return nil
 }
 
@@ -537,21 +554,6 @@ func wipeBytes(b []byte) {
 	}
 }
 
-func cmdKeyfile(args []string, e *Env) error {
-	pos, err := parse("keyfile", args, e, 2, nil)
-	if err != nil {
-		return err
-	}
-	if len(pos) != 2 || pos[0] != "new" {
-		return fail("usage: keyfile new PATH")
-	}
-	if err := vault.NewKeyFile(pos[1]); err != nil {
-		return fail("the key file was not made: %v", err)
-	}
-	fmt.Fprintf(e.Out, "made the key file %s (KeePass XML v2, mode 0600). Keep a copy away from the vault; without it the vault cannot be opened. Use it with ICEVAULT_KEYFILE=%s\n", pos[1], pos[1])
-	return nil
-}
-
 func cmdTouchID(args []string, e *Env) error {
 	pos, err := parse("touchid", args, e, 1, nil)
 	if err != nil {
@@ -575,18 +577,8 @@ func cmdTouchID(args []string, e *Env) error {
 	return nil
 }
 
-func cmdCopy(args []string, e *Env) error {
-	var to string
-	if _, err := parse("copy", args, e, 0, func(fs *flag.FlagSet) { fs.StringVar(&to, "to", "", "a directory") }); err != nil {
-		return err
-	}
-	if to == "" {
-		return &parseErr{msg: "copy needs --to DIR"}
-	}
-	path, err := vaultPath(e)
-	if err != nil {
-		return err
-	}
+// copyNow makes one copy of the encrypted vault file in dir now and records it.
+func copyNow(path, to string, e *Env) error {
 	if err := requireVault(path); err != nil {
 		return err
 	}
@@ -621,8 +613,8 @@ func cmdCopies(args []string, e *Env) error {
 	if err != nil {
 		return err
 	}
-	if len(pos) == 0 || (pos[0] != "add" && pos[0] != "remove" && pos[0] != "list") {
-		return &parseErr{msg: "copies needs add, remove or list"}
+	if len(pos) == 0 || (pos[0] != "add" && pos[0] != "remove" && pos[0] != "list" && pos[0] != "now") {
+		return &parseErr{msg: "copies needs add, remove, list or now"}
 	}
 	path, err := vaultPath(e)
 	if err != nil {
@@ -635,6 +627,9 @@ func cmdCopies(args []string, e *Env) error {
 	}
 	if len(pos) < 2 {
 		return fail("copies %s needs a folder", action)
+	}
+	if action == "now" {
+		return copyNow(path, pos[1], e)
 	}
 	dir, _ := filepath.Abs(pos[1])
 	m := readInfo(path)
@@ -666,7 +661,7 @@ func cmdCopies(args []string, e *Env) error {
 		if err := writeInfo(path, m); err != nil {
 			return err
 		}
-		where := "the SAME volume as the vault: purge-plaintext will not count it"
+		where := "the SAME volume as the vault: it does not protect against the loss of that volume"
 		if !sameVolume(path, dir) {
 			where = "another volume"
 		}

@@ -2,39 +2,20 @@ package vmodel
 
 import (
 	"fmt"
-	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/cybericebox/icevault/internal/kinds"
 	"github.com/cybericebox/icevault/internal/project"
 )
 
-// The owner's setup of an environment from the project description: CreateEnv makes an environment with its site and products, FillMissing
-// gives an environment every variable the description says it needs and the owner fills in, as an empty entry (the hint of the description,
-// secret or plain as it says). Neither ever writes a value, and neither changes an entry that exists: a variable the system makes (managed:
+// The owner's setup of an environment from the project description: FillMissing gives an environment every variable the description says it
+// needs and the owner fills in, as an empty entry (the hint of the description, secret or plain as it says). It never writes a value and never
+// changes an entry that exists: a variable the system makes (managed:
 // system, generated) is left to the project's own init, a variable whose condition does not hold for this environment and a file the
-// environment does not read are skipped. The command line (icevault env) and the window (m-env-fill) both call these: one write path.
-
-var placeRE = regexp.MustCompile(`^[A-Za-z0-9_:-]{1,64}$`)
+// environment does not read are skipped. The window (m-env-fill) calls it.
 
 // PlaceNone is the place of a product that runs nowhere.
 const PlaceNone = "none"
-
-// SiteName is the name of the site CreateEnv makes.
-const SiteName = "main"
-
-// ProductPlan is a product of a new environment and where it runs ("" = the default of the description).
-type ProductPlan struct {
-	Name  string
-	Place string
-}
-
-// EnvPlan is what CreateEnv makes: one site of SiteKind and the products listed (the other products of the description are made switched off).
-type EnvPlan struct {
-	SiteKind string
-	Products []ProductPlan
-}
 
 // Added is one empty entry that was made: where (general, site main, product portal, connection GCP project, ...), the variable and its file.
 type Added struct {
@@ -42,94 +23,11 @@ type Added struct {
 	Secret           bool
 }
 
-// FillReport is what CreateEnv or FillMissing did: names only, never a value.
+// FillReport is what FillMissing did: names only, never a value.
 type FillReport struct {
 	Added  []Added
 	Made   []string // connections made (name (kind))
 	Linked []string // existing connections linked (name (kind))
-}
-
-// PlanProblems checks a plan against the description before anything is asked or written: the problems, or nil.
-func PlanProblems(d *project.Description, p EnvPlan) []string {
-	var errs []string
-	if _, ok := d.SiteKinds[p.SiteKind]; !ok {
-		var ks []string
-		for k := range d.SiteKinds {
-			ks = append(ks, k)
-		}
-		sort.Strings(ks)
-		errs = append(errs, fmt.Sprintf("the project description has no site kind %q (one of %s)", p.SiteKind, strings.Join(ks, ", ")))
-	} else if _, ok := kinds.SiteKind(p.SiteKind); !ok {
-		errs = append(errs, fmt.Sprintf("%q is not a site kind of the tool", p.SiteKind))
-	}
-	seen := map[string]bool{}
-	for _, x := range p.Products {
-		dp := d.Product(x.Name)
-		switch {
-		case dp == nil:
-			errs = append(errs, fmt.Sprintf("the project description has no product %q (one of %s)", x.Name, strings.Join(productNames(d), ", ")))
-		case seen[x.Name]:
-			errs = append(errs, fmt.Sprintf("product %s is named twice", x.Name))
-		case x.Place == "" && dp.PlaceVariable != "" && placeOff(d.Conditions.Defaults[dp.PlaceVariable]):
-			errs = append(errs, fmt.Sprintf("product %s runs nowhere by default (%s=%s): give its place, %s=PLACE", x.Name, dp.PlaceVariable,
-				orNone(d.Conditions.Defaults[dp.PlaceVariable]), x.Name))
-		case x.Place != "" && dp.PlaceVariable == "":
-			errs = append(errs, fmt.Sprintf("product %s has no place variable in the project description: name it without =PLACE", x.Name))
-		case x.Place != "" && !placeRE.MatchString(x.Place):
-			errs = append(errs, fmt.Sprintf("%q is not a place (letters, digits, -, _ and :)", x.Place))
-		}
-		seen[x.Name] = true
-	}
-	return errs
-}
-
-func orNone(s string) string {
-	if s == "" {
-		return "(empty)"
-	}
-	return s
-}
-
-func placeOff(v string) bool { return v == "" || v == PlaceNone }
-
-func productNames(d *project.Description) []string {
-	var out []string
-	for _, p := range d.Products {
-		out = append(out, p.Name)
-	}
-	return out
-}
-
-// CreateEnv makes the environment name from the plan and fills it (FillMissing). committed are the committed settings of the environment in
-// the checkout (nil when none): they decide the conditions together with what the model writes.
-func CreateEnv(m *Vault, d *project.Description, name string, p EnvPlan, committed map[string]string) (*FillReport, error) {
-	if !EnvNameRE.MatchString(name) {
-		return nil, fmt.Errorf("%q is not an environment name", name)
-	}
-	if m.Env(name) != nil {
-		return nil, fmt.Errorf("the vault holds the environment %s already: icevault env fill-missing --env %s adds what it lacks", name, name)
-	}
-	if errs := PlanProblems(d, p); len(errs) > 0 {
-		return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
-	}
-	site := &Site{Name: SiteName, Kind: p.SiteKind}
-	e := &Environment{Name: name, Layouts: map[string][]byte{}, Sites: []*Site{site}}
-	want := map[string]string{}
-	for _, x := range p.Products {
-		want[x.Name] = x.Place
-	}
-	for _, dp := range d.Products {
-		place, on := want[dp.Name]
-		pr := &Product{Name: dp.Name, Enabled: on, Place: place, Sub: map[string][]*Var{}}
-		if on {
-			pr.Site = site
-		} else {
-			pr.Place = PlaceNone
-		}
-		e.Products = append(e.Products, pr)
-	}
-	m.Envs = append(m.Envs, e)
-	return FillMissing(m, d, name, committed)
 }
 
 // FillMissing adds to the environment every owner variable the description says it needs, as an empty entry, and links (or makes) the
@@ -137,7 +35,7 @@ func CreateEnv(m *Vault, d *project.Description, name string, p EnvPlan, committ
 func FillMissing(m *Vault, d *project.Description, name string, committed map[string]string) (*FillReport, error) {
 	e := m.Env(name)
 	if e == nil {
-		return nil, fmt.Errorf("the vault holds no environment %s: icevault env create --env %s makes it", name, name)
+		return nil, fmt.Errorf("the vault holds no environment %s: the window or the agent API makes it", name)
 	}
 	rep := &FillReport{}
 	get := d.Getter(settingsOf(e, d, committed))
@@ -272,7 +170,7 @@ func FillMissing(m *Vault, d *project.Description, name string, committed map[st
 }
 
 // neededWhen says whether an optional connection is needed in this environment: a required-when of one of its variables holds (the rule the
-// window's "missing for deploy" uses), so fill-missing makes it like a connection that is not optional.
+// window's "missing for deploy" uses), so the fill makes it like a connection that is not optional.
 func neededWhen(use *project.ConnectionUse, get func(string) string) bool {
 	for _, v := range use.Variables {
 		if v.Field == "" {

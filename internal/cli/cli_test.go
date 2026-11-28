@@ -44,8 +44,16 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) run(args ...string) int {
 	h.out.Reset()
 	h.errb.Reset()
+	e := h.newEnv()
+	if len(args) >= 2 && args[0] == "session" && (args[1] == "open" || args[1] == "close") {
+		return runTestSession(args[1], args[2:], e)
+	}
+	return Run(args, e)
+}
+
+func (h *harness) newEnv() *Env {
 	asks := append([]string(nil), h.pw...)
-	e := &Env{Getenv: func(k string) string { return h.env[k] }, Out: &h.out, Err: &h.errb, Now: time.Now, Exec: h.exec, TouchID: h.tid, Root: h.root, Rand: h.rand,
+	return &Env{Getenv: func(k string) string { return h.env[k] }, Out: &h.out, Err: &h.errb, Now: time.Now, Exec: h.exec, TouchID: h.tid, Root: h.root, Rand: h.rand,
 		Notify: func(s string) { h.notified = append(h.notified, s) },
 		Ask: func(string) ([]byte, error) {
 			h.asked++
@@ -56,10 +64,6 @@ func (h *harness) run(args ...string) int {
 			asks = asks[1:]
 			return []byte(p), nil
 		}}
-	if len(args) >= 2 && args[0] == "session" && (args[1] == "open" || args[1] == "close") {
-		return runTestSession(args[1], args[2:], e)
-	}
-	return Run(args, e)
 }
 
 func (h *harness) initVault() {
@@ -142,20 +146,50 @@ func TestInitVaultTable(t *testing.T) {
 func TestKeyFileVault(t *testing.T) {
 	h := newHarness(t)
 	kf := filepath.Join(h.dir, "k.keyx")
-	if rc := h.run("keyfile", "new", kf); rc != 0 {
+	h.pw = []string{pw, pw}
+	if rc := h.run("init-vault", "--new-keyfile", kf, "--decryption-time", "100"); rc != 0 || !strings.Contains(h.out.String(), "made the key file") {
 		t.Fatal(h.errb.String())
 	}
-	if rc := h.run("keyfile", "new", kf); rc != 1 {
-		t.Fatal("overwrote a key file")
+	if st, err := os.Stat(kf); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("key file: %v %v", st, err)
 	}
+	h.pw = []string{pw}
 	h.env["ICEVAULT_KEYFILE"] = kf
-	h.initVault()
-	if rc := h.run("import", "--env", "prod"); rc != 0 {
+	if rc := h.importEnv("prod"); rc != 0 {
 		t.Fatal(h.errb.String())
 	}
 	delete(h.env, "ICEVAULT_KEYFILE")
 	if rc := h.run("view", "--env", "prod"); rc != 1 || !strings.Contains(h.errb.String(), "wrong password or key file") {
 		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+}
+
+// --new-keyfile never overwrites a key file, refuses next to ICEVAULT_KEYFILE, and leaves no key file behind when the vault is not made.
+func TestInitVaultNewKeyfileRefusals(t *testing.T) {
+	h := newHarness(t)
+	kf := filepath.Join(h.dir, "k.keyx")
+	if err := os.WriteFile(kf, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.pw = []string{pw, pw}
+	if rc := h.run("init-vault", "--new-keyfile", kf); rc != 1 || !strings.Contains(h.errb.String(), "already exists: not overwritten") {
+		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+	if got, _ := os.ReadFile(kf); string(got) != "mine" {
+		t.Fatal("the key file was overwritten")
+	}
+	h.env["ICEVAULT_KEYFILE"] = kf
+	if rc := h.run("init-vault", "--new-keyfile", filepath.Join(h.dir, "other.keyx")); rc != 1 || !strings.Contains(h.errb.String(), "unset ICEVAULT_KEYFILE") {
+		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+	delete(h.env, "ICEVAULT_KEYFILE")
+	fresh := filepath.Join(h.dir, "fresh.keyx")
+	h.pw = []string{"a", "b"} // the passwords differ: nothing is made, no key file is left
+	if rc := h.run("init-vault", "--new-keyfile", fresh); rc != 1 {
+		t.Fatalf("rc=%d", rc)
+	}
+	if _, err := os.Stat(fresh); err == nil {
+		t.Fatal("a key file was left behind")
 	}
 }
 
@@ -216,7 +250,7 @@ func TestAVaultOfTheOldLayoutIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	v.Close()
-	if rc := h.run("view", "--env", "prod"); rc != 1 || !strings.Contains(h.errb.String(), "holds no vault model") || !strings.Contains(h.errb.String(), "IceVault 0.4") {
+	if rc := h.run("view", "--env", "prod"); rc != 1 || !strings.Contains(h.errb.String(), "holds no vault model") || !strings.Contains(h.errb.String(), "icevault init-vault") {
 		t.Fatalf("rc=%d %s", rc, h.errb.String())
 	}
 }
@@ -266,23 +300,23 @@ func TestCopyAndCopies(t *testing.T) {
 	if w := copiesWarning(h.env["ICEVAULT_VAULT"], time.Now()); !strings.Contains(w, "no destination is configured") {
 		t.Errorf("%q", w)
 	}
-	// copy --to keeps the previous copy as .prev
+	// copies now keeps the previous copy as .prev
 	d2 := filepath.Join(h.dir, "d2")
 	_ = os.Mkdir(d2, 0o700)
-	if rc := h.run("copy", "--to", d2); rc != 0 || !strings.Contains(h.out.String(), a) {
+	if rc := h.run("copies", "now", d2); rc != 0 || !strings.Contains(h.out.String(), a) {
 		t.Fatal(h.errb.String())
 	}
 	h.seed(vault.Entry{Group: "g", Title: "x", Password: []byte("1")})
-	if rc := h.run("copy", "--to", d2); rc != 0 {
+	if rc := h.run("copies", "now", d2); rc != 0 {
 		t.Fatal(h.errb.String())
 	}
 	if _, err := os.Stat(filepath.Join(d2, "v.kdbx.prev")); err != nil {
 		t.Fatal("no previous copy")
 	}
-	if rc := h.run("copy", "--to", filepath.Join(h.dir, "nodir")); rc != 1 || !strings.Contains(h.errb.String(), "is not a directory") {
+	if rc := h.run("copies", "now", filepath.Join(h.dir, "nodir")); rc != 1 || !strings.Contains(h.errb.String(), "is not a directory") {
 		t.Fatal(h.errb.String())
 	}
-	if rc := h.run("copy"); rc != 2 {
+	if rc := h.run("copies", "now"); rc != 1 || !strings.Contains(h.errb.String(), "copies now needs a folder") {
 		t.Fatalf("rc=%d", rc)
 	}
 	if rc := h.run("copies", "add"); rc != 1 || !strings.Contains(h.errb.String(), "copies add needs a folder") {
@@ -341,7 +375,7 @@ func TestTheRefusalCanGoToAFile(t *testing.T) {
 	if rc := h.run("copies", "list"); rc != 0 {
 		t.Fatal("copies list never refuses")
 	}
-	if rc := h.run("copy", "--to", h.dir); rc != 1 || h.errb.Len() != 0 {
+	if rc := h.run("copies", "now", h.dir); rc != 1 || h.errb.Len() != 0 {
 		t.Fatalf("rc=%d stderr=%q", rc, h.errb.String())
 	}
 	got, err := os.ReadFile(errFile)

@@ -208,8 +208,8 @@ func TestChangePasswordGenerateNotTypedBackChangesNothing(t *testing.T) {
 func TestChangePasswordKeepsTheKeyFile(t *testing.T) {
 	h := newHarness(t)
 	kf := filepath.Join(h.dir, "k.key")
-	if rc := h.run("keyfile", "new", kf); rc != 0 {
-		t.Fatal(h.errb.String())
+	if err := vault.NewKeyFile(kf); err != nil {
+		t.Fatal(err)
 	}
 	h.env["ICEVAULT_KEYFILE"] = kf
 	h.initVault()
@@ -310,7 +310,7 @@ func TestChangePasswordListsTheOldCopies(t *testing.T) {
 	if rc := h.run("copies", "add", standing); rc != 0 {
 		t.Fatal(h.errb.String())
 	}
-	if rc := h.run("copy", "--to", once); rc != 0 {
+	if rc := h.run("copies", "now", once); rc != 0 {
 		t.Fatal(h.errb.String())
 	}
 	oldStanding, oldOnce := readFileT(t, filepath.Join(standing, "v.kdbx")), readFileT(t, filepath.Join(once, "v.kdbx"))

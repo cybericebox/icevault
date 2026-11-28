@@ -26,7 +26,7 @@ const (
 	GroupMeta   = ".group"
 	MaxLabels   = 8
 	MaxRefDepth = 8
-	OldLayout   = "the vault uses an older layout than this version: move the old file away, run `icevault init-vault`, then `icevault import --env <name>` for each environment"
+	OldLayout   = "the vault uses an older layout than this version: move the old file away, run `icevault init-vault`, then make the environments in the window (`icevault ui`)"
 )
 
 // Values the store reads and writes, shared by every package.
