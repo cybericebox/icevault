@@ -4,6 +4,8 @@ IceVault {{VERSION}}
 
 <!-- The changes of THIS release only, against the release before it. Fill in before the tag; reset to "Changes since <new tag>" after it. -->
 
+- `icevault set` waits for a running session of the environment: while a run holds a session that is written back into the vault, `set` writes nothing and exits 1 (a change under it made the write-back fail). `--base DIR` names the folder of the session directories, as `session run --base`.
+
 ## What is here
 
 - `IceVault-{{VERSION}}-macos.dmg`: **the recommended way on macOS**. Open it and drag IceVault to Applications. One application for Apple silicon and Intel (the settings window, with the `icevault` command inside it).

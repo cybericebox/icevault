@@ -31,6 +31,7 @@ type setPair struct{ key, value string }
 type setArgs struct {
 	env, scope string
 	dryRun     bool
+	base       string // the folder of the session directories (default: the temp directory), as session run --base
 	pairs      []setPair
 }
 
@@ -40,6 +41,7 @@ func parseSetArgs(e *Env, args []string) (setArgs, error) {
 		fs.StringVar(&a.env, "env", "", "")
 		fs.StringVar(&a.scope, "scope", "", "")
 		fs.BoolVar(&a.dryRun, "dry-run", false, "")
+		fs.StringVar(&a.base, "base", "", "")
 	})
 	if err != nil {
 		return a, err
@@ -517,6 +519,10 @@ func runSet(e *Env, args []string, out io.Writer, v *vault.Vault, plat *render.P
 	}
 	if errs := m.Check(); len(errs) > 0 {
 		return 1, fail("the model would not be valid: %s", strings.Join(errs, "; "))
+	}
+	if info, live := liveWriteSession(e, a.base, a.env); live {
+		return 1, fail("set: nothing was written: a run of '%s' is in progress (PID %d) with a session that is written back into the vault when it ends, "+
+			"and a change now would make that write-back fail; wait for the run to end and set again", a.env, info.PID)
 	}
 	if err := vmodel.Sync(v, m); err != nil {
 		return 1, fail("%v", err)

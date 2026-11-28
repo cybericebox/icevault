@@ -193,3 +193,22 @@ func TestSetRefusedWhileAnotherWriterHoldsTheLock(t *testing.T) {
 		t.Fatal("the vault changed")
 	}
 }
+
+func TestSetWaitsForARunningSessionOfTheEnvironment(t *testing.T) {
+	h := goldenHarness(t)
+	base, dir := openHeld(t, h)
+	before := vaultSum(t, h)
+	if rc := h.run("set", "--env", "prod", "--base", base, "ENGINE_THREADS=5"); rc != 1 || !strings.Contains(h.errb.String(), "is in progress") {
+		t.Fatalf("rc=%d %s", rc, h.errb.String())
+	}
+	if vaultSum(t, h) != before {
+		t.Fatal("the vault changed")
+	}
+	if rc := h.run("set", "--env", "prod", "--base", base, "--dry-run", "ENGINE_THREADS=5"); rc != 0 {
+		t.Fatalf("dry run: rc=%d %s", rc, h.errb.String())
+	}
+	killOwner(t, dir) // the run is gone: its leftover is recover's business, not a reason to wait
+	if rc := h.run("set", "--env", "prod", "--base", base, "ENGINE_THREADS=5"); rc != 0 {
+		t.Fatalf("after the run: rc=%d %s", rc, h.errb.String())
+	}
+}
